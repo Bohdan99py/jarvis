@@ -1,0 +1,48 @@
+# Build
+build/
+cmake-build-*/
+out/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln
+*.vcxproj*
+CMakeSettings.json
+
+# Qt
+moc_*
+ui_*
+qrc_*
+*.qm
+
+# Compiled
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.pdb
+*.exp
+*.ilk
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# JARVIS data (user-specific)
+jarvis_memory.json
+jarvis_patterns.json
+jarvis_apikey.dat
+
+# ВНИМАНИЕ: Если вшил API-ключ — НЕ КОММИТЬ этот файл в публичный репо!
+# Раскомментируй строку ниже:
+core/embedded_key.h
+
+# Updates & backups
+updates/
+backup/

@@ -1,0 +1,134 @@
+name: Build & Release J.A.R.V.I.S.
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  QT_VERSION: '6.8.0'
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: ${{ env.QT_VERSION }}
+        host: windows
+        target: desktop
+        arch: win64_msvc2022_64
+
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v2
+
+    # === Сборка ===
+    - name: Configure CMake
+      run: >
+        cmake -S . -B build
+        -G "Visual Studio 17 2022" -A x64
+        -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+
+    - name: Build Release
+      run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+    # === Подготовка пакета ===
+    - name: Prepare release package
+      run: |
+        mkdir release_package
+        mkdir release_package\plugins
+
+        copy build\bin\JarvisApp.exe release_package\
+        copy build\bin\JarvisCore.dll release_package\
+        copy plugins\plugins.json release_package\plugins\
+
+        # Копируем DLL плагинов если есть
+        if exist build\bin\JarvisPlugin_*.dll (
+          copy build\bin\JarvisPlugin_*.dll release_package\plugins\
+        )
+
+        # Qt DLLs
+        & "${{ env.Qt6_DIR }}\bin\windeployqt.exe" `
+          --release `
+          --no-translations `
+          --no-opengl-sw `
+          --no-system-d3d-compiler `
+          release_package\JarvisApp.exe
+      shell: pwsh
+
+    # === Артефакт сборки (для каждого пуша) ===
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: jarvis-windows-x64
+        path: release_package/
+
+    # ============================================================
+    # Только при создании тега v* — создаём полный релиз
+    # ============================================================
+
+    # Отдельные DLL для hot-update
+    - name: Prepare update DLLs
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        mkdir update_dlls
+        copy build\bin\JarvisCore.dll update_dlls\
+        if exist build\bin\JarvisPlugin_*.dll (
+          copy build\bin\JarvisPlugin_*.dll update_dlls\
+        )
+      shell: cmd
+
+    # ZIP-архив полной установки
+    - name: Create ZIP archive
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        7z a JARVIS-${{ github.ref_name }}-win64.zip ./release_package/*
+      shell: cmd
+
+    # Инсталлятор (Inno Setup)
+    - name: Install Inno Setup
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        choco install innosetup -y --no-progress
+      shell: cmd
+
+    - name: Update installer version
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        $version = "${{ github.ref_name }}".TrimStart("v")
+        $content = Get-Content installer.iss -Raw
+        $content = $content -replace '#define MyAppVersion "2.0.0"', "#define MyAppVersion `"$version`""
+        $content = $content -replace '#define MyAppBuildDir "build\\release_package"', '#define MyAppBuildDir "release_package"'
+        Set-Content installer.iss $content
+      shell: pwsh
+
+    - name: Build installer
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+      shell: cmd
+      continue-on-error: true  # Может не собраться без иконок
+
+    # === Создаём GitHub Release ===
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          JARVIS-${{ github.ref_name }}-win64.zip
+          update_dlls/JarvisCore.dll
+          update_dlls/JarvisPlugin_*.dll
+          build/installer/JARVIS-Setup-*.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
