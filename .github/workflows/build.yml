@@ -15,119 +15,129 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    # === Получаем код ===
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    # === Устанавливаем Qt ===
-    - name: Install Qt
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: ${{ env.QT_VERSION }}
-        host: windows
-        target: desktop
-        arch: win64_msvc2022_64
-        cache: true
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
 
-    # === Настраиваем MSVC ===
-    - name: Setup MSVC
-      uses: microsoft/setup-msbuild@v2
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
 
-    # === Конфигурация CMake ===
-    - name: Configure CMake
-      run: >
-        cmake -S . -B build
-        -G "Visual Studio 17 2022" -A x64
-        -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
-        -DCMAKE_BUILD_TYPE=Release
-        -DGITHUB_USER="Bohdan99py"
-        -DGITHUB_REPO="jarvis"
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build
+          -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
 
-    # === Сборка ===
-    - name: Build Release
-      run: cmake --build build --config Release --parallel
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
 
-    # === Подготовка пакета (windeployqt + копирование) ===
-    - name: Prepare release package
-      run: |
-        mkdir build\release_package
+      - name: Prepare release package
+        run: |
+          mkdir build\release_package -ErrorAction SilentlyContinue
+          
+          # Ищем Jarvis.exe во всех возможных местах
+          $found = $false
+          foreach ($path in @(
+            "build\Release\Jarvis.exe",
+            "build\bin\Release\Jarvis.exe",
+            "build\bin\Jarvis.exe",
+            "build\Jarvis.exe"
+          )) {
+            if (Test-Path $path) {
+              Copy-Item $path "build\release_package\"
+              Write-Host "Found exe at: $path"
+              $found = $true
+              break
+            }
+          }
+          
+          if (-not $found) {
+            Write-Host "Searching for Jarvis.exe..."
+            Get-ChildItem -Path build -Recurse -Filter "Jarvis.exe" | ForEach-Object {
+              Write-Host "Found: $($_.FullName)"
+              Copy-Item $_.FullName "build\release_package\"
+              $found = $true
+            }
+          }
+          
+          if (-not $found) {
+            Write-Error "Jarvis.exe not found!"
+            exit 1
+          }
+          
+          # windeployqt
+          $windeployqt = Join-Path $env:Qt6_DIR "bin\windeployqt.exe"
+          if (-not (Test-Path $windeployqt)) {
+            $windeployqt = Join-Path $env:Qt6_DIR "bin\windeployqt6.exe"
+          }
+          
+          & $windeployqt "build\release_package\Jarvis.exe" `
+            --release `
+            --no-translations `
+            --no-opengl-sw `
+            --no-system-d3d-compiler `
+            --no-compiler-runtime `
+            --dir "build\release_package"
+          
+          Write-Host "Release package contents:"
+          Get-ChildItem "build\release_package" -Recurse | Format-Table Name, Length
+        shell: pwsh
 
-        # Копируем exe
-        if (Test-Path "build\Release\Jarvis.exe") {
-          Copy-Item "build\Release\Jarvis.exe" "build\release_package\"
-        } elseif (Test-Path "build\bin\Release\Jarvis.exe") {
-          Copy-Item "build\bin\Release\Jarvis.exe" "build\release_package\"
-        }
+      # === Только при создании тега (релиз) ===
 
-        # windeployqt — копирует все Qt DLL
-        $windeployqt = Join-Path $env:Qt6_DIR "bin\windeployqt.exe"
-        if (-not (Test-Path $windeployqt)) {
-          $windeployqt = Join-Path $env:Qt6_DIR "bin\windeployqt6.exe"
-        }
+      - name: Download VC++ Redistributable
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir redist -ErrorAction SilentlyContinue
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
+            -OutFile "redist\vc_redist.x64.exe" -UseBasicParsing
+        shell: pwsh
 
-        & $windeployqt "build\release_package\Jarvis.exe" `
-          --release `
-          --no-translations `
-          --no-opengl-sw `
-          --no-system-d3d-compiler `
-          --no-compiler-runtime `
-          --dir "build\release_package"
-      shell: pwsh
+      - name: Create ZIP archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          Copy-Item "redist\vc_redist.x64.exe" "build\release_package\" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "build\release_package\*" `
+            -DestinationPath "JARVIS-${{ github.ref_name }}-win64.zip"
+        shell: pwsh
 
-    # === Скачиваем VC++ Redistributable ===
-    - name: Download VC++ Redistributable
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        mkdir redist -ErrorAction SilentlyContinue
-        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
-          -OutFile "redist\vc_redist.x64.exe" -UseBasicParsing
-      shell: pwsh
+      - name: Install Inno Setup
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: choco install innosetup -y --no-progress
+        shell: cmd
 
-    # === ZIP архив (для тех кто не хочет установщик) ===
-    - name: Create ZIP archive
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        # Копируем vcredist в пакет тоже
-        Copy-Item "redist\vc_redist.x64.exe" "build\release_package\" -ErrorAction SilentlyContinue
+      - name: Update installer version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $content = Get-Content installer.iss -Raw
+          $content = $content -replace '#define MyAppVersion "2.0.0"', "#define MyAppVersion `"$version`""
+          Set-Content installer.iss $content
+        shell: pwsh
 
-        Compress-Archive -Path "build\release_package\*" `
-          -DestinationPath "JARVIS-${{ github.ref_name }}-win64.zip"
-      shell: pwsh
+      - name: Build installer
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+        shell: cmd
+        continue-on-error: true
 
-    # === Установщик (Inno Setup) ===
-    - name: Install Inno Setup
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: choco install innosetup -y --no-progress
-      shell: cmd
-
-    - name: Update installer version
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        $version = "${{ github.ref_name }}".TrimStart("v")
-        $content = Get-Content installer.iss -Raw
-
-        # Обновляем версию
-        $content = $content -replace '#define MyAppVersion "2.0.0"', "#define MyAppVersion `"$version`""
-
-        Set-Content installer.iss $content
-      shell: pwsh
-
-    - name: Build installer
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-      shell: cmd
-
-    # === Публикуем GitHub Release ===
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
-      with:
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-        files: |
-          JARVIS-${{ github.ref_name }}-win64.zip
-          build/installer/JARVIS-Setup-*.exe
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            JARVIS-${{ github.ref_name }}-win64.zip
+            build/installer/JARVIS-Setup-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
