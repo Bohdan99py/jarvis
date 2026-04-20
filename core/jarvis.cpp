@@ -1,5 +1,5 @@
 // -------------------------------------------------------
-// jarvis.cpp — Ядро J.A.R.V.I.S.: команды, TTS, плагины
+// jarvis.cpp — Ядро J.A.R.V.I.S.: команды, TTS, мозги
 // -------------------------------------------------------
 
 #include "jarvis.h"
@@ -7,8 +7,7 @@
 #include "session_memory.h"
 #include "claude_api.h"
 #include "action_predictor.h"
-#include "plugin_manager.h"
-#include "updater.h"
+#include "auto_updater.h"
 
 #include <sapi.h>
 #include <shellapi.h>
@@ -22,6 +21,17 @@
 #include <QRegularExpression>
 #include <QCoreApplication>
 
+// Дефайны из CMake
+#ifndef JARVIS_VERSION
+#define JARVIS_VERSION "2.0.0"
+#endif
+#ifndef JARVIS_GITHUB_USER
+#define JARVIS_GITHUB_USER "Bohdan99py"
+#endif
+#ifndef JARVIS_GITHUB_REPO
+#define JARVIS_GITHUB_REPO "jarvis"
+#endif
+
 // ============================================================
 // Конструктор / Деструктор
 // ============================================================
@@ -33,43 +43,29 @@ Jarvis::Jarvis(QObject* parent)
     m_claudeApi   = new ClaudeApi(m_memory, this);
     m_predictor   = new ActionPredictor(m_memory, this);
     m_keyEmulator = new KeyEmulator(this);
-    m_pluginMgr   = new PluginManager(this, this);
-    m_updater     = new Updater(this);
 
-    // Настраиваем апдейтер — замени на свой репозиторий
-    m_updater->setRepository(QStringLiteral("YOUR_GITHUB_USER"),
-                             QStringLiteral("jarvis"));
-    m_updater->setCurrentVersion(QCoreApplication::applicationVersion());
+    // Автообновление
+    m_updater = new AutoUpdater(
+        QStringLiteral(JARVIS_VERSION),
+        QStringLiteral(JARVIS_GITHUB_USER),
+        QStringLiteral(JARVIS_GITHUB_REPO),
+        this
+    );
 
     registerCommands();
-
-    // Загружаем плагины из папки рядом с exe
-    QString pluginsDir = QCoreApplication::applicationDirPath()
-                         + QStringLiteral("/plugins");
-    m_pluginMgr->loadPlugins(pluginsDir);
 
     // Реакция на ошибки API
     connect(m_claudeApi, &ClaudeApi::apiError, this, [this](const QString& err) {
         emit asyncResponseError(err);
     });
 
-    // Реакция на плагины
-    connect(m_pluginMgr, &PluginManager::pluginLoaded, this, [this](const QString& name) {
-        emit logRequested(QStringLiteral("СИСТЕМА"),
-                          QStringLiteral("Плагин загружен: ") + name,
-                          QStringLiteral("#00ff88"));
-    });
-    connect(m_pluginMgr, &PluginManager::pluginError, this,
-            [this](const QString& name, const QString& error) {
-        emit logRequested(QStringLiteral("ОШИБКА"),
-                          QStringLiteral("Плагин ") + name + QStringLiteral(": ") + error,
-                          QStringLiteral("#ff4466"));
-    });
+    // Проверяем обновления при запуске (тихо, без уведомления если нет обновлений)
+    m_updater->checkForUpdates(true);
 }
 
 Jarvis::~Jarvis()
 {
-    m_pluginMgr->unloadAll();
+    // Сохраняем паттерны при завершении
     m_predictor->savePatterns();
     m_memory->savePersistent();
 }
@@ -86,6 +82,14 @@ void Jarvis::registerCommands()
         [this](const QString& s) { return cmdSetApiKey(s); },
         QStringLiteral("apikey <ключ> — установить Claude API-ключ"),
         true
+    );
+
+    // --- Обновление ---
+    m_registry.registerCommand(
+        {QStringLiteral("обновление"), QStringLiteral("обнови"),
+         QStringLiteral("update"), QStringLiteral("версия"), QStringLiteral("version")},
+        [this](const QString& s) { return cmdCheckUpdate(s); },
+        QStringLiteral("обновление — проверить обновления")
     );
 
     // --- Память ---
@@ -113,26 +117,6 @@ void Jarvis::registerCommands()
         {QStringLiteral("статистика"), QStringLiteral("stats")},
         [this](const QString& s) { return cmdShowStats(s); },
         QStringLiteral("статистика — статистика использования")
-    );
-
-    // --- Обновления и плагины ---
-    m_registry.registerCommand(
-        {QStringLiteral("обновление"), QStringLiteral("update")},
-        [this](const QString& s) { return cmdCheckUpdate(s); },
-        QStringLiteral("обновление — проверить обновления")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("плагины"), QStringLiteral("plugins")},
-        [this](const QString& s) { return cmdListPlugins(s); },
-        QStringLiteral("плагины — список плагинов")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("перезагрузи "), QStringLiteral("reload ")},
-        [this](const QString& s) { return cmdReloadPlugin(s); },
-        QStringLiteral("перезагрузи <плагин> — hot-reload плагина"),
-        true
     );
 
     // --- Приветствие ---
@@ -397,6 +381,7 @@ QString Jarvis::processCommand(const QString& input)
         m_memory->addMessage(QStringLiteral("assistant"), result.response);
         m_memory->updateContext(s, result.response);
 
+        // Предугадывание: записываем и предлагаем
         m_predictor->recordSequence(s);
         auto suggestion = m_predictor->suggestAfter(s);
         if (suggestion.isValid() && suggestion.confidence >= 0.5) {
@@ -406,22 +391,16 @@ QString Jarvis::processCommand(const QString& input)
         return result.response;
     }
 
-    // 2. Пробуем плагины
-    QString pluginResponse;
-    if (m_pluginMgr->tryHandleCommand(s, pluginResponse)) {
-        m_memory->addMessage(QStringLiteral("assistant"), pluginResponse);
-        m_memory->updateContext(s, pluginResponse);
-        m_predictor->recordSequence(s);
-        return pluginResponse;
-    }
-
-    // 3. Если есть API-ключ — отправляем в Claude API
+    // 2. Если есть API-ключ — отправляем в Claude API
     if (m_claudeApi->shouldUseApi(s)) {
         m_claudeApi->sendMessage(s, [this, s](bool success, const QString& response) {
             if (success) {
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
+
+                // Проверяем, есть ли команда в ответе Claude
                 handleClaudeResponse(response);
+
                 m_predictor->recordSequence(s);
                 emit asyncResponseReady(response);
             } else {
@@ -429,10 +408,10 @@ QString Jarvis::processCommand(const QString& input)
             }
         });
 
-        return QString(); // Ответ придёт асинхронно
+        return QString(); // Пустая строка = ответ придёт асинхронно
     }
 
-    // 4. Fallback без API
+    // 3. Fallback без API
     QString fallback = QStringLiteral(
         "Не понял команду. Напишите «помощь» для списка команд.\n"
         "Для свободного диалога установите API-ключ: apikey <ваш-ключ>"
@@ -447,6 +426,7 @@ QString Jarvis::processCommand(const QString& input)
 
 void Jarvis::handleClaudeResponse(const QString& response)
 {
+    // Ищем паттерн [CMD:команда] в ответе Claude
     static const QRegularExpression cmdPattern(
         QStringLiteral(R"(\[CMD:(.+?)\])"));
 
@@ -454,76 +434,13 @@ void Jarvis::handleClaudeResponse(const QString& response)
     while (it.hasNext()) {
         QRegularExpressionMatch match = it.next();
         QString cmd = match.captured(1).trimmed();
+
+        // Выполняем команду через реестр
         auto result = m_registry.tryExecute(cmd);
-        Q_UNUSED(result)
+        if (result.matched) {
+            // Команда уже выполнена, UI покажет ответ Claude
+        }
     }
-}
-
-// ============================================================
-// PluginHost реализация
-// ============================================================
-
-void Jarvis::addMessage(const QString& role, const QString& content)
-{
-    m_memory->addMessage(role, content);
-}
-
-QJsonArray Jarvis::recentMessages(int max) const
-{
-    return m_memory->recentMessagesAsJson(max);
-}
-
-void Jarvis::rememberFact(const QString& key, const QString& value)
-{
-    m_memory->rememberFact(key, value);
-}
-
-QString Jarvis::recallFact(const QString& key) const
-{
-    return m_memory->recallFact(key);
-}
-
-QJsonObject Jarvis::allFacts() const
-{
-    return m_memory->allFacts();
-}
-
-QJsonObject Jarvis::commandStats() const
-{
-    return m_memory->commandStats();
-}
-
-QString Jarvis::buildSystemPrompt() const
-{
-    return m_memory->buildSystemPrompt();
-}
-
-void Jarvis::registerCommand(const QStringList& keywords,
-                              CommandHandler handler,
-                              const QString& description,
-                              bool prefixMatch)
-{
-    m_registry.registerCommand(keywords, std::move(handler), description, prefixMatch);
-}
-
-void Jarvis::appendLog(const QString& who, const QString& text, const QString& color)
-{
-    emit logRequested(who, text, color);
-}
-
-void Jarvis::showSuggestion(const QString& description, const QString& action)
-{
-    emit suggestionAvailable(description, action);
-}
-
-void Jarvis::setStatus(const QString& text, const QString& color)
-{
-    emit statusRequested(text, color);
-}
-
-QString Jarvis::executeCommand(const QString& input)
-{
-    return processCommand(input);
 }
 
 // ============================================================
@@ -586,7 +503,7 @@ QString Jarvis::cmdShowMemory(const QString&)
 
     QString text = QStringLiteral("Сохранённые факты:\n");
     for (auto it = facts.begin(); it != facts.end(); ++it) {
-        text += QStringLiteral("  ") + it.key() + QStringLiteral(": ")
+        text += QStringLiteral("• ") + it.key() + QStringLiteral(": ")
               + it.value().toString() + QStringLiteral("\n");
     }
 
@@ -605,6 +522,7 @@ QString Jarvis::cmdShowStats(const QString&)
         return QStringLiteral("Статистика пуста — пока недостаточно данных.");
     }
 
+    // Сортируем по частоте
     QVector<QPair<QString, int>> sorted;
     for (auto it = stats.begin(); it != stats.end(); ++it) {
         sorted.append({it.key(), it.value().toInt()});
@@ -615,7 +533,7 @@ QString Jarvis::cmdShowStats(const QString&)
     QString text = QStringLiteral("Статистика команд:\n");
     int shown = 0;
     for (const auto& [cmd, count] : sorted) {
-        text += QStringLiteral("  ") + cmd + QStringLiteral(": ")
+        text += QStringLiteral("• ") + cmd + QStringLiteral(": ")
               + QString::number(count) + QStringLiteral(" раз\n");
         if (++shown >= 15) break;
     }
@@ -624,11 +542,12 @@ QString Jarvis::cmdShowStats(const QString&)
           + QString::number(m_memory->taskContext().commandCount)
           + QStringLiteral(" команд");
 
+    // Предложения предиктора
     auto suggestions = m_predictor->suggest(3);
     if (!suggestions.isEmpty()) {
         text += QStringLiteral("\n\nПредложения:");
         for (const auto& s : suggestions) {
-            text += QStringLiteral("\n  -> ") + s.description
+            text += QStringLiteral("\n  → ") + s.description
                   + QStringLiteral(" (") + QString::number(int(s.confidence * 100))
                   + QStringLiteral("%)");
         }
@@ -638,68 +557,15 @@ QString Jarvis::cmdShowStats(const QString&)
 }
 
 // ============================================================
-// Команды: Обновления и плагины
+// Команда проверки обновлений
 // ============================================================
 
 QString Jarvis::cmdCheckUpdate(const QString&)
 {
-    m_updater->checkForUpdates();
-
-    connect(m_updater, &Updater::updateAvailable, this,
-            [this](const UpdateInfo& info) {
-                QString msg = QStringLiteral("Доступно обновление: v")
-                              + info.latestVersion
-                              + QStringLiteral(" (текущая: v")
-                              + info.currentVersion + QStringLiteral(")\n")
-                              + info.changelog.left(200);
-                emit asyncResponseReady(msg);
-            }, Qt::SingleShotConnection);
-
-    connect(m_updater, &Updater::noUpdatesAvailable, this,
-            [this]() {
-                emit asyncResponseReady(
-                    QStringLiteral("Вы используете последнюю версию."));
-            }, Qt::SingleShotConnection);
-
-    connect(m_updater, &Updater::updateError, this,
-            [this](const QString& err) {
-                emit asyncResponseError(err);
-            }, Qt::SingleShotConnection);
-
-    return QStringLiteral("Проверяю обновления...");
-}
-
-QString Jarvis::cmdListPlugins(const QString&)
-{
-    auto plugins = m_pluginMgr->plugins();
-    if (plugins.isEmpty()) {
-        return QStringLiteral("Плагины не загружены.\n"
-                              "Положите DLL-плагины в папку plugins/ рядом с Jarvis.exe");
-    }
-
-    QString text = QStringLiteral("Загруженные плагины:\n");
-    for (const auto& p : plugins) {
-        QString status = p.loaded ? QStringLiteral("[ON]") : QStringLiteral("[OFF]");
-        text += QStringLiteral("  ") + status + QStringLiteral(" ")
-              + p.displayName + QStringLiteral(" v") + p.version
-              + QStringLiteral("\n");
-    }
-
-    return text.trimmed();
-}
-
-QString Jarvis::cmdReloadPlugin(const QString& input)
-{
-    QString name = extractArg(input, {QStringLiteral("перезагрузи "),
-                                       QStringLiteral("reload ")});
-    if (name.isEmpty()) {
-        return QStringLiteral("Укажите имя плагина: перезагрузи <имя>");
-    }
-
-    if (m_pluginMgr->reloadPlugin(name)) {
-        return QStringLiteral("Плагин перезагружен: ") + name;
-    }
-    return QStringLiteral("Не удалось перезагрузить плагин: ") + name;
+    m_updater->checkForUpdates(false);
+    return QStringLiteral("Текущая версия: ")
+           + QCoreApplication::applicationVersion()
+           + QStringLiteral("\nПроверяю обновления...");
 }
 
 // ============================================================

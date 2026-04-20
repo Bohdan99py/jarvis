@@ -8,58 +8,64 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-# ============================================================
-# Настройки путей
-# ============================================================
-
-# Путь к Qt — измени под свою систему или передай через -DCMAKE_PREFIX_PATH=...
+# Путь к Qt — можно переопределить при вызове cmake:
+#   cmake -DCMAKE_PREFIX_PATH="C:/Qt/6.8.0/msvc2022_64" ..
 if(NOT DEFINED CMAKE_PREFIX_PATH)
-    set(CMAKE_PREFIX_PATH "C:/Qt/6.11.0/msvc2022_64" CACHE PATH "Qt installation path")
+    set(CMAKE_PREFIX_PATH "C:/Qt/6.11.0/msvc2022_64")
 endif()
-
-# Все DLL/EXE складываются в одну папку bin/
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
-# Для multi-config генераторов (Visual Studio)
-foreach(CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
-    string(TOUPPER ${CONFIG_TYPE} CONFIG_TYPE_UPPER)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} ${CMAKE_BINARY_DIR}/bin)
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} ${CMAKE_BINARY_DIR}/bin)
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} ${CMAKE_BINARY_DIR}/lib)
-endforeach()
-
-# ============================================================
-# Находим Qt
-# ============================================================
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
-# ============================================================
-# Подпроекты
-# ============================================================
+# --- GitHub-репозиторий для автообновления ---
+# Замени на свой GitHub username:
+set(GITHUB_USER "Bohdan99py" CACHE STRING "GitHub username")
+set(GITHUB_REPO "jarvis"     CACHE STRING "GitHub repository name")
 
-# 1. Ядро (DLL) — можно обновлять отдельно
-add_subdirectory(core)
-
-# 2. Плагины (DLL) — каждый обновляется независимо
-add_subdirectory(plugins)
-
-# 3. Приложение (EXE) — тонкий лаунчер
-add_subdirectory(app)
-
-# ============================================================
-# Установка (install)
-# ============================================================
-
-install(TARGETS JarvisApp JarvisCore
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION bin
-    ARCHIVE DESTINATION lib
+add_executable(Jarvis WIN32
+        main.cpp
+        jarvis.h
+        jarvis.cpp
+        mainwindow.h
+        mainwindow.cpp
+        theme.h
+        command_registry.h
+        command_registry.cpp
+        virtual_keyboard.h
+        virtual_keyboard.cpp
+        claude_api.h
+        claude_api.cpp
+        session_memory.h
+        session_memory.cpp
+        action_predictor.h
+        action_predictor.cpp
+        auto_updater.h
+        auto_updater.cpp
 )
 
-# Копируем конфиг плагинов
-install(FILES ${CMAKE_SOURCE_DIR}/plugins/plugins.json
-    DESTINATION bin
+target_link_libraries(Jarvis PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Network
+        ole32
+        oleaut32
+        shell32
 )
+
+# Передаём версию и GitHub info в код через дефайны
+target_compile_definitions(Jarvis PRIVATE
+        UNICODE
+        _UNICODE
+        JARVIS_VERSION="${PROJECT_VERSION}"
+        JARVIS_GITHUB_USER="${GITHUB_USER}"
+        JARVIS_GITHUB_REPO="${GITHUB_REPO}"
+)
+
+if(MSVC)
+    target_compile_options(Jarvis PRIVATE /W4)
+    target_compile_options(Jarvis PRIVATE $<$<CONFIG:Release>:/O2 /GL>)
+    target_link_options(Jarvis PRIVATE $<$<CONFIG:Release>:/LTCG>)
+endif()
+
+# --- Установка (для CPack / ручного deploy) ---
+install(TARGETS Jarvis RUNTIME DESTINATION .)

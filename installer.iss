@@ -1,24 +1,22 @@
 ; -------------------------------------------------------
 ; installer.iss — Inno Setup скрипт для J.A.R.V.I.S.
 ;
-; Требования:
-;   1. Inno Setup 6+ (https://jrsoftware.org/isinfo.php)
-;   2. Собранный проект в build\bin\
-;   3. Qt DLL рядом (через windeployqt)
+; Создаёт установщик со ВСЕМИ зависимостями:
+;   - Jarvis.exe + Qt DLL (через windeployqt)
+;   - Visual C++ Redistributable (vcredist)
+;   - Ярлыки, автозагрузка, деинсталляция
 ;
 ; Использование:
-;   1. Собери проект: build.bat Release
-;   2. Подготовь Qt DLL: scripts\prepare_release.bat
-;   3. Открой этот файл в Inno Setup Compiler → Compile
-;   Или из командной строки:
-;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+;   1. Собери: scripts\build_release.bat
+;   2. Скомпилируй: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+;   Или GitHub Actions сделает всё автоматически.
 ; -------------------------------------------------------
 
 #define MyAppName "J.A.R.V.I.S."
 #define MyAppVersion "2.0.0"
 #define MyAppPublisher "JARVIS Project"
-#define MyAppURL "https://github.com/YOUR_GITHUB_USER/jarvis"
-#define MyAppExeName "JarvisApp.exe"
+#define MyAppURL "https://github.com/Bohdan99py/jarvis"
+#define MyAppExeName "Jarvis.exe"
 #define MyAppBuildDir "build\release_package"
 
 [Setup]
@@ -33,10 +31,8 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\JARVIS
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-LicenseFile=LICENSE
 OutputDir=build\installer
 OutputBaseFilename=JARVIS-Setup-{#MyAppVersion}
-SetupIconFile=assets\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -44,34 +40,40 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
-; Красивый установщик
-WizardImageFile=assets\wizard_image.bmp
-WizardSmallImageFile=assets\wizard_small.bmp
+; Иконка (если есть)
+; SetupIconFile=assets\icon.ico
+; WizardImageFile=assets\wizard_image.bmp
+; WizardSmallImageFile=assets\wizard_small.bmp
+
+; Разрешаем закрытие работающего JARVIS при обновлении
+CloseApplications=yes
+CloseApplicationsFilter=Jarvis.exe
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Запускать при старте Windows"; GroupDescription: "Дополнительно:"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "autostart"; Description: "Запускать при старте Windows / Start with Windows"; GroupDescription: "Дополнительно / Additional:"
 
 [Files]
-; Основные файлы
-Source: "{#MyAppBuildDir}\JarvisApp.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#MyAppBuildDir}\JarvisCore.dll"; DestDir: "{app}"; Flags: ignoreversion
+; === Основной exe ===
+Source: "{#MyAppBuildDir}\Jarvis.exe"; DestDir: "{app}"; Flags: ignoreversion
 
-; Qt DLL и зависимости (после windeployqt)
-Source: "{#MyAppBuildDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-Source: "{#MyAppBuildDir}\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs
-Source: "{#MyAppBuildDir}\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs
-Source: "{#MyAppBuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs
+; === Qt DLL и зависимости (после windeployqt) ===
+Source: "{#MyAppBuildDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 
-; Плагины (папка)
-Source: "{#MyAppBuildDir}\plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
+; === Qt плагины (платформы, стили, TLS) ===
+Source: "{#MyAppBuildDir}\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppBuildDir}\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: DirExists(ExpandConstant('{#MyAppBuildDir}\styles'))
+Source: "{#MyAppBuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: DirExists(ExpandConstant('{#MyAppBuildDir}\tls'))
+Source: "{#MyAppBuildDir}\networkinformation\*"; DestDir: "{app}\networkinformation"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: DirExists(ExpandConstant('{#MyAppBuildDir}\networkinformation'))
 
-; Скрипт обновления
-Source: "scripts\update.bat"; DestDir: "{app}\scripts"; Flags: ignoreversion
+; === Visual C++ Redistributable ===
+; Скачай vc_redist.x64.exe с https://aka.ms/vs/17/release/vc_redist.x64.exe
+; и положи в папку redist\
+Source: "redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: not VCRedistInstalled
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -79,21 +81,58 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-; Автозагрузка (опционально)
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "JARVIS"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
+; Автозагрузка
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+    ValueType: string; ValueName: "JARVIS"; \
+    ValueData: """{app}\{#MyAppExeName}"""; \
+    Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+; Устанавливаем VC++ Redistributable если нужно (тихо)
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; \
+    StatusMsg: "Установка Visual C++ Runtime..."; \
+    Flags: waituntilterminated; Check: not VCRedistInstalled
+
+; Запускаем JARVIS после установки
+Filename: "{app}\{#MyAppExeName}"; \
+    Description: "{cm:LaunchProgram,{#MyAppName}}"; \
+    Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Очищаем папку обновлений и бэкапов при удалении
-Type: filesandordirs; Name: "{app}\updates"
-Type: filesandordirs; Name: "{app}\backup"
+; Очищаем пользовательские данные при полном удалении
+Type: filesandordirs; Name: "{localappdata}\JARVIS Project"
 
 [Code]
-// Проверяем MSVC Runtime при установке
-function InitializeSetup(): Boolean;
+// Проверяем наличие Visual C++ Redistributable 2015-2022
+function VCRedistInstalled(): Boolean;
+var
+    Version: String;
 begin
-  Result := True;
-  // Можно добавить проверку на наличие Visual C++ Redistributable
+    Result := False;
+    // MSVC 2015-2022 x64
+    if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
+                           'Version', Version) then
+    begin
+        Result := True;
+    end;
+    // Альтернативный ключ
+    if not Result then
+    begin
+        if RegKeyExists(HKLM,
+            'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64') then
+            Result := True;
+    end;
+    // Ещё один вариант через Wow6432Node
+    if not Result then
+    begin
+        if RegKeyExists(HKLM,
+            'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64') then
+            Result := True;
+    end;
+end;
+
+// Проверка существования директории
+function DirExists(Dir: String): Boolean;
+begin
+    Result := DirExists(Dir);
 end;

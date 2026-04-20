@@ -7,6 +7,7 @@
 #include "theme.h"
 #include "virtual_keyboard.h"
 #include "claude_api.h"
+#include "auto_updater.h"
 
 #include <QApplication>
 #include <QVBoxLayout>
@@ -17,6 +18,7 @@
 #include <QTime>
 #include <QFont>
 #include <QPropertyAnimation>
+#include <QMessageBox>
 
 // ============================================================
 // Конструктор
@@ -49,17 +51,65 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_jarvis, &Jarvis::suggestionAvailable,
             this, &MainWindow::onSuggestion);
 
-    // PluginHost UI-сигналы
-    connect(m_jarvis, &Jarvis::logRequested,
-            this, &MainWindow::onLogRequested);
-    connect(m_jarvis, &Jarvis::statusRequested,
-            this, &MainWindow::onStatusRequested);
-
     // Индикатор «Думаю...» при запросе к API
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestStarted,
             this, [this]() { setThinkingState(true); });
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestFinished,
             this, [this]() { setThinkingState(false); });
+
+    // --- Автообновление ---
+    auto* updater = m_jarvis->autoUpdater();
+
+    connect(updater, &AutoUpdater::updateAvailable,
+            this, [this](const QString& newVersion, const QString& releaseNotes,
+                         const QUrl& downloadUrl) {
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Доступно обновление v") + newVersion + QStringLiteral("!"),
+                  Theme::LogColors::system);
+
+        // Показываем диалог
+        QMessageBox::StandardButton reply = QMessageBox::question(
+            this,
+            QStringLiteral("Обновление J.A.R.V.I.S."),
+            QStringLiteral("Доступна новая версия v%1.\n\n%2\n\nУстановить обновление?")
+                .arg(newVersion, releaseNotes.left(300)),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::Yes
+        );
+
+        if (reply == QMessageBox::Yes) {
+            appendLog(QStringLiteral("СИСТЕМА"),
+                      QStringLiteral("Скачиваю обновление..."),
+                      Theme::LogColors::system);
+            m_jarvis->autoUpdater()->downloadAndInstall(downloadUrl);
+        }
+    });
+
+    connect(updater, &AutoUpdater::noUpdateAvailable,
+            this, [this]() {
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("У вас последняя версия (")
+                  + QCoreApplication::applicationVersion() + QStringLiteral(")."),
+                  Theme::LogColors::system);
+    });
+
+    connect(updater, &AutoUpdater::downloadProgress,
+            this, [this](int percent) {
+        m_status->setText(QStringLiteral("Обновление: %1%").arg(percent));
+    });
+
+    connect(updater, &AutoUpdater::downloadFinished,
+            this, [this](const QString& path) {
+        Q_UNUSED(path)
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Обновление скачано. Запускаю установщик..."),
+                  Theme::LogColors::system);
+    });
+
+    connect(updater, &AutoUpdater::updateError,
+            this, [this](const QString& error) {
+        appendLog(QStringLiteral("ОШИБКА"), error, Theme::LogColors::error);
+    });
 
     buildUI();
     qApp->setStyleSheet(Theme::globalStyleSheet());
@@ -72,9 +122,12 @@ MainWindow::MainWindow(QWidget* parent)
     else if (hour < 18) g = QStringLiteral("Добрый день");
     else                g = QStringLiteral("Добрый вечер");
 
-    appendLog(QStringLiteral("JARVIS"), g + QStringLiteral("! Система готова."),
+    appendLog(QStringLiteral("JARVIS"),
+              g + QStringLiteral("! Система готова. v")
+              + QCoreApplication::applicationVersion(),
               Theme::LogColors::jarvis);
 
+    // Проверяем наличие API-ключа
     if (m_jarvis->claudeApi()->hasApiKey()) {
         appendLog(QStringLiteral("JARVIS"),
                   QStringLiteral("Claude API подключён. Свободный диалог доступен."),
@@ -134,9 +187,11 @@ void MainWindow::onSend()
     QString response = m_jarvis->processCommand(text);
 
     if (!response.isEmpty()) {
+        // Синхронный ответ (локальная команда)
         appendLog(QStringLiteral("JARVIS"), response, Theme::LogColors::jarvis);
         m_jarvis->speakAsync(response);
     }
+    // Если response пустой — ответ придёт через onAsyncResponse
 
     m_input->setFocus();
 }
@@ -182,13 +237,14 @@ void MainWindow::onTypingFinished()
 }
 
 // ============================================================
-// Slots: Claude API
+// Slots: Claude API (мозги)
 // ============================================================
 
 void MainWindow::onAsyncResponse(const QString& response)
 {
     appendLog(QStringLiteral("JARVIS"), response, Theme::LogColors::jarvis);
 
+    // Озвучиваем только короткие ответы (до 200 символов)
     if (response.length() <= 200) {
         m_jarvis->speakAsync(response);
     }
@@ -207,23 +263,7 @@ void MainWindow::onSuggestion(const QString& description, const QString& action)
 }
 
 // ============================================================
-// Slots: PluginHost UI
-// ============================================================
-
-void MainWindow::onLogRequested(const QString& who, const QString& text, const QString& color)
-{
-    appendLog(who, text, color);
-}
-
-void MainWindow::onStatusRequested(const QString& text, const QString& color)
-{
-    m_status->setText(text);
-    m_status->setStyleSheet(QStringLiteral("color: %1; font-size: 12px;").arg(color));
-    m_dot->setStyleSheet(QStringLiteral("color: %1; font-size: 18px;").arg(color));
-}
-
-// ============================================================
-// Thinking state
+// Thinking state (при запросе к API)
 // ============================================================
 
 void MainWindow::setThinkingState(bool thinking)
@@ -243,7 +283,7 @@ void MainWindow::setThinkingState(bool thinking)
 }
 
 // ============================================================
-// Клавиатура
+// Клавиатура: показать/скрыть
 // ============================================================
 
 void MainWindow::toggleKeyboard()
@@ -281,7 +321,8 @@ void MainWindow::toggleKeyboard()
 
 void MainWindow::buildUI()
 {
-    setWindowTitle(QStringLiteral("J.A.R.V.I.S. — Personal Assistant"));
+    setWindowTitle(QStringLiteral("J.A.R.V.I.S. — Personal Assistant v")
+                   + QCoreApplication::applicationVersion());
     setMinimumSize(580, 500);
     resize(640, 600);
 
@@ -331,7 +372,7 @@ void MainWindow::buildUI()
     m_log->setFocusPolicy(Qt::NoFocus);
     vbox->addWidget(m_log, 1);
 
-    // === Панель предложений ===
+    // === Панель предложений (скрыта по умолчанию) ===
     m_suggestionBar = new QWidget(this);
     m_suggestionBar->setVisible(false);
     m_suggestionBar->setStyleSheet(
@@ -364,6 +405,7 @@ void MainWindow::buildUI()
 
     vbox->addWidget(m_suggestionBar);
 
+    // Принять предложение
     connect(m_suggestionBtn, &QPushButton::clicked, this, [this]() {
         if (!m_pendingSuggestionAction.isEmpty()) {
             m_input->setText(m_pendingSuggestionAction);
@@ -372,6 +414,7 @@ void MainWindow::buildUI()
         m_suggestionBar->setVisible(false);
     });
 
+    // Отклонить предложение
     connect(sugDismiss, &QPushButton::clicked, this, [this]() {
         m_suggestionBar->setVisible(false);
     });
@@ -412,7 +455,7 @@ void MainWindow::buildUI()
     bottomBar->addWidget(kbBtn);
     vbox->addLayout(bottomBar);
 
-    // === Виртуальная клавиатура ===
+    // === Виртуальная клавиатура (скрыта) ===
     m_kbContainer = new QWidget(this);
     m_kbContainer->setMaximumHeight(0);
     m_kbContainer->setVisible(false);
