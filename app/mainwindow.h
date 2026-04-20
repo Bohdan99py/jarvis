@@ -37,10 +37,6 @@ private slots:
     void onAsyncError(const QString& error);
     void onSuggestion(const QString& description, const QString& action);
 
-    // PluginHost UI
-    void onLogRequested(const QString& who, const QString& text, const QString& color);
-    void onStatusRequested(const QString& text, const QString& color);
-
 private:
     void buildUI();
     void appendLog(const QString& who, const QString& text, const QString& color);

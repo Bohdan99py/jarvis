@@ -8,8 +8,8 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-# Путь к Qt — можно переопределить при вызове cmake:
-#   cmake -DCMAKE_PREFIX_PATH="C:/Qt/6.8.0/msvc2022_64" ..
+# Путь к Qt — CLion/Visual Studio найдут автоматически,
+# или передай: cmake -DCMAKE_PREFIX_PATH="C:/Qt/6.11.0/msvc2022_64" ..
 if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "C:/Qt/6.11.0/msvc2022_64")
 endif()
@@ -17,29 +17,42 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 # --- GitHub-репозиторий для автообновления ---
-# Замени на свой GitHub username:
 set(GITHUB_USER "Bohdan99py" CACHE STRING "GitHub username")
 set(GITHUB_REPO "jarvis"     CACHE STRING "GitHub repository name")
 
+# ============================================================
+# Все исходники — один exe, без DLL, без плагинов
+# ============================================================
+
 add_executable(Jarvis WIN32
-        main.cpp
-        jarvis.h
-        jarvis.cpp
-        mainwindow.h
-        mainwindow.cpp
-        theme.h
-        command_registry.h
-        command_registry.cpp
-        virtual_keyboard.h
-        virtual_keyboard.cpp
-        claude_api.h
-        claude_api.cpp
-        session_memory.h
-        session_memory.cpp
-        action_predictor.h
-        action_predictor.cpp
-        auto_updater.h
-        auto_updater.cpp
+        # --- app/ ---
+        app/main.cpp
+        app/mainwindow.h
+        app/mainwindow.cpp
+
+        # --- core/ ---
+        core/jarvis.h
+        core/jarvis.cpp
+        core/theme.h
+        core/command_registry.h
+        core/command_registry.cpp
+        core/virtual_keyboard.h
+        core/virtual_keyboard.cpp
+        core/claude_api.h
+        core/claude_api.cpp
+        core/session_memory.h
+        core/session_memory.cpp
+        core/action_predictor.h
+        core/action_predictor.cpp
+        core/auto_updater.h
+        core/auto_updater.cpp
+        core/embedded_key.h
+)
+
+# Чтобы #include "jarvis.h" работал из app/
+target_include_directories(Jarvis PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/app
 )
 
 target_link_libraries(Jarvis PRIVATE
@@ -52,7 +65,7 @@ target_link_libraries(Jarvis PRIVATE
         shell32
 )
 
-# Передаём версию и GitHub info в код через дефайны
+# Версия и GitHub info → в код через дефайны
 target_compile_definitions(Jarvis PRIVATE
         UNICODE
         _UNICODE
@@ -67,5 +80,4 @@ if(MSVC)
     target_link_options(Jarvis PRIVATE $<$<CONFIG:Release>:/LTCG>)
 endif()
 
-# --- Установка (для CPack / ручного deploy) ---
 install(TARGETS Jarvis RUNTIME DESTINATION .)
