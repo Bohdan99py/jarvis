@@ -26,15 +26,56 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           cache: true
+          set-env: true
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
+
+      - name: Find Qt path
+        id: qt_path
+        run: |
+          # Выводим все Qt-переменные для диагностики
+          Write-Host "=== Qt environment variables ==="
+          Get-ChildItem env: | Where-Object { $_.Value -match '[Qq]t' } | Format-Table Name, Value
+          
+          # install-qt-action выставляет QT_ROOT_DIR или IQTA_TOOLS или добавляет в PATH
+          $qtdir = $null
+          
+          if ($env:QT_ROOT_DIR -and (Test-Path $env:QT_ROOT_DIR)) {
+            $qtdir = $env:QT_ROOT_DIR
+          }
+          elseif ($env:Qt6_DIR -and (Test-Path $env:Qt6_DIR)) {
+            # Qt6_DIR обычно указывает на lib/cmake/Qt6, идём на 3 уровня вверх
+            $qtdir = (Resolve-Path "$env:Qt6_DIR\..\..\..").Path
+          }
+          elseif ($env:QTDIR -and (Test-Path $env:QTDIR)) {
+            $qtdir = $env:QTDIR
+          }
+          
+          # Fallback: ищем windeployqt в PATH
+          if (-not $qtdir) {
+            $wd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+            if (-not $wd) { $wd = Get-Command windeployqt6.exe -ErrorAction SilentlyContinue }
+            if ($wd) {
+              $qtdir = Split-Path (Split-Path $wd.Source)
+            }
+          }
+          
+          if (-not $qtdir) {
+            Write-Error "Cannot find Qt! Check install-qt-action output."
+            exit 1
+          }
+          
+          Write-Host "Qt dir resolved: $qtdir"
+          echo "QTDIR=$qtdir" >> $env:GITHUB_OUTPUT
+          echo "QTDIR=$qtdir" >> $env:GITHUB_ENV
+        shell: pwsh
 
       - name: Configure CMake
         run: >
           cmake -S . -B build
           -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+          -DCMAKE_PREFIX_PATH="${{ steps.qt_path.outputs.QTDIR }}"
 
       - name: Build Release
         run: cmake --build build --config Release --parallel
@@ -43,43 +84,40 @@ jobs:
         run: |
           mkdir build\release_package -ErrorAction SilentlyContinue
           
-          # Ищем Jarvis.exe во всех возможных местах
-          $found = $false
-          foreach ($path in @(
-            "build\Release\Jarvis.exe",
-            "build\bin\Release\Jarvis.exe",
-            "build\bin\Jarvis.exe",
-            "build\Jarvis.exe"
-          )) {
-            if (Test-Path $path) {
-              Copy-Item $path "build\release_package\"
-              Write-Host "Found exe at: $path"
-              $found = $true
-              break
-            }
-          }
+          # Ищем Jarvis.exe рекурсивно
+          $exe = Get-ChildItem -Path build -Recurse -Filter "Jarvis.exe" |
+                 Where-Object { $_.DirectoryName -notmatch "release_package" } |
+                 Select-Object -First 1
           
-          if (-not $found) {
-            Write-Host "Searching for Jarvis.exe..."
-            Get-ChildItem -Path build -Recurse -Filter "Jarvis.exe" | ForEach-Object {
-              Write-Host "Found: $($_.FullName)"
-              Copy-Item $_.FullName "build\release_package\"
-              $found = $true
-            }
-          }
-          
-          if (-not $found) {
-            Write-Error "Jarvis.exe not found!"
+          if (-not $exe) {
+            Write-Error "Jarvis.exe not found in build!"
+            Get-ChildItem -Path build -Recurse -Filter "*.exe" | Format-Table FullName
             exit 1
           }
           
+          Write-Host "Found exe: $($exe.FullName)"
+          Copy-Item $exe.FullName "build\release_package\"
+          
           # windeployqt
-          $windeployqt = Join-Path $env:Qt6_DIR "bin\windeployqt.exe"
-          if (-not (Test-Path $windeployqt)) {
-            $windeployqt = Join-Path $env:Qt6_DIR "bin\windeployqt6.exe"
+          $wdqt = Join-Path $env:QTDIR "bin\windeployqt.exe"
+          if (-not (Test-Path $wdqt)) {
+            $wdqt = Join-Path $env:QTDIR "bin\windeployqt6.exe"
+          }
+          if (-not (Test-Path $wdqt)) {
+            $wdqt = (Get-Command windeployqt.exe -ErrorAction SilentlyContinue).Source
+          }
+          if (-not (Test-Path $wdqt)) {
+            $wdqt = (Get-Command windeployqt6.exe -ErrorAction SilentlyContinue).Source
           }
           
-          & $windeployqt "build\release_package\Jarvis.exe" `
+          if (-not $wdqt -or -not (Test-Path $wdqt)) {
+            Write-Error "windeployqt not found! QTDIR=$env:QTDIR"
+            exit 1
+          }
+          
+          Write-Host "windeployqt: $wdqt"
+          
+          & $wdqt "build\release_package\Jarvis.exe" `
             --release `
             --no-translations `
             --no-opengl-sw `
@@ -87,11 +125,11 @@ jobs:
             --no-compiler-runtime `
             --dir "build\release_package"
           
-          Write-Host "Release package contents:"
+          Write-Host "=== Package contents ==="
           Get-ChildItem "build\release_package" -Recurse | Format-Table Name, Length
         shell: pwsh
 
-      # === Только при создании тега (релиз) ===
+      # === Только при тегах (релиз) ===
 
       - name: Download VC++ Redistributable
         if: startsWith(github.ref, 'refs/tags/v')
