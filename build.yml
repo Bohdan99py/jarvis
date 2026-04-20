@@ -1,0 +1,184 @@
+name: Build & Release J.A.R.V.I.S.
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  QT_VERSION: '6.8.0'
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: ${{ env.QT_VERSION }}
+        host: windows
+        target: desktop
+        arch: win64_msvc2022_64
+
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v2
+
+    # === Вшиваем API-ключ из GitHub Secrets ===
+    - name: Inject API key
+      if: env.ANTHROPIC_API_KEY != ''
+      env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        $key = $env:ANTHROPIC_API_KEY
+        $xorKey = @(0x4A, 0x41, 0x52, 0x56, 0x49, 0x53, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x13, 0x37, 0x42, 0x69)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($key)
+        $encrypted = @()
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            $encrypted += ($bytes[$i] -bxor $xorKey[$i % $xorKey.Length])
+        }
+
+        # Формируем строки для C++
+        $lines = @()
+        for ($i = 0; $i -lt $encrypted.Length; $i += 12) {
+            $end = [Math]::Min($i + 11, $encrypted.Length - 1)
+            $chunk = $encrypted[$i..$end]
+            $hexChunk = ($chunk | ForEach-Object { '0x{0:X2}' -f $_ }) -join ', '
+            $lines += "    $hexChunk,"
+        }
+        $arrayBody = $lines -join "`n"
+
+        $header = @"
+        #pragma once
+        #include <QString>
+        #include <QByteArray>
+
+        namespace EmbeddedKey {
+
+        static constexpr uint8_t XOR_KEY[] = {
+            0x4A, 0x41, 0x52, 0x56, 0x49, 0x53, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x13, 0x37, 0x42, 0x69
+        };
+        static constexpr int XOR_KEY_LEN = sizeof(XOR_KEY);
+
+        static constexpr uint8_t ENCRYPTED_KEY_DATA[] = {
+        $arrayBody
+        };
+        static constexpr int ENCRYPTED_KEY_SIZE = $($encrypted.Length);
+
+        inline QByteArray xorDecrypt(const uint8_t* data, int size) {
+            QByteArray result(size, '\0');
+            for (int i = 0; i < size; ++i) {
+                result[i] = static_cast<char>(data[i] ^ XOR_KEY[i % XOR_KEY_LEN]);
+            }
+            return result;
+        }
+
+        inline QString decryptApiKey() {
+            if (ENCRYPTED_KEY_SIZE == 0) return QString();
+            QByteArray decrypted = xorDecrypt(ENCRYPTED_KEY_DATA, ENCRYPTED_KEY_SIZE);
+            return QString::fromUtf8(decrypted);
+        }
+
+        inline bool hasEmbeddedKey() { return ENCRYPTED_KEY_SIZE > 0; }
+
+        }
+        "@
+
+        Set-Content -Path "core/embedded_key.h" -Value $header -Encoding UTF8
+        Write-Host "API key injected ($($encrypted.Length) bytes encrypted)"
+      shell: pwsh
+
+    # === Сборка ===
+    - name: Configure CMake
+      run: >
+        cmake -S . -B build
+        -G "Visual Studio 17 2022" -A x64
+        -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+
+    - name: Build Release
+      run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+    # === Подготовка пакета ===
+    - name: Prepare release package
+      run: |
+        mkdir release_package
+        mkdir release_package\plugins
+
+        copy build\bin\JarvisApp.exe release_package\
+        copy build\bin\JarvisCore.dll release_package\
+        copy plugins\plugins.json release_package\plugins\
+
+        if (Test-Path build\bin\JarvisPlugin_*.dll) {
+          copy build\bin\JarvisPlugin_*.dll release_package\plugins\
+        }
+
+        & "${{ env.Qt6_DIR }}\bin\windeployqt.exe" `
+          --release `
+          --no-translations `
+          --no-opengl-sw `
+          --no-system-d3d-compiler `
+          release_package\JarvisApp.exe
+      shell: pwsh
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: jarvis-windows-x64
+        path: release_package/
+
+    # ============================================================
+    # Релиз — только при теге v*
+    # ============================================================
+
+    - name: Prepare update DLLs
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        mkdir update_dlls
+        copy build\bin\JarvisCore.dll update_dlls\
+      shell: cmd
+
+    - name: Create ZIP archive
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: 7z a JARVIS-${{ github.ref_name }}-win64.zip ./release_package/*
+      shell: cmd
+
+    - name: Install Inno Setup
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: choco install innosetup -y --no-progress
+      shell: cmd
+
+    - name: Update installer version
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        $version = "${{ github.ref_name }}".TrimStart("v")
+        $content = Get-Content installer.iss -Raw
+        $content = $content -replace '#define MyAppVersion "2.0.0"', "#define MyAppVersion `"$version`""
+        $content = $content -replace '#define MyAppBuildDir "build\\release_package"', '#define MyAppBuildDir "release_package"'
+        Set-Content installer.iss $content
+      shell: pwsh
+
+    - name: Build installer
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+      shell: cmd
+      continue-on-error: true
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          JARVIS-${{ github.ref_name }}-win64.zip
+          update_dlls/JarvisCore.dll
+          build/installer/JARVIS-Setup-*.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
