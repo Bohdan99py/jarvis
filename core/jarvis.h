@@ -22,6 +22,7 @@ class SessionMemory;
 class ClaudeApi;
 class ActionPredictor;
 class AutoUpdater;
+class ProjectIndexer;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -51,11 +52,12 @@ public:
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
 
-    KeyEmulator*     keyEmulator()     const { return m_keyEmulator; }
-    SessionMemory*   memory()          const { return m_memory; }
-    ClaudeApi*       claudeApi()       const { return m_claudeApi; }
-    ActionPredictor* actionPredictor() const { return m_predictor; }
-    AutoUpdater*     autoUpdater()     const { return m_updater; }
+    KeyEmulator*     keyEmulator()      const { return m_keyEmulator; }
+    SessionMemory*   memory()           const { return m_memory; }
+    ClaudeApi*       claudeApi()        const { return m_claudeApi; }
+    ActionPredictor* actionPredictor()  const { return m_predictor; }
+    AutoUpdater*     autoUpdater()      const { return m_updater; }
+    ProjectIndexer*  projectIndexer()   const { return m_indexer; }
 
 signals:
     void speakingChanged(bool speaking);
@@ -85,15 +87,21 @@ private:
     QString cmdPressKey(const QString& input);
     QString cmdCombo(const QString& input);
 
-    // Новые команды: память и API
+    // Память и API
     QString cmdSetApiKey(const QString& input);
     QString cmdRememberFact(const QString& input);
     QString cmdRecallFact(const QString& input);
     QString cmdShowMemory(const QString& input);
     QString cmdShowStats(const QString& input);
 
-    // Команда обновления
+    // Обновление
     QString cmdCheckUpdate(const QString& input);
+
+    // Индексатор проекта
+    QString cmdIndexProject(const QString& input);
+    QString cmdFindSymbol(const QString& input);
+    QString cmdProjectMap(const QString& input);
+    QString cmdGrep(const QString& input);
 
     // Обработка ответа Claude API (парсинг [CMD:...])
     void handleClaudeResponse(const QString& response);
@@ -108,6 +116,7 @@ private:
     ClaudeApi*       m_claudeApi   = nullptr;
     ActionPredictor* m_predictor   = nullptr;
     AutoUpdater*     m_updater     = nullptr;
+    ProjectIndexer*  m_indexer     = nullptr;
 
     std::atomic<bool> m_speaking{false};
     QMutex m_ttsMutex;

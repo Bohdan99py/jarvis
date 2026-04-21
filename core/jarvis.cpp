@@ -8,6 +8,7 @@
 #include "claude_api.h"
 #include "action_predictor.h"
 #include "auto_updater.h"
+#include "project_indexer.h"
 
 #include <sapi.h>
 #include <shellapi.h>
@@ -20,6 +21,8 @@
 #include <QMap>
 #include <QRegularExpression>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 
 // Дефайны из CMake
 #ifndef JARVIS_VERSION
@@ -43,6 +46,7 @@ Jarvis::Jarvis(QObject* parent)
     m_claudeApi   = new ClaudeApi(m_memory, this);
     m_predictor   = new ActionPredictor(m_memory, this);
     m_keyEmulator = new KeyEmulator(this);
+    m_indexer     = new ProjectIndexer(this);
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -58,16 +62,13 @@ Jarvis::Jarvis(QObject* parent)
     connect(m_claudeApi, &ClaudeApi::apiError, this, [this](const QString& err) {
         emit asyncResponseError(err);
     });
-
-    // Проверяем обновления при запуске (тихо, без уведомления если нет обновлений)
-    m_updater->checkForUpdates(true);
 }
 
 Jarvis::~Jarvis()
 {
-    // Сохраняем паттерны при завершении
     m_predictor->savePatterns();
     m_memory->savePersistent();
+    m_indexer->saveIndex();
 }
 
 // ============================================================
@@ -76,7 +77,7 @@ Jarvis::~Jarvis()
 
 void Jarvis::registerCommands()
 {
-    // --- Управление API-ключом ---
+    // --- API-ключ ---
     m_registry.registerCommand(
         {QStringLiteral("apikey "), QStringLiteral("ключ ")},
         [this](const QString& s) { return cmdSetApiKey(s); },
@@ -90,6 +91,37 @@ void Jarvis::registerCommands()
          QStringLiteral("update"), QStringLiteral("версия"), QStringLiteral("version")},
         [this](const QString& s) { return cmdCheckUpdate(s); },
         QStringLiteral("обновление — проверить обновления")
+    );
+
+    // --- Индексатор проекта ---
+    m_registry.registerCommand(
+        {QStringLiteral("индекс "), QStringLiteral("index "),
+         QStringLiteral("проект "), QStringLiteral("project ")},
+        [this](const QString& s) { return cmdIndexProject(s); },
+        QStringLiteral("индекс <путь> — индексировать C++ проект"),
+        true
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("найди символ "), QStringLiteral("find "),
+         QStringLiteral("символ "), QStringLiteral("symbol ")},
+        [this](const QString& s) { return cmdFindSymbol(s); },
+        QStringLiteral("найди символ <имя> — найти класс/функцию в проекте"),
+        true
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("карта"), QStringLiteral("map"),
+         QStringLiteral("структура"), QStringLiteral("structure")},
+        [this](const QString& s) { return cmdProjectMap(s); },
+        QStringLiteral("карта — карта проекта (классы, функции)")
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("grep "), QStringLiteral("поиск ")},
+        [this](const QString& s) { return cmdGrep(s); },
+        QStringLiteral("grep <текст> — поиск текста в файлах проекта"),
+        true
     );
 
     // --- Память ---
@@ -372,7 +404,6 @@ QString Jarvis::processCommand(const QString& input)
         return QStringLiteral("Введите команду или напишите «помощь».");
     }
 
-    // Сохраняем в историю
     m_memory->addMessage(QStringLiteral("user"), s);
 
     // 1. Пробуем локальные команды
@@ -381,7 +412,6 @@ QString Jarvis::processCommand(const QString& input)
         m_memory->addMessage(QStringLiteral("assistant"), result.response);
         m_memory->updateContext(s, result.response);
 
-        // Предугадывание: записываем и предлагаем
         m_predictor->recordSequence(s);
         auto suggestion = m_predictor->suggestAfter(s);
         if (suggestion.isValid() && suggestion.confidence >= 0.5) {
@@ -393,14 +423,52 @@ QString Jarvis::processCommand(const QString& input)
 
     // 2. Если есть API-ключ — отправляем в Claude API
     if (m_claudeApi->shouldUseApi(s)) {
-        m_claudeApi->sendMessage(s, [this, s](bool success, const QString& response) {
+        // Если есть индекс проекта — добавляем контекст
+        QString enrichedMessage = s;
+
+        if (m_indexer->fileCount() > 0) {
+            // Ищем релевантные символы по ключевым словам запроса
+            QStringList words = s.split(QRegularExpression(QStringLiteral("\\s+")),
+                                        Qt::SkipEmptyParts);
+            QVector<CodeSymbol> relevantSymbols;
+
+            for (const auto& word : words) {
+                if (word.length() < 3) continue; // Пропускаем короткие слова
+                auto found = m_indexer->findSymbol(word);
+                for (const auto& sym : found) {
+                    if (relevantSymbols.size() >= 5) break;
+                    bool duplicate = false;
+                    for (const auto& existing : relevantSymbols) {
+                        if (existing.name == sym.name && existing.filePath == sym.filePath) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) relevantSymbols.append(sym);
+                }
+            }
+
+            // Если нашли релевантный код — добавляем к запросу
+            if (!relevantSymbols.isEmpty()) {
+                QString codeContext = QStringLiteral("\n\n--- Контекст из проекта ---\n");
+                for (const auto& sym : relevantSymbols) {
+                    QString snippet = m_indexer->getCodeSnippet(sym, 5);
+                    if (!snippet.isEmpty()) {
+                        codeContext += QStringLiteral("// ") + sym.filePath
+                                    + QStringLiteral(" — ") + sym.kindToString()
+                                    + QStringLiteral(" ") + sym.name + QStringLiteral("\n");
+                        codeContext += snippet + QStringLiteral("\n");
+                    }
+                }
+                enrichedMessage = s + codeContext;
+            }
+        }
+
+        m_claudeApi->sendMessage(enrichedMessage, [this, s](bool success, const QString& response) {
             if (success) {
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
-
-                // Проверяем, есть ли команда в ответе Claude
                 handleClaudeResponse(response);
-
                 m_predictor->recordSequence(s);
                 emit asyncResponseReady(response);
             } else {
@@ -408,10 +476,10 @@ QString Jarvis::processCommand(const QString& input)
             }
         });
 
-        return QString(); // Пустая строка = ответ придёт асинхронно
+        return QString();
     }
 
-    // 3. Fallback без API
+    // 3. Fallback
     QString fallback = QStringLiteral(
         "Не понял команду. Напишите «помощь» для списка команд.\n"
         "Для свободного диалога установите API-ключ: apikey <ваш-ключ>"
@@ -426,7 +494,6 @@ QString Jarvis::processCommand(const QString& input)
 
 void Jarvis::handleClaudeResponse(const QString& response)
 {
-    // Ищем паттерн [CMD:команда] в ответе Claude
     static const QRegularExpression cmdPattern(
         QStringLiteral(R"(\[CMD:(.+?)\])"));
 
@@ -434,12 +501,7 @@ void Jarvis::handleClaudeResponse(const QString& response)
     while (it.hasNext()) {
         QRegularExpressionMatch match = it.next();
         QString cmd = match.captured(1).trimmed();
-
-        // Выполняем команду через реестр
-        auto result = m_registry.tryExecute(cmd);
-        if (result.matched) {
-            // Команда уже выполнена, UI покажет ответ Claude
-        }
+        m_registry.tryExecute(cmd);
     }
 }
 
@@ -522,7 +584,6 @@ QString Jarvis::cmdShowStats(const QString&)
         return QStringLiteral("Статистика пуста — пока недостаточно данных.");
     }
 
-    // Сортируем по частоте
     QVector<QPair<QString, int>> sorted;
     for (auto it = stats.begin(); it != stats.end(); ++it) {
         sorted.append({it.key(), it.value().toInt()});
@@ -542,7 +603,6 @@ QString Jarvis::cmdShowStats(const QString&)
           + QString::number(m_memory->taskContext().commandCount)
           + QStringLiteral(" команд");
 
-    // Предложения предиктора
     auto suggestions = m_predictor->suggest(3);
     if (!suggestions.isEmpty()) {
         text += QStringLiteral("\n\nПредложения:");
@@ -557,7 +617,7 @@ QString Jarvis::cmdShowStats(const QString&)
 }
 
 // ============================================================
-// Команда проверки обновлений
+// Обновление
 // ============================================================
 
 QString Jarvis::cmdCheckUpdate(const QString&)
@@ -566,6 +626,144 @@ QString Jarvis::cmdCheckUpdate(const QString&)
     return QStringLiteral("Текущая версия: ")
            + QCoreApplication::applicationVersion()
            + QStringLiteral("\nПроверяю обновления...");
+}
+
+// ============================================================
+// Индексатор проекта
+// ============================================================
+
+QString Jarvis::cmdIndexProject(const QString& input)
+{
+    QString path = extractArg(input, {QStringLiteral("индекс "),
+                                       QStringLiteral("index "),
+                                       QStringLiteral("проект "),
+                                       QStringLiteral("project ")});
+    if (path.isEmpty()) {
+        if (m_indexer->projectRoot().isEmpty()) {
+            return QStringLiteral("Укажите путь к проекту:\n"
+                                  "индекс C:\\Projects\\MyGame\n\n"
+                                  "После индексации доступны команды:\n"
+                                  "• карта — структура проекта\n"
+                                  "• найди символ <имя> — поиск функции/класса\n"
+                                  "• grep <текст> — поиск в файлах");
+        }
+        // Переиндексация текущего проекта
+        m_indexer->indexProject();
+        return QStringLiteral("Переиндексирую ") + m_indexer->projectRoot()
+             + QStringLiteral("...\nФайлов: ") + QString::number(m_indexer->fileCount())
+             + QStringLiteral(", Символов: ") + QString::number(m_indexer->symbolCount());
+    }
+
+    // Нормализуем путь
+    path = path.replace(QChar('/'), QChar('\\'));
+
+    if (!QDir(path).exists()) {
+        return QStringLiteral("Папка не найдена: ") + path;
+    }
+
+    m_indexer->setProjectRoot(path);
+    m_indexer->indexProject();
+    m_indexer->enableFileWatcher(true);
+
+    return QStringLiteral("Проект проиндексирован: ") + path
+         + QStringLiteral("\nФайлов: ") + QString::number(m_indexer->fileCount())
+         + QStringLiteral(", Символов: ") + QString::number(m_indexer->symbolCount())
+         + QStringLiteral("\n\nСлежение за изменениями включено.")
+         + QStringLiteral("\nТеперь при вопросах к Claude я автоматически "
+                          "найду нужный код и отправлю только его.");
+}
+
+QString Jarvis::cmdFindSymbol(const QString& input)
+{
+    QString name = extractArg(input, {QStringLiteral("найди символ "),
+                                       QStringLiteral("find "),
+                                       QStringLiteral("символ "),
+                                       QStringLiteral("symbol ")});
+    if (name.isEmpty()) {
+        return QStringLiteral("Укажите имя: найди символ SpawnEnemy");
+    }
+
+    if (m_indexer->fileCount() == 0) {
+        return QStringLiteral("Проект не проиндексирован. Используйте: индекс <путь>");
+    }
+
+    auto results = m_indexer->findSymbol(name);
+    if (results.isEmpty()) {
+        return QStringLiteral("Символ «") + name + QStringLiteral("» не найден.");
+    }
+
+    QString text = QStringLiteral("Найдено ") + QString::number(results.size())
+                 + QStringLiteral(" результатов:\n\n");
+
+    int shown = 0;
+    for (const auto& sym : results) {
+        text += QStringLiteral("• ") + sym.kindToString() + QStringLiteral(" ");
+        if (!sym.parentClass.isEmpty()) {
+            text += sym.parentClass + QStringLiteral("::");
+        }
+        text += sym.name;
+        text += QStringLiteral("\n  Файл: ") + m_indexer->projectRoot()
+              + QStringLiteral("/") + sym.filePath;
+        text += QStringLiteral(", строка ") + QString::number(sym.lineStart);
+        if (!sym.brief.isEmpty()) {
+            text += QStringLiteral("\n  ") + sym.brief;
+        }
+        text += QStringLiteral("\n");
+
+        if (++shown >= 10) {
+            text += QStringLiteral("\n... и ещё ")
+                  + QString::number(results.size() - 10) + QStringLiteral(" результатов");
+            break;
+        }
+    }
+
+    return text.trimmed();
+}
+
+QString Jarvis::cmdProjectMap(const QString&)
+{
+    if (m_indexer->fileCount() == 0) {
+        return QStringLiteral("Проект не проиндексирован. Используйте: индекс <путь>");
+    }
+
+    QString map = m_indexer->projectMap();
+
+    // Ограничиваем длину вывода
+    if (map.length() > 3000) {
+        map = map.left(3000) + QStringLiteral("\n\n... (обрезано, всего ")
+            + QString::number(m_indexer->fileCount()) + QStringLiteral(" файлов, ")
+            + QString::number(m_indexer->symbolCount()) + QStringLiteral(" символов)");
+    }
+
+    return map;
+}
+
+QString Jarvis::cmdGrep(const QString& input)
+{
+    QString pattern = extractArg(input, {QStringLiteral("grep "),
+                                          QStringLiteral("поиск ")});
+    if (pattern.isEmpty()) {
+        return QStringLiteral("Укажите текст для поиска: grep SpawnEnemy");
+    }
+
+    if (m_indexer->fileCount() == 0) {
+        return QStringLiteral("Проект не проиндексирован. Используйте: индекс <путь>");
+    }
+
+    auto results = m_indexer->grep(pattern, 20);
+    if (results.isEmpty()) {
+        return QStringLiteral("Не найдено: «") + pattern + QStringLiteral("»");
+    }
+
+    QString text = QStringLiteral("Найдено ") + QString::number(results.size())
+                 + QStringLiteral(" совпадений:\n\n");
+
+    for (const auto& r : results) {
+        text += r.filePath + QStringLiteral(":") + QString::number(r.line)
+              + QStringLiteral("  ") + r.lineText + QStringLiteral("\n");
+    }
+
+    return text.trimmed();
 }
 
 // ============================================================
@@ -624,6 +822,13 @@ QString Jarvis::cmdHelp(const QString&)
     help += QStringLiteral("\n\n— Свободный диалог —\n"
                            "Любой вопрос → отправляется в Claude API\n"
                            "(требуется apikey)");
+    if (m_indexer->fileCount() > 0) {
+        help += QStringLiteral("\n\n— Проект «")
+              + QFileInfo(m_indexer->projectRoot()).fileName()
+              + QStringLiteral("» проиндексирован —\n")
+              + QString::number(m_indexer->fileCount()) + QStringLiteral(" файлов, ")
+              + QString::number(m_indexer->symbolCount()) + QStringLiteral(" символов");
+    }
     return help;
 }
 

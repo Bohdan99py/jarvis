@@ -8,21 +8,14 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-# Путь к Qt — CLion/Visual Studio найдут автоматически,
-# или передай: cmake -DCMAKE_PREFIX_PATH="C:/Qt/6.11.0/msvc2022_64" ..
 if(NOT DEFINED CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "C:/Qt/6.11.0/msvc2022_64")
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
-# --- GitHub-репозиторий для автообновления ---
 set(GITHUB_USER "Bohdan99py" CACHE STRING "GitHub username")
 set(GITHUB_REPO "jarvis"     CACHE STRING "GitHub repository name")
-
-# ============================================================
-# Все исходники — один exe, без DLL, без плагинов
-# ============================================================
 
 add_executable(Jarvis WIN32
         # --- app/ ---
@@ -46,10 +39,11 @@ add_executable(Jarvis WIN32
         core/action_predictor.cpp
         core/auto_updater.h
         core/auto_updater.cpp
+        core/project_indexer.h
+        core/project_indexer.cpp
         core/embedded_key.h
 )
 
-# Чтобы #include "jarvis.h" работал из app/
 target_include_directories(Jarvis PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/core
         ${CMAKE_CURRENT_SOURCE_DIR}/app
@@ -65,7 +59,6 @@ target_link_libraries(Jarvis PRIVATE
         shell32
 )
 
-# Версия и GitHub info → в код через дефайны
 target_compile_definitions(Jarvis PRIVATE
         UNICODE
         _UNICODE
