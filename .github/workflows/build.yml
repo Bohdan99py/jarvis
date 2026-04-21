@@ -30,6 +30,15 @@ jobs:
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
+                - name: Inject version from tag
+                if: startsWith(github.ref, 'refs/tags/v')
+                run: |
+                  $version = "${{ github.ref_name }}".TrimStart("v")
+                  $content = Get-Content CMakeLists.txt -Raw
+                  $content = $content -replace 'project\(Jarvis VERSION \d+\.\d+\.\d+', "project(Jarvis VERSION $version"
+                  Set-Content CMakeLists.txt $content
+                  Write-Host "Version set to: $version"
+                shell: pwsh
 
       - name: Find Qt path
         id: qt_path
