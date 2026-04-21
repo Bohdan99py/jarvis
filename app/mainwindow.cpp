@@ -8,6 +8,7 @@
 #include "virtual_keyboard.h"
 #include "claude_api.h"
 #include "auto_updater.h"
+#include "project_indexer.h"
 
 #include <QApplication>
 #include <QVBoxLayout>
@@ -25,6 +26,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QFileDialog>
+#include <QDir>
 
 // ============================================================
 // Конструктор
@@ -71,7 +73,6 @@ MainWindow::MainWindow(QWidget* parent)
                          const QUrl& downloadUrl) {
         Q_UNUSED(releaseNotes)
         Q_UNUSED(downloadUrl)
-        // Показываем панель обновления (не диалог — менее навязчиво)
         showUpdateBar(newVersion);
     });
 
@@ -132,6 +133,16 @@ MainWindow::MainWindow(QWidget* parent)
                   QStringLiteral("Введите команду или «помощь». "
                                  "Для AI-режима: apikey <ваш-ключ>"),
                   Theme::LogColors::jarvis);
+    }
+
+    // Показываем статус индексатора если проект уже загружен из кэша
+    if (m_jarvis->projectIndexer()->fileCount() > 0) {
+        appendLog(QStringLiteral("JARVIS"),
+                  QStringLiteral("Проект загружен из кэша: ")
+                  + m_jarvis->projectIndexer()->projectRoot()
+                  + QStringLiteral(" (") + QString::number(m_jarvis->projectIndexer()->fileCount())
+                  + QStringLiteral(" файлов)"),
+                  Theme::LogColors::system);
     }
 
     m_input->setFocus();
@@ -219,6 +230,93 @@ void MainWindow::buildMenuBar()
     auto* actKeyboard = settingsMenu->addAction(QStringLiteral("Виртуальная клавиатура"));
     connect(actKeyboard, &QAction::triggered, this, &MainWindow::toggleKeyboard);
 
+    // --- Проект ---
+    auto* projectMenu = menuBar->addMenu(QStringLiteral("Проект"));
+
+    auto* actIndexProject = projectMenu->addAction(QStringLiteral("Индексировать папку..."));
+    connect(actIndexProject, &QAction::triggered, this, [this]() {
+        // Начальная папка — последний проект или домашняя
+        QString startDir = m_jarvis->projectIndexer()->projectRoot();
+        if (startDir.isEmpty()) startDir = QDir::homePath();
+
+        QString dir = QFileDialog::getExistingDirectory(this,
+            QStringLiteral("Выберите папку проекта"),
+            startDir,
+            QFileDialog::ShowDirsOnly);
+        if (dir.isEmpty()) return;
+
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Индексирую: ") + dir + QStringLiteral("..."),
+                  Theme::LogColors::system);
+
+        m_jarvis->projectIndexer()->setProjectRoot(dir);
+        m_jarvis->projectIndexer()->indexProject();
+        m_jarvis->projectIndexer()->enableFileWatcher(true);
+
+        appendLog(QStringLiteral("JARVIS"),
+                  QStringLiteral("Проект проиндексирован!\n"
+                                 "Файлов: ") + QString::number(m_jarvis->projectIndexer()->fileCount())
+                  + QStringLiteral(", Символов: ") + QString::number(m_jarvis->projectIndexer()->symbolCount())
+                  + QStringLiteral("\nСлежение за изменениями включено.\n"
+                                   "Теперь при вопросах к Claude я автоматически найду нужный код."),
+                  Theme::LogColors::jarvis);
+    });
+
+    auto* actProjectMap = projectMenu->addAction(QStringLiteral("Карта проекта"));
+    connect(actProjectMap, &QAction::triggered, this, [this]() {
+        if (m_jarvis->projectIndexer()->fileCount() == 0) {
+            appendLog(QStringLiteral("СИСТЕМА"),
+                      QStringLiteral("Проект не проиндексирован. Используйте Проект → Индексировать папку."),
+                      Theme::LogColors::error);
+            return;
+        }
+        m_input->setText(QStringLiteral("карта"));
+        onSend();
+    });
+
+    auto* actReindex = projectMenu->addAction(QStringLiteral("Переиндексировать"));
+    connect(actReindex, &QAction::triggered, this, [this]() {
+        if (m_jarvis->projectIndexer()->projectRoot().isEmpty()) {
+            appendLog(QStringLiteral("СИСТЕМА"),
+                      QStringLiteral("Сначала выберите папку: Проект → Индексировать папку."),
+                      Theme::LogColors::error);
+            return;
+        }
+        m_jarvis->projectIndexer()->indexProject();
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Переиндексировано: ")
+                  + QString::number(m_jarvis->projectIndexer()->fileCount())
+                  + QStringLiteral(" файлов, ")
+                  + QString::number(m_jarvis->projectIndexer()->symbolCount())
+                  + QStringLiteral(" символов."),
+                  Theme::LogColors::system);
+    });
+
+    projectMenu->addSeparator();
+
+    auto* actProjectInfo = projectMenu->addAction(QStringLiteral("Информация о проекте"));
+    connect(actProjectInfo, &QAction::triggered, this, [this]() {
+        auto* idx = m_jarvis->projectIndexer();
+        if (idx->fileCount() == 0) {
+            appendLog(QStringLiteral("СИСТЕМА"),
+                      QStringLiteral("Проект не проиндексирован."),
+                      Theme::LogColors::error);
+            return;
+        }
+
+        QString info = QStringLiteral("Проект: ") + idx->projectRoot()
+                     + QStringLiteral("\nФайлов: ") + QString::number(idx->fileCount())
+                     + QStringLiteral("\nСимволов: ") + QString::number(idx->symbolCount())
+                     + QStringLiteral("\n\nКлассы:\n");
+
+        QStringList classes = idx->allClasses();
+        for (const auto& cls : classes) {
+            info += QStringLiteral("  • ") + cls + QStringLiteral("\n");
+        }
+
+        appendLog(QStringLiteral("JARVIS"), info.trimmed(), Theme::LogColors::jarvis);
+    });
+
     // --- Обновление ---
     auto* updateMenu = menuBar->addMenu(QStringLiteral("Обновление"));
 
@@ -304,7 +402,6 @@ void MainWindow::onSend()
 
     // Вайбкодинг: добавляем системный префикс к запросу
     if (m_vibeCodingMode && m_jarvis->claudeApi()->hasApiKey()) {
-        // Проверяем, не является ли это локальной командой
         if (m_jarvis->claudeApi()->shouldUseApi(text)) {
             text = QStringLiteral(
                 "Ты — вайбкодинг-ассистент. Пользователь описывает что хочет создать. "
@@ -314,8 +411,7 @@ void MainWindow::onSend()
         }
     }
 
-    appendLog(QStringLiteral("ВЫ"), m_input->placeholderText().isEmpty() ? text : text.left(200),
-              Theme::LogColors::user);
+    appendLog(QStringLiteral("ВЫ"), text.left(200), Theme::LogColors::user);
 
     QString response = m_jarvis->processCommand(text);
 
@@ -518,7 +614,7 @@ void MainWindow::buildUI()
     sep->setFixedHeight(1);
     vbox->addWidget(sep);
 
-    // === Панель обновления (скрыта по умолчанию) ===
+    // === Панель обновления (скрыта) ===
     m_updateBar = new QWidget(this);
     m_updateBar->setVisible(false);
     m_updateBar->setStyleSheet(
@@ -562,7 +658,6 @@ void MainWindow::buildUI()
 
     vbox->addWidget(m_updateBar);
 
-    // Кнопка "Обновить"
     connect(m_updateBtn, &QPushButton::clicked, this, [this]() {
         m_updateBtn->setVisible(false);
         m_updateProgress->setVisible(true);
@@ -572,7 +667,6 @@ void MainWindow::buildUI()
         m_jarvis->autoUpdater()->downloadPendingUpdate();
     });
 
-    // Закрыть панель
     connect(m_updateDismiss, &QPushButton::clicked, this, [this]() {
         hideUpdateBar();
     });
@@ -584,7 +678,7 @@ void MainWindow::buildUI()
     m_log->setFocusPolicy(Qt::NoFocus);
     vbox->addWidget(m_log, 1);
 
-    // === Панель предложений (скрыта по умолчанию) ===
+    // === Панель предложений (скрыта) ===
     m_suggestionBar = new QWidget(this);
     m_suggestionBar->setVisible(false);
     m_suggestionBar->setStyleSheet(
@@ -648,9 +742,7 @@ void MainWindow::buildUI()
     // === Нижняя панель ===
     auto* bottomBar = new QHBoxLayout();
 
-    // Индикатор режима
     auto* modeLabel = new QLabel(this);
-    modeLabel->setObjectName(QStringLiteral("modeLabel"));
     modeLabel->setStyleSheet(
         QStringLiteral("color: #2a4a60; font-size: 11px; border: none; background: transparent;"));
     modeLabel->setText(QStringLiteral("v") + QCoreApplication::applicationVersion());
