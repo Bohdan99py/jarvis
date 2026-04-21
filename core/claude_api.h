@@ -55,7 +55,7 @@ private:
     SessionMemory* m_memory = nullptr;
 
     QString m_apiKey;
-    QString m_model = QStringLiteral("claude-sonnet-4-20250514");
+    QString m_model = QStringLiteral("claude-sonnet-4-6-20250827");
     bool m_requesting = false;
     bool m_usingEmbeddedKey = false;  // true = используется вшитый ключ
 
