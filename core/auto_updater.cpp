@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QCoreApplication>
+#include <QTimer>
 
 AutoUpdater::AutoUpdater(const QString& currentVersion,
                          const QString& githubUser,
@@ -82,7 +83,6 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
     QUrl installerUrl;
     QJsonArray assets = release[QStringLiteral("assets")].toArray();
 
-    // Сначала ищем .exe установщик
     for (const auto& asset : assets) {
         QJsonObject obj = asset.toObject();
         QString name = obj[QStringLiteral("name")].toString();
@@ -93,7 +93,6 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
         }
     }
 
-    // Fallback: .zip
     if (installerUrl.isEmpty()) {
         for (const auto& asset : assets) {
             QJsonObject obj = asset.toObject();
@@ -112,7 +111,6 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
         return;
     }
 
-    // Сохраняем для кнопки "Обновить" в интерфейсе
     m_pendingVersion = remoteVersion;
     m_pendingUrl     = installerUrl;
     m_pendingNotes   = body;
@@ -174,23 +172,70 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
     QString fileName = reply->url().fileName();
     if (fileName.isEmpty()) fileName = QStringLiteral("JARVIS-Setup.exe");
 
-    QString filePath = m_downloadPath + QDir::separator() + fileName;
+    QString installerPath = m_downloadPath + QDir::separator() + fileName;
 
-    QFile file(filePath);
+    QFile file(installerPath);
     if (!file.open(QIODevice::WriteOnly)) {
-        emit updateError(QStringLiteral("Не удалось сохранить: ") + filePath);
+        emit updateError(QStringLiteral("Не удалось сохранить: ") + installerPath);
         return;
     }
     file.write(data);
     file.close();
 
-    emit downloadFinished(filePath);
+    emit downloadFinished(installerPath);
 
-    // Запускаем установщик и закрываем приложение
-    if (filePath.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive)) {
-        QProcess::startDetached(filePath, {QStringLiteral("/SILENT"),
-                                           QStringLiteral("/CLOSEAPPLICATIONS")});
-        QCoreApplication::quit();
+    if (!installerPath.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
+        return;
+
+    // Создаём bat-скрипт который:
+    //   1. Ждёт закрытия Jarvis.exe (до 15 секунд)
+    //   2. Запускает установщик в тихом режиме
+    //   3. Удаляет себя
+    QString batPath = m_downloadPath + QDir::separator() + QStringLiteral("jarvis_update.bat");
+
+    QFile bat(batPath);
+    if (bat.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QString script = QStringLiteral(
+            "@echo off\r\n"
+            "echo Waiting for JARVIS to close...\r\n"
+            "set /a TRIES=0\r\n"
+            ":WAIT_LOOP\r\n"
+            "tasklist /FI \"IMAGENAME eq Jarvis.exe\" 2>NUL | find /I /N \"Jarvis.exe\" >NUL\r\n"
+            "if \"%ERRORLEVEL%\"==\"0\" (\r\n"
+            "    set /a TRIES+=1\r\n"
+            "    if %TRIES% GEQ 30 (\r\n"
+            "        echo Timeout. Killing JARVIS...\r\n"
+            "        taskkill /F /IM Jarvis.exe >NUL 2>&1\r\n"
+            "        timeout /t 2 /nobreak >NUL\r\n"
+            "        goto :RUN_SETUP\r\n"
+            "    )\r\n"
+            "    timeout /t 1 /nobreak >NUL\r\n"
+            "    goto :WAIT_LOOP\r\n"
+            ")\r\n"
+            ":RUN_SETUP\r\n"
+            "echo Starting installer...\r\n"
+            "start \"\" \"%1\" /SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS\r\n"
+            "timeout /t 3 /nobreak >NUL\r\n"
+            "del \"%~f0\"\r\n"
+        ).arg(installerPath);
+
+        bat.write(script.toLocal8Bit());
+        bat.close();
+
+        // Запускаем bat скрытно (без окна)
+        QProcess::startDetached(
+            QStringLiteral("cmd.exe"),
+            {QStringLiteral("/c"), QStringLiteral("start"), QStringLiteral("/min"),
+             QStringLiteral("\"JARVIS Update\""), batPath}
+        );
+
+        // Закрываем JARVIS через 500мс (даём bat-скрипту стартовать)
+        QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+    } else {
+        // Fallback: запускаем установщик напрямую
+        QProcess::startDetached(installerPath, {QStringLiteral("/SILENT"),
+                                                QStringLiteral("/CLOSEAPPLICATIONS")});
+        QTimer::singleShot(500, qApp, &QCoreApplication::quit);
     }
 }
 
