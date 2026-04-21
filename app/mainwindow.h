@@ -10,6 +10,8 @@
 #include <QLabel>
 #include <QTimer>
 #include <QPropertyAnimation>
+#include <QMenuBar>
+#include <QProgressBar>
 
 class Jarvis;
 class VirtualKeyboardWidget;
@@ -39,8 +41,13 @@ private slots:
 
 private:
     void buildUI();
+    void buildMenuBar();
     void appendLog(const QString& who, const QString& text, const QString& color);
     void setThinkingState(bool thinking);
+
+    // Обновление UI
+    void showUpdateBar(const QString& version);
+    void hideUpdateBar();
 
     Jarvis*                 m_jarvis     = nullptr;
     QTextEdit*              m_log        = nullptr;
@@ -60,4 +67,14 @@ private:
     QLabel*                 m_suggestionText = nullptr;
     QPushButton*            m_suggestionBtn  = nullptr;
     QString                 m_pendingSuggestionAction;
+
+    // Панель обновления
+    QWidget*                m_updateBar       = nullptr;
+    QLabel*                 m_updateLabel     = nullptr;
+    QPushButton*            m_updateBtn       = nullptr;
+    QPushButton*            m_updateDismiss   = nullptr;
+    QProgressBar*           m_updateProgress  = nullptr;
+
+    // Вайбкодинг
+    bool                    m_vibeCodingMode  = false;
 };

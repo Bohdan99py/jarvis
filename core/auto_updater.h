@@ -20,31 +20,27 @@ public:
                          const QString& githubRepo,
                          QObject* parent = nullptr);
 
-    // Проверить наличие обновлений (асинхронно)
     void checkForUpdates(bool silent = true);
-
-    // Скачать и установить обновление
     void downloadAndInstall(const QUrl& installerUrl);
 
-    // Текущая версия
     QString currentVersion() const { return m_currentVersion; }
 
+    // Последнее найденное обновление (сохраняется если пользователь нажал "Нет")
+    bool    hasPendingUpdate() const { return !m_pendingUrl.isEmpty(); }
+    QString pendingVersion()   const { return m_pendingVersion; }
+    QUrl    pendingUrl()       const { return m_pendingUrl; }
+    QString pendingNotes()     const { return m_pendingNotes; }
+
+    // Скачать отложенное обновление
+    void downloadPendingUpdate();
+
 signals:
-    // Найдено обновление
     void updateAvailable(const QString& newVersion,
                          const QString& releaseNotes,
                          const QUrl& downloadUrl);
-
-    // Обновлений нет (только если silent=false)
     void noUpdateAvailable();
-
-    // Прогресс скачивания (0-100)
     void downloadProgress(int percent);
-
-    // Скачивание завершено, готово к установке
     void downloadFinished(const QString& installerPath);
-
-    // Ошибка
     void updateError(const QString& error);
 
 private slots:
@@ -52,7 +48,6 @@ private slots:
     void onDownloadFinished(QNetworkReply* reply);
 
 private:
-    // Сравнение версий: возвращает true если remote > current
     bool isNewerVersion(const QString& remote, const QString& current) const;
 
     QNetworkAccessManager* m_network = nullptr;
@@ -60,6 +55,11 @@ private:
     QString m_githubUser;
     QString m_githubRepo;
     QString m_downloadPath;
+
+    // Отложенное обновление
+    QString m_pendingVersion;
+    QUrl    m_pendingUrl;
+    QString m_pendingNotes;
 
     QNetworkReply* m_downloadReply = nullptr;
 };
