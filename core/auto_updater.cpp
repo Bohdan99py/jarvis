@@ -4,6 +4,12 @@
 
 #include "auto_updater.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <shellapi.h>
+
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -13,7 +19,6 @@
 #include <QFile>
 #include <QDir>
 #include <QStandardPaths>
-#include <QProcess>
 #include <QCoreApplication>
 #include <QTimer>
 
@@ -174,17 +179,31 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
     if (!installerPath.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
         return;
 
-    // Запускаем установщик напрямую (обычный режим с визардом)
-    // Inno Setup сам умеет закрывать приложение через CloseApplications
-    bool launched = QProcess::startDetached(installerPath, {});
+    // Используем ShellExecuteW вместо QProcess::startDetached
+    // Это ВАЖНО: ShellExecuteW показывает диалог Windows SmartScreen
+    // ("Windows защитил ваш ПК → Всё равно запустить")
+    // QProcess::startDetached тихо блокируется SmartScreen без окна
 
-    if (launched) {
-        // Закрываем JARVIS через 2 секунды — установщик уже запущен
+    std::wstring wPath = installerPath.toStdWString();
+
+    HINSTANCE result = ShellExecuteW(
+        nullptr,            // hwnd
+        L"open",            // операция
+        wPath.c_str(),      // путь к exe
+        nullptr,            // без аргументов — покажет визард
+        nullptr,            // рабочая директория
+        SW_SHOWNORMAL       // показать окно
+    );
+
+    // ShellExecuteW возвращает > 32 при успехе
+    if (reinterpret_cast<intptr_t>(result) > 32) {
+        // Установщик запущен — закрываем JARVIS через 2 секунды
         QTimer::singleShot(2000, qApp, []() {
             QCoreApplication::exit(0);
         });
     } else {
-        emit updateError(QStringLiteral("Не удалось запустить установщик: ") + installerPath);
+        emit updateError(QStringLiteral("Не удалось запустить установщик.\n"
+                                        "Попробуйте вручную: ") + installerPath);
     }
 }
 
