@@ -30,10 +30,6 @@ AutoUpdater::AutoUpdater(const QString& currentVersion,
     m_downloadPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
 }
 
-// ============================================================
-// Проверка обновлений
-// ============================================================
-
 void AutoUpdater::checkForUpdates(bool silent)
 {
     QString url = QStringLiteral("https://api.github.com/repos/%1/%2/releases/latest")
@@ -79,7 +75,6 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
         return;
     }
 
-    // Ищем установщик в assets
     QUrl installerUrl;
     QJsonArray assets = release[QStringLiteral("assets")].toArray();
 
@@ -118,19 +113,11 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
     emit updateAvailable(remoteVersion, body, installerUrl);
 }
 
-// ============================================================
-// Скачивание отложенного обновления
-// ============================================================
-
 void AutoUpdater::downloadPendingUpdate()
 {
     if (m_pendingUrl.isEmpty()) return;
     downloadAndInstall(m_pendingUrl);
 }
-
-// ============================================================
-// Скачивание и установка
-// ============================================================
 
 void AutoUpdater::downloadAndInstall(const QUrl& installerUrl)
 {
@@ -187,61 +174,19 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
     if (!installerPath.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
         return;
 
-    // Создаём bat-скрипт который:
-    //   1. Ждёт закрытия Jarvis.exe (до 15 секунд)
-    //   2. Запускает установщик в тихом режиме
-    //   3. Удаляет себя
-    QString batPath = m_downloadPath + QDir::separator() + QStringLiteral("jarvis_update.bat");
+    // Запускаем установщик напрямую (обычный режим с визардом)
+    // Inno Setup сам умеет закрывать приложение через CloseApplications
+    bool launched = QProcess::startDetached(installerPath, {});
 
-    QFile bat(batPath);
-    if (bat.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QString script = QStringLiteral(
-            "@echo off\r\n"
-            "echo Waiting for JARVIS to close...\r\n"
-            "set /a TRIES=0\r\n"
-            ":WAIT_LOOP\r\n"
-            "tasklist /FI \"IMAGENAME eq Jarvis.exe\" 2>NUL | find /I /N \"Jarvis.exe\" >NUL\r\n"
-            "if \"%ERRORLEVEL%\"==\"0\" (\r\n"
-            "    set /a TRIES+=1\r\n"
-            "    if %TRIES% GEQ 30 (\r\n"
-            "        echo Timeout. Killing JARVIS...\r\n"
-            "        taskkill /F /IM Jarvis.exe >NUL 2>&1\r\n"
-            "        timeout /t 2 /nobreak >NUL\r\n"
-            "        goto :RUN_SETUP\r\n"
-            "    )\r\n"
-            "    timeout /t 1 /nobreak >NUL\r\n"
-            "    goto :WAIT_LOOP\r\n"
-            ")\r\n"
-            ":RUN_SETUP\r\n"
-            "echo Starting installer...\r\n"
-            "start \"\" \"%1\" /SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS\r\n"
-            "timeout /t 3 /nobreak >NUL\r\n"
-            "del \"%~f0\"\r\n"
-        ).arg(installerPath);
-
-        bat.write(script.toLocal8Bit());
-        bat.close();
-
-        // Запускаем bat скрытно (без окна)
-        QProcess::startDetached(
-            QStringLiteral("cmd.exe"),
-            {QStringLiteral("/c"), QStringLiteral("start"), QStringLiteral("/min"),
-             QStringLiteral("\"JARVIS Update\""), batPath}
-        );
-
-        // Закрываем JARVIS через 500мс (даём bat-скрипту стартовать)
-        QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+    if (launched) {
+        // Закрываем JARVIS через 2 секунды — установщик уже запущен
+        QTimer::singleShot(2000, qApp, []() {
+            QCoreApplication::exit(0);
+        });
     } else {
-        // Fallback: запускаем установщик напрямую
-        QProcess::startDetached(installerPath, {QStringLiteral("/SILENT"),
-                                                QStringLiteral("/CLOSEAPPLICATIONS")});
-        QTimer::singleShot(500, qApp, &QCoreApplication::quit);
+        emit updateError(QStringLiteral("Не удалось запустить установщик: ") + installerPath);
     }
 }
-
-// ============================================================
-// Сравнение версий
-// ============================================================
 
 bool AutoUpdater::isNewerVersion(const QString& remote, const QString& current) const
 {
