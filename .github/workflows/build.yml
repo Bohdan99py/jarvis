@@ -30,55 +30,45 @@ jobs:
 
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v2
+
       - name: Inject version from tag
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
-            $version = "${{ github.ref_name }}".TrimStart("v")
-            $content = Get-Content CMakeLists.txt -Raw
-            $content = $content -replace 'project\(Jarvis VERSION \d+\.\d+\.\d+', "project(Jarvis VERSION $version"
-            Set-Content CMakeLists.txt $content
-            Write-Host "Version set to: $version"
-          shell: pwsh
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace 'project\(Jarvis VERSION \d+\.\d+\.\d+', "project(Jarvis VERSION $version"
+          Set-Content CMakeLists.txt $content
+          Write-Host "Version set to: $version"
 
       - name: Find Qt path
         id: qt_path
+        shell: pwsh
         run: |
-          # Выводим все Qt-переменные для диагностики
           Write-Host "=== Qt environment variables ==="
           Get-ChildItem env: | Where-Object { $_.Value -match '[Qq]t' } | Format-Table Name, Value
-          
-          # install-qt-action выставляет QT_ROOT_DIR или IQTA_TOOLS или добавляет в PATH
           $qtdir = $null
-          
           if ($env:QT_ROOT_DIR -and (Test-Path $env:QT_ROOT_DIR)) {
             $qtdir = $env:QT_ROOT_DIR
           }
           elseif ($env:Qt6_DIR -and (Test-Path $env:Qt6_DIR)) {
-            # Qt6_DIR обычно указывает на lib/cmake/Qt6, идём на 3 уровня вверх
             $qtdir = (Resolve-Path "$env:Qt6_DIR\..\..\..").Path
           }
           elseif ($env:QTDIR -and (Test-Path $env:QTDIR)) {
             $qtdir = $env:QTDIR
           }
-          
-          # Fallback: ищем windeployqt в PATH
           if (-not $qtdir) {
             $wd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
             if (-not $wd) { $wd = Get-Command windeployqt6.exe -ErrorAction SilentlyContinue }
-            if ($wd) {
-              $qtdir = Split-Path (Split-Path $wd.Source)
-            }
+            if ($wd) { $qtdir = Split-Path (Split-Path $wd.Source) }
           }
-          
           if (-not $qtdir) {
-            Write-Error "Cannot find Qt! Check install-qt-action output."
+            Write-Error "Cannot find Qt!"
             exit 1
           }
-          
           Write-Host "Qt dir resolved: $qtdir"
           echo "QTDIR=$qtdir" >> $env:GITHUB_OUTPUT
           echo "QTDIR=$qtdir" >> $env:GITHUB_ENV
-        shell: pwsh
 
       - name: Configure CMake
         run: >
@@ -90,24 +80,19 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       - name: Prepare release package
+        shell: pwsh
         run: |
           mkdir build\release_package -ErrorAction SilentlyContinue
-          
-          # Ищем Jarvis.exe рекурсивно
           $exe = Get-ChildItem -Path build -Recurse -Filter "Jarvis.exe" |
                  Where-Object { $_.DirectoryName -notmatch "release_package" } |
                  Select-Object -First 1
-          
           if (-not $exe) {
             Write-Error "Jarvis.exe not found in build!"
             Get-ChildItem -Path build -Recurse -Filter "*.exe" | Format-Table FullName
             exit 1
           }
-          
           Write-Host "Found exe: $($exe.FullName)"
           Copy-Item $exe.FullName "build\release_package\"
-          
-          # windeployqt
           $wdqt = Join-Path $env:QTDIR "bin\windeployqt.exe"
           if (-not (Test-Path $wdqt)) {
             $wdqt = Join-Path $env:QTDIR "bin\windeployqt6.exe"
@@ -118,14 +103,11 @@ jobs:
           if (-not (Test-Path $wdqt)) {
             $wdqt = (Get-Command windeployqt6.exe -ErrorAction SilentlyContinue).Source
           }
-          
           if (-not $wdqt -or -not (Test-Path $wdqt)) {
             Write-Error "windeployqt not found! QTDIR=$env:QTDIR"
             exit 1
           }
-          
           Write-Host "windeployqt: $wdqt"
-          
           & $wdqt "build\release_package\Jarvis.exe" `
             --release `
             --no-translations `
@@ -133,47 +115,43 @@ jobs:
             --no-system-d3d-compiler `
             --no-compiler-runtime `
             --dir "build\release_package"
-          
           Write-Host "=== Package contents ==="
           Get-ChildItem "build\release_package" -Recurse | Format-Table Name, Length
-        shell: pwsh
-
-      # === Только при тегах (релиз) ===
 
       - name: Download VC++ Redistributable
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
           mkdir redist -ErrorAction SilentlyContinue
           Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
             -OutFile "redist\vc_redist.x64.exe" -UseBasicParsing
-        shell: pwsh
 
       - name: Create ZIP archive
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
           Copy-Item "redist\vc_redist.x64.exe" "build\release_package\" -ErrorAction SilentlyContinue
           Compress-Archive -Path "build\release_package\*" `
             -DestinationPath "JARVIS-${{ github.ref_name }}-win64.zip"
-        shell: pwsh
 
       - name: Install Inno Setup
         if: startsWith(github.ref, 'refs/tags/v')
-        run: choco install innosetup -y --no-progress
         shell: cmd
+        run: choco install innosetup -y --no-progress
 
       - name: Update installer version
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
           $content = Get-Content installer.iss -Raw
           $content = $content -replace '#define MyAppVersion "2.0.0"', "#define MyAppVersion `"$version`""
           Set-Content installer.iss $content
-        shell: pwsh
 
       - name: Build installer
         if: startsWith(github.ref, 'refs/tags/v')
-        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
         shell: cmd
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
         continue-on-error: true
 
       - name: Create Release
