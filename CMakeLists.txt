@@ -41,6 +41,8 @@ add_executable(Jarvis WIN32
         core/auto_updater.cpp
         core/project_indexer.h
         core/project_indexer.cpp
+        core/code_actions.h
+        core/code_actions.cpp
         core/embedded_key.h
 )
 

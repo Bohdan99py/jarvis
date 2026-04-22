@@ -1,6 +1,6 @@
 #pragma once
 // -------------------------------------------------------
-// jarvis.h — Ядро ассистента: команды, TTS, мозги
+// jarvis.h — Ядро ассистента: команды, TTS, мозги, IDE
 // -------------------------------------------------------
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -23,6 +23,7 @@ class ClaudeApi;
 class ActionPredictor;
 class AutoUpdater;
 class ProjectIndexer;
+class CodeActions;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -47,7 +48,6 @@ public:
     explicit Jarvis(QObject* parent = nullptr);
     ~Jarvis() override;
 
-    // Обработка команды (синхронная для локальных, async для API)
     QString processCommand(const QString& input);
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
@@ -58,21 +58,18 @@ public:
     ActionPredictor* actionPredictor()  const { return m_predictor; }
     AutoUpdater*     autoUpdater()      const { return m_updater; }
     ProjectIndexer*  projectIndexer()   const { return m_indexer; }
+    CodeActions*     codeActions()      const { return m_codeActions; }
 
 signals:
     void speakingChanged(bool speaking);
-
-    // Асинхронный ответ от Claude API
     void asyncResponseReady(const QString& response);
     void asyncResponseError(const QString& error);
-
-    // Предложение действия
     void suggestionAvailable(const QString& description, const QString& action);
 
 private:
     void registerCommands();
 
-    // Обработчики команд
+    // Команды
     QString cmdTime(const QString& input);
     QString cmdDate(const QString& input);
     QString cmdGreeting(const QString& input);
@@ -97,13 +94,12 @@ private:
     // Обновление
     QString cmdCheckUpdate(const QString& input);
 
-    // Индексатор проекта
+    // Индексатор
     QString cmdIndexProject(const QString& input);
     QString cmdFindSymbol(const QString& input);
     QString cmdProjectMap(const QString& input);
     QString cmdGrep(const QString& input);
 
-    // Обработка ответа Claude API (парсинг [CMD:...])
     void handleClaudeResponse(const QString& response);
 
     static QString extractArg(const QString& input, const QStringList& prefixes);
@@ -111,12 +107,13 @@ private:
 
     ComInitializer   m_com;
     CommandRegistry  m_registry;
-    KeyEmulator*     m_keyEmulator = nullptr;
-    SessionMemory*   m_memory      = nullptr;
-    ClaudeApi*       m_claudeApi   = nullptr;
-    ActionPredictor* m_predictor   = nullptr;
-    AutoUpdater*     m_updater     = nullptr;
-    ProjectIndexer*  m_indexer     = nullptr;
+    KeyEmulator*     m_keyEmulator  = nullptr;
+    SessionMemory*   m_memory       = nullptr;
+    ClaudeApi*       m_claudeApi    = nullptr;
+    ActionPredictor* m_predictor    = nullptr;
+    AutoUpdater*     m_updater      = nullptr;
+    ProjectIndexer*  m_indexer      = nullptr;
+    CodeActions*     m_codeActions  = nullptr;
 
     std::atomic<bool> m_speaking{false};
     QMutex m_ttsMutex;

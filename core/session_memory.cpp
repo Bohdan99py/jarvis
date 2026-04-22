@@ -84,7 +84,6 @@ SessionMemory::SessionMemory(QObject* parent)
 
 SessionMemory::~SessionMemory()
 {
-    // Сохраняем summary текущей сессии перед завершением
     if (!m_sessionMessages.isEmpty()) {
         QJsonObject sessionSummaryObj;
         sessionSummaryObj[QStringLiteral("date")] =
@@ -92,7 +91,6 @@ SessionMemory::~SessionMemory()
         sessionSummaryObj[QStringLiteral("commandCount")] = m_taskContext.commandCount;
         sessionSummaryObj[QStringLiteral("lastTopic")]    = m_taskContext.lastTopic;
 
-        // Краткое summary: первые и последние сообщения
         QString summary;
         int count = m_sessionMessages.size();
         int show = qMin(count, 4);
@@ -111,7 +109,6 @@ SessionMemory::~SessionMemory()
 
         m_pastSessions.append(sessionSummaryObj);
 
-        // Ограничить количество сохранённых сессий
         while (m_pastSessions.size() > MAX_PAST_SESSIONS) {
             m_pastSessions.removeFirst();
         }
@@ -132,7 +129,6 @@ void SessionMemory::addMessage(const QString& role, const QString& content)
     msg.timestamp = QDateTime::currentDateTime();
     m_sessionMessages.append(msg);
 
-    // Ротация: при превышении лимита удаляем старые
     while (m_sessionMessages.size() > MAX_SESSION_MESSAGES) {
         m_sessionMessages.removeFirst();
     }
@@ -175,10 +171,8 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
 
     QString lower = userInput.toLower();
 
-    // Определяем тему
     if (lower.contains(QStringLiteral("найди")) || lower.contains(QStringLiteral("search"))
         || lower.contains(QStringLiteral("гугл"))) {
-        // Извлекаем поисковый запрос
         QString query = userInput;
         for (const auto& prefix : {QStringLiteral("найди "), QStringLiteral("search "),
                                     QStringLiteral("гугл ")}) {
@@ -193,7 +187,6 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
             m_taskContext.recentSearches.removeLast();
     }
 
-    // Отслеживание запущенных приложений
     if (lower.contains(QStringLiteral("запусти")) || lower.contains(QStringLiteral("открой"))
         || lower.contains(QStringLiteral("launch"))) {
         QString app = userInput;
@@ -210,7 +203,6 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
         m_taskContext.currentTask = QStringLiteral("Работа с ") + app;
     }
 
-    // Статистика команд
     recordCommandUsage(lower.split(QChar(' ')).first());
 
     emit memoryUpdated();
@@ -283,16 +275,36 @@ void SessionMemory::recordCommandUsage(const QString& command)
 QString SessionMemory::buildSystemPrompt() const
 {
     QString prompt = QStringLiteral(
-        "Ты — J.A.R.V.I.S., персональный ИИ-ассистент на Windows. "
-        "Ты помогаешь пользователю с задачами на ПК. "
-        "Отвечай кратко, по делу, на русском языке. "
-        "Ты можешь выполнять системные команды: запускать приложения, искать в интернете, "
-        "печатать текст в окнах, блокировать экран.\n\n"
+        "Ты — J.A.R.V.I.S., персональный ИИ-ассистент и IDE на Windows. "
+        "Отвечай кратко, по делу, на русском.\n\n"
+        "=== РЕЖИМ РАБОТЫ С ФАЙЛАМИ ===\n"
+        "Когда пользователь просит создать или изменить код, используй специальные блоки:\n\n"
+        "Создать/перезаписать файл:\n"
+        "[FILE:путь/к/файлу.cpp]\n"
+        "...полный код файла...\n"
+        "[/FILE]\n\n"
+        "Изменить фрагмент в существующем файле (экономит токены!):\n"
+        "[DIFF:путь/к/файлу.cpp]\n"
+        "[FIND]\n"
+        "...точный старый код который нужно найти...\n"
+        "[REPLACE]\n"
+        "...новый код на замену...\n"
+        "[/DIFF]\n\n"
+        "Создать папку: [MKDIR:путь/к/папке]\n"
+        "Удалить файл: [DELETE:путь/к/файлу]\n"
+        "Системная команда: [CMD:команда]\n\n"
+        "=== ПРАВИЛА ===\n"
+        "- Для небольших изменений ВСЕГДА используй [DIFF] — не переписывай весь файл\n"
+        "- Для новых файлов используй [FILE]\n"
+        "- Пиши полный рабочий код, не пропускай части с комментариями типа '// ...остальное'\n"
+        "- Кратко объясни что делаешь ПЕРЕД блоками кода\n"
+        "- Пути указывай относительно корня проекта\n"
+        "- Если вопрос разговорный — просто ответь текстом без блоков\n\n"
     );
 
-    // Добавляем факты о пользователе
+    // Факты о пользователе
     if (!m_persistentFacts.isEmpty()) {
-        prompt += QStringLiteral("Известные факты о пользователе:\n");
+        prompt += QStringLiteral("Факты о пользователе:\n");
         for (auto it = m_persistentFacts.begin(); it != m_persistentFacts.end(); ++it) {
             prompt += QStringLiteral("- ") + it.key() + QStringLiteral(": ")
                     + it.value().toString() + QStringLiteral("\n");
@@ -300,39 +312,28 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral("\n");
     }
 
-    // Контекст текущей задачи
+    // Контекст
     if (!m_taskContext.currentTask.isEmpty()) {
-        prompt += QStringLiteral("Текущая задача пользователя: ")
-                + m_taskContext.currentTask + QStringLiteral("\n");
+        prompt += QStringLiteral("Текущая задача: ") + m_taskContext.currentTask + QStringLiteral("\n");
     }
     if (!m_taskContext.lastTopic.isEmpty()) {
-        prompt += QStringLiteral("Последняя тема: ")
-                + m_taskContext.lastTopic + QStringLiteral("\n");
+        prompt += QStringLiteral("Последняя тема: ") + m_taskContext.lastTopic + QStringLiteral("\n");
     }
     if (!m_taskContext.recentApps.isEmpty()) {
         prompt += QStringLiteral("Недавние приложения: ")
                 + m_taskContext.recentApps.join(QStringLiteral(", ")) + QStringLiteral("\n");
     }
 
-    // Краткие сведения из прошлых сессий
+    // Прошлые сессии
     if (!m_pastSessions.isEmpty()) {
         prompt += QStringLiteral("\nИз прошлых сессий:\n");
         int show = qMin(m_pastSessions.size(), 3);
         for (int i = m_pastSessions.size() - show; i < m_pastSessions.size(); ++i) {
             QJsonObject s = m_pastSessions[i].toObject();
             prompt += QStringLiteral("- ") + s[QStringLiteral("date")].toString()
-                    + QStringLiteral(": ") + s[QStringLiteral("lastTopic")].toString()
-                    + QStringLiteral(" (") + QString::number(s[QStringLiteral("commandCount")].toInt())
-                    + QStringLiteral(" команд)\n");
+                    + QStringLiteral(": ") + s[QStringLiteral("lastTopic")].toString() + QStringLiteral("\n");
         }
     }
-
-    prompt += QStringLiteral(
-        "\nЕсли пользователь просит выполнить системную команду, "
-        "ответь ТОЛЬКО командой в формате [CMD:команда]. "
-        "Например: [CMD:запусти notepad.exe] или [CMD:найди погода москва]. "
-        "Если вопрос разговорный — просто ответь текстом.\n"
-    );
 
     return prompt;
 }

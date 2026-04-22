@@ -9,6 +9,7 @@
 #include "action_predictor.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
+#include "code_actions.h"
 
 #include <sapi.h>
 #include <shellapi.h>
@@ -23,7 +24,6 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-
 // Дефайны из CMake
 #ifndef JARVIS_VERSION
 #define JARVIS_VERSION "2.0.0"
@@ -47,6 +47,7 @@ Jarvis::Jarvis(QObject* parent)
     m_predictor   = new ActionPredictor(m_memory, this);
     m_keyEmulator = new KeyEmulator(this);
     m_indexer     = new ProjectIndexer(this);
+    m_codeActions = new CodeActions(this);
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -466,11 +467,24 @@ QString Jarvis::processCommand(const QString& input)
 
         m_claudeApi->sendMessage(enrichedMessage, [this, s](bool success, const QString& response) {
             if (success) {
-                m_memory->addMessage(QStringLiteral("assistant"), response);
-                m_memory->updateContext(s, response);
+                // Обрабатываем файловые операции из ответа
+                if (!m_indexer->projectRoot().isEmpty()) {
+                    m_codeActions->setProjectRoot(m_indexer->projectRoot());
+                }
+                QString fileReport = m_codeActions->processResponse(response);
+                QString displayResponse = m_codeActions->cleanResponseForDisplay(response);
+
+                m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
+                m_memory->updateContext(s, displayResponse);
                 handleClaudeResponse(response);
                 m_predictor->recordSequence(s);
-                emit asyncResponseReady(response);
+
+                // Показываем текст + отчёт о файлах
+                QString fullResponse = displayResponse;
+                if (!fileReport.isEmpty()) {
+                    fullResponse += QStringLiteral("\n\n") + fileReport;
+                }
+                emit asyncResponseReady(fullResponse);
             } else {
                 emit asyncResponseError(response);
             }
