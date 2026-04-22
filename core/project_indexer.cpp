@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QStandardPaths>
+#include <QSet>
 
 // Расширения для индексации
 const QStringList ProjectIndexer::s_sourceExtensions = {
@@ -144,6 +145,7 @@ void ProjectIndexer::setProjectRoot(const QString& path)
 
     m_projectRoot = path;
     m_files.clear();
+    m_symbolCount = 0;
 
     // Пробуем загрузить кэшированный индекс
     loadIndex();
@@ -158,18 +160,29 @@ void ProjectIndexer::indexProject()
     if (m_projectRoot.isEmpty() || m_indexing) return;
 
     m_indexing = true;
-    QStringList files = collectSourceFiles(m_projectRoot);
+    const QStringList files = collectSourceFiles(m_projectRoot);
+    QMap<QString, IndexedFile> newFiles;
 
     emit indexingStarted(files.size());
 
-    m_files.clear();
-
     for (int i = 0; i < files.size(); ++i) {
-        IndexedFile indexed = parseFile(files[i]);
-        m_files[files[i]] = indexed;
+        const QString& filePath = files[i];
+        const QFileInfo currentInfo(filePath);
+
+        auto existing = m_files.constFind(filePath);
+        if (existing != m_files.cend()
+            && currentInfo.exists()
+            && existing->lastModified >= currentInfo.lastModified()) {
+            newFiles.insert(filePath, *existing);
+        } else {
+            newFiles.insert(filePath, parseFile(filePath));
+        }
 
         emit indexingProgress(i + 1, files.size());
     }
+
+    m_files = std::move(newFiles);
+    rebuildCaches();
 
     // Настраиваем watcher
     if (m_watcherEnabled) {
@@ -192,11 +205,13 @@ void ProjectIndexer::indexFile(const QString& filePath)
 {
     if (!QFile::exists(filePath)) {
         m_files.remove(filePath);
+        rebuildCaches();
         return;
     }
 
     IndexedFile indexed = parseFile(filePath);
     m_files[filePath] = indexed;
+    rebuildCaches();
 
     emit fileReindexed(filePath);
 }
@@ -590,32 +605,30 @@ QString ProjectIndexer::getFileLines(const QString& filePath, int startLine, int
 
 int ProjectIndexer::symbolCount() const
 {
-    int count = 0;
-    for (const auto& file : m_files) {
-        count += file.symbols.size();
-    }
-    return count;
+    return m_symbolCount;
 }
 
 QStringList ProjectIndexer::allClasses() const
 {
-    QStringList classes;
+    QSet<QString> classes;
     for (const auto& file : m_files) {
         for (const auto& sym : file.symbols) {
             if (sym.kind == CodeSymbol::Class || sym.kind == CodeSymbol::Struct
                 || sym.kind == CodeSymbol::UClass) {
-                if (!classes.contains(sym.name))
-                    classes.append(sym.name);
+                classes.insert(sym.name);
             }
         }
     }
-    classes.sort();
-    return classes;
+
+    QStringList result = classes.values();
+    result.sort();
+    return result;
 }
 
 QStringList ProjectIndexer::allFiles() const
 {
     QStringList files;
+    files.reserve(m_files.size());
     for (const auto& file : m_files) {
         files.append(file.relativePath);
     }
@@ -730,6 +743,8 @@ void ProjectIndexer::loadIndex()
 
         m_files[f.filePath] = f;
     }
+
+    rebuildCaches();
 }
 
 // ============================================================
@@ -751,23 +766,30 @@ void ProjectIndexer::enableFileWatcher(bool enable)
     // Добавляем все файлы и директории
     m_watcher->addPath(m_projectRoot);
 
+    QStringList filePaths;
+    filePaths.reserve(m_files.size());
     for (const auto& file : m_files) {
-        m_watcher->addPath(file.filePath);
+        if (QFile::exists(file.filePath)) {
+            filePaths.append(file.filePath);
+        }
+    }
+    if (!filePaths.isEmpty()) {
+        m_watcher->addPaths(filePaths);
     }
 
     // Добавляем поддиректории
+    QStringList directories;
     QDirIterator dirIt(m_projectRoot, QDir::Dirs | QDir::NoDotAndDotDot,
                        QDirIterator::Subdirectories);
     while (dirIt.hasNext()) {
         QString dir = dirIt.next();
-        // Пропускаем build, .git и т.д.
-        QString name = QFileInfo(dir).fileName();
-        if (name.startsWith(QChar('.')) || name == QStringLiteral("build")
-            || name == QStringLiteral("Binaries") || name == QStringLiteral("Intermediate")
-            || name == QStringLiteral("Saved") || name == QStringLiteral("DerivedDataCache")) {
+        if (shouldSkipPath(dir)) {
             continue;
         }
-        m_watcher->addPath(dir);
+        directories.append(dir);
+    }
+    if (!directories.isEmpty()) {
+        m_watcher->addPaths(directories);
     }
 }
 
@@ -790,7 +812,12 @@ void ProjectIndexer::onDirectoryChanged(const QString& path)
     if (m_indexing) return;
 
     // Проверяем новые файлы
-    QStringList currentFiles = collectSourceFiles(m_projectRoot);
+    const QStringList currentFiles = collectSourceFiles(m_projectRoot);
+    QSet<QString> currentSet;
+    for (const QString& filePath : currentFiles) {
+        currentSet.insert(filePath);
+    }
+
     for (const auto& filePath : currentFiles) {
         if (!m_files.contains(filePath)) {
             indexFile(filePath);
@@ -798,6 +825,20 @@ void ProjectIndexer::onDirectoryChanged(const QString& path)
                 m_watcher->addPath(filePath);
             }
         }
+    }
+
+    QStringList removedFiles;
+    for (auto it = m_files.cbegin(); it != m_files.cend(); ++it) {
+        if (!currentSet.contains(it.key())) {
+            removedFiles.append(it.key());
+        }
+    }
+
+    if (!removedFiles.isEmpty()) {
+        for (const QString& filePath : removedFiles) {
+            m_files.remove(filePath);
+        }
+        rebuildCaches();
     }
 }
 
@@ -816,17 +857,7 @@ QStringList ProjectIndexer::collectSourceFiles(const QString& dir) const
     while (it.hasNext()) {
         QString path = it.next();
 
-        // Пропускаем build, .git, промежуточные
-        if (path.contains(QStringLiteral("/build/"))
-            || path.contains(QStringLiteral("\\build\\"))
-            || path.contains(QStringLiteral("/.git/"))
-            || path.contains(QStringLiteral("\\.git\\"))
-            || path.contains(QStringLiteral("/cmake-build"))
-            || path.contains(QStringLiteral("\\cmake-build"))
-            || path.contains(QStringLiteral("/Intermediate/"))
-            || path.contains(QStringLiteral("\\Intermediate\\"))
-            || path.contains(QStringLiteral("/DerivedDataCache"))
-            || path.contains(QStringLiteral("\\DerivedDataCache"))) {
+        if (shouldSkipPath(path)) {
             continue;
         }
 
@@ -842,4 +873,31 @@ QString ProjectIndexer::relativePath(const QString& absPath) const
 
     QDir root(m_projectRoot);
     return root.relativeFilePath(absPath);
+}
+
+void ProjectIndexer::rebuildCaches()
+{
+    m_symbolCount = 0;
+    for (const auto& file : m_files) {
+        m_symbolCount += file.symbols.size();
+    }
+}
+
+bool ProjectIndexer::shouldSkipPath(const QString& path) const
+{
+    const QString normalized = QDir::fromNativeSeparators(path);
+    const QFileInfo info(normalized);
+    const QString name = info.fileName();
+
+    if (name.startsWith(QChar('.'))) {
+        return true;
+    }
+
+    return normalized.contains(QStringLiteral("/build/"))
+           || normalized.contains(QStringLiteral("/cmake-build"))
+           || normalized.contains(QStringLiteral("/.git/"))
+           || normalized.contains(QStringLiteral("/Binaries/"))
+           || normalized.contains(QStringLiteral("/Intermediate/"))
+           || normalized.contains(QStringLiteral("/Saved/"))
+           || normalized.contains(QStringLiteral("/DerivedDataCache"));
 }

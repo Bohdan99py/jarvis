@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFileSystemWatcher>
+#include <QSet>
 
 // Один символ (класс, функция, переменная, макрос и т.д.)
 struct CodeSymbol
@@ -143,6 +144,8 @@ private:
     // Парсинг файла
     IndexedFile parseFile(const QString& filePath) const;
     void parseSymbols(IndexedFile& file, const QStringList& lines) const;
+    void rebuildCaches();
+    bool shouldSkipPath(const QString& path) const;
 
     // Утилиты
     QStringList collectSourceFiles(const QString& dir) const;
@@ -154,6 +157,7 @@ private:
     QFileSystemWatcher* m_watcher = nullptr;
     bool m_indexing = false;
     bool m_watcherEnabled = false;
+    int m_symbolCount = 0;
 
     // Расширения файлов для индексации
     static const QStringList s_sourceExtensions;

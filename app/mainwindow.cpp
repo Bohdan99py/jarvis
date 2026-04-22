@@ -27,6 +27,7 @@
 #include <QUrl>
 #include <QFileDialog>
 #include <QDir>
+#include <QTextDocument>
 
 // ============================================================
 // Конструктор
@@ -676,6 +677,7 @@ void MainWindow::buildUI()
     m_log->setObjectName(QStringLiteral("logArea"));
     m_log->setReadOnly(true);
     m_log->setFocusPolicy(Qt::NoFocus);
+    m_log->document()->setMaximumBlockCount(1000);
     vbox->addWidget(m_log, 1);
 
     // === Панель предложений (скрыта) ===
