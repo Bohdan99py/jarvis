@@ -20,10 +20,12 @@
 #include <QThread>
 #include <QMutexLocker>
 #include <QMap>
+#include <QSet>
 #include <QRegularExpression>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+
 // Дефайны из CMake
 #ifndef JARVIS_VERSION
 #define JARVIS_VERSION "2.0.0"
@@ -63,6 +65,17 @@ Jarvis::Jarvis(QObject* parent)
     connect(m_claudeApi, &ClaudeApi::apiError, this, [this](const QString& err) {
         emit asyncResponseError(err);
     });
+
+    // Синхронизация информации об индексе с системным промптом
+    connect(m_indexer, &ProjectIndexer::indexingFinished, this,
+            [this](int, int) { syncProjectInfoToMemory(); });
+    connect(m_indexer, &ProjectIndexer::fileReindexed, this,
+            [this](const QString&) { syncProjectInfoToMemory(); });
+
+    // Если индекс загружен из кэша на старте
+    if (m_indexer->fileCount() > 0) {
+        syncProjectInfoToMemory();
+    }
 }
 
 Jarvis::~Jarvis()
@@ -70,6 +83,28 @@ Jarvis::~Jarvis()
     m_predictor->savePatterns();
     m_memory->savePersistent();
     m_indexer->saveIndex();
+}
+
+// ============================================================
+// Синхронизация данных индекса с SessionMemory (для system prompt)
+// ============================================================
+
+void Jarvis::syncProjectInfoToMemory()
+{
+    if (m_indexer->fileCount() == 0) {
+        m_memory->clearProjectInfo();
+        return;
+    }
+
+    m_memory->setProjectInfo(
+        m_indexer->projectRoot(),
+        m_indexer->projectMap(),
+        m_indexer->fileCount(),
+        m_indexer->symbolCount()
+    );
+
+    // code_actions должен знать корень проекта
+    m_codeActions->setProjectRoot(m_indexer->projectRoot());
 }
 
 // ============================================================
@@ -292,8 +327,8 @@ void Jarvis::registerCommands()
 
 QString Jarvis::extractArg(const QString& input, const QStringList& prefixes)
 {
-    QString trimmed = input.trimmed();
-    QString lower = trimmed.toLower();
+    const QString trimmed = input.trimmed();
+    const QString lower   = trimmed.toLower();
 
     for (const auto& prefix : prefixes) {
         if (lower.startsWith(prefix)) {
@@ -345,6 +380,303 @@ WORD Jarvis::parseVirtualKey(const QString& name)
             return static_cast<WORD>(ch.unicode());
     }
     return 0;
+}
+
+// ============================================================
+// Детектор "коддинг-интента"
+// ============================================================
+
+bool Jarvis::isCodingIntent(const QString& input)
+{
+    const QString lower = input.toLower();
+
+    // Глаголы: сделай/создай/добавь/исправь/оптимизируй/рефакторинг/...
+    static const QStringList verbs = {
+        QStringLiteral("сделай"),     QStringLiteral("создай"),
+        QStringLiteral("напиши"),     QStringLiteral("добавь"),
+        QStringLiteral("исправь"),    QStringLiteral("пофикс"),
+        QStringLiteral("фикс"),       QStringLiteral("fix"),
+        QStringLiteral("оптимизир"),  QStringLiteral("optimize"),
+        QStringLiteral("рефактор"),   QStringLiteral("refactor"),
+        QStringLiteral("перепиши"),   QStringLiteral("rewrite"),
+        QStringLiteral("реализуй"),   QStringLiteral("implement"),
+        QStringLiteral("интегрир"),   QStringLiteral("integrate"),
+        QStringLiteral("подключи"),   QStringLiteral("удали из"),
+        QStringLiteral("убери"),      QStringLiteral("remove"),
+        QStringLiteral("замени"),     QStringLiteral("replace"),
+        QStringLiteral("улучши"),     QStringLiteral("improve"),
+        QStringLiteral("доработай"),  QStringLiteral("доделай"),
+        QStringLiteral("почини"),     QStringLiteral("объясни код"),
+        QStringLiteral("ревью"),      QStringLiteral("review"),
+        QStringLiteral("проверь код"),QStringLiteral("проверь файл"),
+        QStringLiteral("migrate"),    QStringLiteral("port "),
+        QStringLiteral("add "),       QStringLiteral("create "),
+        QStringLiteral("make "),      QStringLiteral("build "),
+    };
+    for (const auto& v : verbs) {
+        if (lower.contains(v)) return true;
+    }
+
+    // Сущности: функция/класс/метод/файл/модуль/компонент/баг/ошибку
+    static const QStringList entities = {
+        QStringLiteral("функци"),     QStringLiteral("function"),
+        QStringLiteral("метод"),      QStringLiteral("method"),
+        QStringLiteral("класс"),      QStringLiteral("class "),
+        QStringLiteral("струк"),      QStringLiteral("struct"),
+        QStringLiteral("модул"),      QStringLiteral("module"),
+        QStringLiteral("компонент"),  QStringLiteral("component"),
+        QStringLiteral("плагин"),     QStringLiteral("plugin"),
+        QStringLiteral(" баг"),       QStringLiteral(" bug"),
+        QStringLiteral("ошибк"),      QStringLiteral(" error"),
+        QStringLiteral(".cpp"),       QStringLiteral(".h"),
+        QStringLiteral(".hpp"),       QStringLiteral(".cxx"),
+        QStringLiteral(".py"),        QStringLiteral(".js"),
+        QStringLiteral(".ts"),        QStringLiteral("cmake"),
+    };
+    for (const auto& e : entities) {
+        if (lower.contains(e)) return true;
+    }
+
+    return false;
+}
+
+// ============================================================
+// Извлечение ключевых слов (без предлогов/мусора)
+// ============================================================
+
+QStringList Jarvis::extractKeywords(const QString& input)
+{
+    // Стоп-слова (русские + английские + глаголы намерений)
+    static const QSet<QString> stopWords = {
+        // предлоги/союзы/частицы RU
+        QStringLiteral("и"),   QStringLiteral("в"),  QStringLiteral("на"), QStringLiteral("с"),
+        QStringLiteral("из"),  QStringLiteral("к"),  QStringLiteral("по"), QStringLiteral("у"),
+        QStringLiteral("от"),  QStringLiteral("за"), QStringLiteral("для"),QStringLiteral("без"),
+        QStringLiteral("что"), QStringLiteral("как"),QStringLiteral("это"),QStringLiteral("там"),
+        QStringLiteral("где"), QStringLiteral("тут"),QStringLiteral("же"), QStringLiteral("бы"),
+        QStringLiteral("не"),  QStringLiteral("но"), QStringLiteral("ли"), QStringLiteral("ни"),
+        QStringLiteral("мне"), QStringLiteral("мой"),QStringLiteral("его"),QStringLiteral("ее"),
+        QStringLiteral("её"),  QStringLiteral("они"),QStringLiteral("ты"), QStringLiteral("я"),
+        QStringLiteral("мы"),  QStringLiteral("вы"),
+        // глаголы действий — НЕ названия модулей
+        QStringLiteral("сделай"),   QStringLiteral("создай"),  QStringLiteral("напиши"),
+        QStringLiteral("добавь"),   QStringLiteral("исправь"), QStringLiteral("оптимизируй"),
+        QStringLiteral("рефактори"),QStringLiteral("перепиши"),QStringLiteral("реализуй"),
+        QStringLiteral("улучши"),   QStringLiteral("замени"),  QStringLiteral("убери"),
+        QStringLiteral("почини"),   QStringLiteral("доработай"),QStringLiteral("проверь"),
+        QStringLiteral("объясни"),  QStringLiteral("покажи"),  QStringLiteral("дай"),
+        QStringLiteral("хочу"),     QStringLiteral("надо"),    QStringLiteral("нужно"),
+        QStringLiteral("нужен"),    QStringLiteral("нужна"),
+        // английские
+        QStringLiteral("the"), QStringLiteral("a"),   QStringLiteral("an"),
+        QStringLiteral("to"),  QStringLiteral("in"),  QStringLiteral("on"),
+        QStringLiteral("at"),  QStringLiteral("for"), QStringLiteral("of"),
+        QStringLiteral("and"), QStringLiteral("or"),  QStringLiteral("but"),
+        QStringLiteral("with"),QStringLiteral("from"),QStringLiteral("is"),
+        QStringLiteral("are"), QStringLiteral("was"), QStringLiteral("be"),
+        QStringLiteral("make"),QStringLiteral("create"),QStringLiteral("add"),
+        QStringLiteral("fix"), QStringLiteral("improve"),QStringLiteral("refactor"),
+        QStringLiteral("i"),   QStringLiteral("you"), QStringLiteral("my"),
+        // слова-сущности без информации
+        QStringLiteral("функцию"),  QStringLiteral("функция"), QStringLiteral("функции"),
+        QStringLiteral("метод"),    QStringLiteral("методы"),  QStringLiteral("класс"),
+        QStringLiteral("файл"),     QStringLiteral("файлы"),   QStringLiteral("код"),
+        QStringLiteral("коде"),     QStringLiteral("кода"),    QStringLiteral("проект"),
+        QStringLiteral("проекта"),  QStringLiteral("function"),QStringLiteral("method"),
+        QStringLiteral("class"),    QStringLiteral("file"),    QStringLiteral("code"),
+    };
+
+    static const QRegularExpression splitter(QStringLiteral("[\\s,.:;!?\\-\"'()\\[\\]{}/\\\\]+"));
+    QStringList raw = input.split(splitter, Qt::SkipEmptyParts);
+    QStringList result;
+    QSet<QString> seen;
+
+    for (QString w : raw) {
+        w = w.trimmed().toLower();
+        if (w.length() < 3) continue;
+        if (stopWords.contains(w)) continue;
+        if (seen.contains(w)) continue;
+        seen.insert(w);
+        result.append(w);
+    }
+    return result;
+}
+
+// ============================================================
+// Построение контекста из проекта для Claude
+// ============================================================
+
+QString Jarvis::buildProjectContext(const QString& userQuery) const
+{
+    if (m_indexer->fileCount() == 0) return QString();
+
+    const QStringList keywords = extractKeywords(userQuery);
+    const bool coding = isCodingIntent(userQuery);
+
+    // Лимиты, чтобы не уронить API
+    constexpr int MAX_FILES          = 3;      // сколько целых файлов прицепить
+    constexpr int MAX_FILE_CHARS     = 14000;  // бюджет на один файл
+    constexpr int MAX_TOTAL_CHARS    = 32000;  // суммарный бюджет на контекст
+    constexpr int MAX_SYMBOL_MATCHES = 8;      // сколько сниппетов символов
+    constexpr int MAX_GREP_HITS      = 10;     // сколько grep-совпадений
+
+    // === Собираем кандидатов: файлы ===
+    QStringList pickedFiles;       // относительные пути
+    QSet<QString> pickedFilesSet;
+
+    auto addFile = [&](const QString& relPath) {
+        if (pickedFiles.size() >= MAX_FILES) return;
+        if (pickedFilesSet.contains(relPath)) return;
+        pickedFilesSet.insert(relPath);
+        pickedFiles.append(relPath);
+    };
+
+    // 1. Поиск по имени файла напрямую (virtual_keyboard, session_memory и т.п.)
+    for (const auto& kw : keywords) {
+        if (pickedFiles.size() >= MAX_FILES) break;
+        auto files = m_indexer->findFile(kw);
+        for (const auto& f : files) {
+            addFile(f.relativePath.isEmpty() ? f.filePath : f.relativePath);
+            if (pickedFiles.size() >= MAX_FILES) break;
+        }
+    }
+
+    // 2. Поиск по символам (если по именам не нашли или осталось место)
+    QVector<CodeSymbol> symbolHits;
+    for (const auto& kw : keywords) {
+        if (symbolHits.size() >= MAX_SYMBOL_MATCHES) break;
+        auto found = m_indexer->findSymbol(kw);
+        for (const auto& sym : found) {
+            if (symbolHits.size() >= MAX_SYMBOL_MATCHES) break;
+            bool duplicate = false;
+            for (const auto& existing : symbolHits) {
+                if (existing.name == sym.name && existing.filePath == sym.filePath) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) symbolHits.append(sym);
+        }
+    }
+
+    // Если это кодинг-интент и у нас всё ещё нет файлов,
+    // но есть символы — добавим файлы из символов.
+    if (coding && pickedFiles.isEmpty() && !symbolHits.isEmpty()) {
+        for (const auto& sym : symbolHits) {
+            addFile(sym.filePath);
+            if (pickedFiles.size() >= MAX_FILES) break;
+        }
+    }
+
+    // 3. Если всё ещё пусто и это кодинг-интент — делаем grep по ключевым словам.
+    QVector<ProjectIndexer::GrepResult> grepHits;
+    if (coding && pickedFiles.isEmpty() && symbolHits.isEmpty()) {
+        for (const auto& kw : keywords) {
+            auto r = m_indexer->grep(kw, MAX_GREP_HITS);
+            for (const auto& hit : r) {
+                grepHits.append(hit);
+                if (grepHits.size() >= MAX_GREP_HITS) break;
+            }
+            if (grepHits.size() >= MAX_GREP_HITS) break;
+        }
+    }
+
+    // === Сборка блока контекста ===
+    QString context;
+    context.reserve(8192);
+    int budget = MAX_TOTAL_CHARS;
+
+    // Заголовок + инструкция Клоду
+    context += QStringLiteral("\n\n--- Контекст из проекта (автоматически от JARVIS) ---\n");
+    context += QStringLiteral("# Root: ") + m_indexer->projectRoot() + QStringLiteral("\n");
+    if (coding) {
+        context += QStringLiteral(
+            "# Режим: КОДИНГ. Используй приложенные файлы как авторитетный источник. "
+            "Отвечай сразу блоками [FILE:...] или [DIFF:...]. "
+            "Если нужен ещё какой-то файл — назови его и жди следующего сообщения.\n");
+    } else {
+        context += QStringLiteral(
+            "# Режим: ЧТЕНИЕ. Отвечай на вопрос пользователя, опираясь на эти фрагменты.\n");
+    }
+
+    auto appendAndTrim = [&](const QString& chunk) -> bool {
+        if (chunk.size() >= budget) {
+            context += chunk.left(budget);
+            context += QStringLiteral("\n... (обрезано по лимиту) ...\n");
+            budget = 0;
+            return false;
+        }
+        context += chunk;
+        budget -= chunk.size();
+        return true;
+    };
+
+    // ---- Файлы целиком (для кодинг-запросов) ----
+    for (const QString& rel : pickedFiles) {
+        if (budget <= 0) break;
+
+        // Берём весь файл: getFileLines(path, 1, -1) — но API этого не даёт, так что читаем сами
+        // через getFileLines большим диапазоном.
+        const QString content = m_indexer->getFileLines(rel, 1, 100000);
+        if (content.isEmpty()) continue;
+
+        QString trimmed = content;
+        if (trimmed.size() > MAX_FILE_CHARS) {
+            trimmed = trimmed.left(MAX_FILE_CHARS)
+                    + QStringLiteral("\n// ... (файл обрезан, ")
+                    + QString::number(content.size() - MAX_FILE_CHARS)
+                    + QStringLiteral(" символов скрыто) ...\n");
+        }
+
+        QString header = QStringLiteral("\n### FILE: ") + rel + QStringLiteral("\n```\n");
+        QString footer = QStringLiteral("\n```\n");
+        if (!appendAndTrim(header + trimmed + footer)) break;
+    }
+
+    // ---- Отдельные символы (если ещё есть бюджет) ----
+    if (budget > 1000 && !symbolHits.isEmpty()) {
+        QString hdr = QStringLiteral("\n### Найденные символы:\n");
+        appendAndTrim(hdr);
+        int written = 0;
+        for (const auto& sym : symbolHits) {
+            if (budget <= 500) break;
+            // Не дублируем сниппет для уже приложенных файлов
+            if (pickedFilesSet.contains(sym.filePath)) continue;
+
+            const QString snippet = m_indexer->getCodeSnippet(sym, 5);
+            if (snippet.isEmpty()) continue;
+
+            QString block = QStringLiteral("// ") + sym.filePath
+                          + QStringLiteral(" — ") + sym.kindToString()
+                          + QStringLiteral(" ") + sym.name + QStringLiteral("\n```\n")
+                          + snippet + QStringLiteral("\n```\n");
+            if (!appendAndTrim(block)) break;
+            ++written;
+            if (written >= 6) break;
+        }
+    }
+
+    // ---- Grep-совпадения (последний fallback) ----
+    if (budget > 500 && !grepHits.isEmpty()) {
+        QString block = QStringLiteral("\n### Совпадения grep:\n");
+        for (const auto& h : grepHits) {
+            block += h.filePath + QStringLiteral(":") + QString::number(h.line)
+                   + QStringLiteral("  ") + h.lineText.left(200) + QStringLiteral("\n");
+        }
+        appendAndTrim(block);
+    }
+
+    // Если реально ничего не нашли — возвращаем намёк вместо пустоты,
+    // чтобы Claude не начал спрашивать код у пользователя.
+    if (pickedFiles.isEmpty() && symbolHits.isEmpty() && grepHits.isEmpty()) {
+        context += QStringLiteral(
+            "\n(Автопоиск не нашёл прямых совпадений в индексе. "
+            "Опирайся на карту проекта в system prompt; если нужен конкретный файл — "
+            "назови его по имени, JARVIS подгрузит на следующем шаге.)\n");
+    }
+
+    context += QStringLiteral("--- Конец контекста ---\n");
+    return context;
 }
 
 // ============================================================
@@ -424,54 +756,22 @@ QString Jarvis::processCommand(const QString& input)
 
     // 2. Если есть API-ключ — отправляем в Claude API
     if (m_claudeApi->shouldUseApi(s)) {
-        // Если есть индекс проекта — добавляем контекст
-        QString enrichedMessage = s;
-
-        if (m_indexer->fileCount() > 0) {
-            // Ищем релевантные символы по ключевым словам запроса
-            QStringList words = s.split(QRegularExpression(QStringLiteral("\\s+")),
-                                        Qt::SkipEmptyParts);
-            QVector<CodeSymbol> relevantSymbols;
-
-            for (const auto& word : words) {
-                if (word.length() < 3) continue; // Пропускаем короткие слова
-                auto found = m_indexer->findSymbol(word);
-                for (const auto& sym : found) {
-                    if (relevantSymbols.size() >= 5) break;
-                    bool duplicate = false;
-                    for (const auto& existing : relevantSymbols) {
-                        if (existing.name == sym.name && existing.filePath == sym.filePath) {
-                            duplicate = true;
-                            break;
-                        }
-                    }
-                    if (!duplicate) relevantSymbols.append(sym);
-                }
-            }
-
-            // Если нашли релевантный код — добавляем к запросу
-            if (!relevantSymbols.isEmpty()) {
-                QString codeContext = QStringLiteral("\n\n--- Контекст из проекта ---\n");
-                for (const auto& sym : relevantSymbols) {
-                    QString snippet = m_indexer->getCodeSnippet(sym, 5);
-                    if (!snippet.isEmpty()) {
-                        codeContext += QStringLiteral("// ") + sym.filePath
-                                    + QStringLiteral(" — ") + sym.kindToString()
-                                    + QStringLiteral(" ") + sym.name + QStringLiteral("\n");
-                        codeContext += snippet + QStringLiteral("\n");
-                    }
-                }
-                enrichedMessage = s + codeContext;
-            }
+        // Убедимся что code_actions знает корень проекта (на случай первого запуска)
+        if (!m_indexer->projectRoot().isEmpty()) {
+            m_codeActions->setProjectRoot(m_indexer->projectRoot());
         }
 
-        m_claudeApi->sendMessage(enrichedMessage, [this, s](bool success, const QString& response) {
+        // Умное обогащение запроса контекстом проекта
+        const QString projectContext = buildProjectContext(s);
+        const QString enrichedMessage = projectContext.isEmpty()
+                                       ? s
+                                       : (s + projectContext);
+
+        m_claudeApi->sendMessage(enrichedMessage,
+                                 [this, s](bool success, const QString& response) {
             if (success) {
-                // Обрабатываем файловые операции из ответа
-                if (!m_indexer->projectRoot().isEmpty()) {
-                    m_codeActions->setProjectRoot(m_indexer->projectRoot());
-                }
-                QString fileReport = m_codeActions->processResponse(response);
+                // Обработка файловых операций из ответа
+                QString fileReport     = m_codeActions->processResponse(response);
                 QString displayResponse = m_codeActions->cleanResponseForDisplay(response);
 
                 m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
@@ -479,7 +779,6 @@ QString Jarvis::processCommand(const QString& input)
                 handleClaudeResponse(response);
                 m_predictor->recordSequence(s);
 
-                // Показываем текст + отчёт о файлах
                 QString fullResponse = displayResponse;
                 if (!fileReport.isEmpty()) {
                     fullResponse += QStringLiteral("\n\n") + fileReport;
@@ -663,6 +962,7 @@ QString Jarvis::cmdIndexProject(const QString& input)
         }
         // Переиндексация текущего проекта
         m_indexer->indexProject();
+        syncProjectInfoToMemory();
         return QStringLiteral("Переиндексирую ") + m_indexer->projectRoot()
              + QStringLiteral("...\nФайлов: ") + QString::number(m_indexer->fileCount())
              + QStringLiteral(", Символов: ") + QString::number(m_indexer->symbolCount());
@@ -678,6 +978,7 @@ QString Jarvis::cmdIndexProject(const QString& input)
     m_indexer->setProjectRoot(path);
     m_indexer->indexProject();
     m_indexer->enableFileWatcher(true);
+    syncProjectInfoToMemory();
 
     return QStringLiteral("Проект проиндексирован: ") + path
          + QStringLiteral("\nФайлов: ") + QString::number(m_indexer->fileCount())

@@ -10,6 +10,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QMutex>
 #include <windows.h>
 #include <objbase.h>
@@ -60,6 +61,9 @@ public:
     ProjectIndexer*  projectIndexer()   const { return m_indexer; }
     CodeActions*     codeActions()      const { return m_codeActions; }
 
+    // Синхронизировать данные индексатора с SessionMemory (зовётся после индексации)
+    void syncProjectInfoToMemory();
+
 signals:
     void speakingChanged(bool speaking);
     void asyncResponseReady(const QString& response);
@@ -69,7 +73,20 @@ signals:
 private:
     void registerCommands();
 
-    // Команды
+    // === Контекст для Claude ===
+
+    // Детектор "коддинг-интента" в запросе
+    // ("сделай функцию", "оптимизируй", "добавь", "рефакторинг" и т.п.)
+    static bool isCodingIntent(const QString& input);
+
+    // Список токенов для поиска в проекте (очищенный от предлогов/мусора)
+    static QStringList extractKeywords(const QString& input);
+
+    // Собрать блок "--- Контекст из проекта ---" для запроса
+    // Учитывает вид интента (coding vs обычный) и подбирает разные стратегии.
+    QString buildProjectContext(const QString& userQuery) const;
+
+    // === Команды ===
     QString cmdTime(const QString& input);
     QString cmdDate(const QString& input);
     QString cmdGreeting(const QString& input);

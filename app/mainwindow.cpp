@@ -9,6 +9,7 @@
 #include "claude_api.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
+#include "session_memory.h"
 
 #include <QApplication>
 #include <QVBoxLayout>
@@ -27,7 +28,6 @@
 #include <QUrl>
 #include <QFileDialog>
 #include <QDir>
-#include <QTextDocument>
 
 // ============================================================
 // Конструктор
@@ -144,6 +144,9 @@ MainWindow::MainWindow(QWidget* parent)
                   + QStringLiteral(" (") + QString::number(m_jarvis->projectIndexer()->fileCount())
                   + QStringLiteral(" файлов)"),
                   Theme::LogColors::system);
+
+        // Синхронизируем проектный контекст с памятью (system prompt)
+        m_jarvis->syncProjectInfoToMemory();
     }
 
     m_input->setFocus();
@@ -212,16 +215,24 @@ void MainWindow::buildMenuBar()
     actVibe->setChecked(m_vibeCodingMode);
     connect(actVibe, &QAction::toggled, this, [this](bool checked) {
         m_vibeCodingMode = checked;
+
+        // Прокидываем режим в SessionMemory — это меняет system prompt для Claude
+        // Никаких искусственных префиксов к пользовательскому тексту больше нет.
+        m_jarvis->memory()->setVibeMode(checked);
+
         if (checked) {
-            m_input->setPlaceholderText(QStringLiteral("Опиши что хочешь создать..."));
+            m_input->setPlaceholderText(
+                QStringLiteral("Опиши что сделать: «оптимизируй X», «добавь функцию Y», «исправь Z»..."));
             appendLog(QStringLiteral("JARVIS"),
-                      QStringLiteral("Вайбкодинг включён. Опишите приложение/скрипт/страницу — "
-                                     "я напишу код. Укажите язык (Python, HTML, C++, JS...)"),
+                      QStringLiteral("Вайбкодинг включён. "
+                                     "Нужный код я возьму из индекса проекта сам — "
+                                     "достаточно коротких фраз типа «сделай виртуальную мышку» "
+                                     "или «оптимизируй session_memory.cpp»."),
                       Theme::LogColors::system);
         } else {
             m_input->setPlaceholderText(QStringLiteral("Введите команду или вопрос..."));
             appendLog(QStringLiteral("JARVIS"),
-                      QStringLiteral("Вайбкодинг выключен. Обычный режим."),
+                      QStringLiteral("Вайбкодинг выключен. Обычный режим (диалог + команды)."),
                       Theme::LogColors::system);
         }
     });
@@ -254,6 +265,9 @@ void MainWindow::buildMenuBar()
         m_jarvis->projectIndexer()->indexProject();
         m_jarvis->projectIndexer()->enableFileWatcher(true);
 
+        // Передаём данные индекса в SessionMemory (для system prompt)
+        m_jarvis->syncProjectInfoToMemory();
+
         appendLog(QStringLiteral("JARVIS"),
                   QStringLiteral("Проект проиндексирован!\n"
                                  "Файлов: ") + QString::number(m_jarvis->projectIndexer()->fileCount())
@@ -284,6 +298,7 @@ void MainWindow::buildMenuBar()
             return;
         }
         m_jarvis->projectIndexer()->indexProject();
+        m_jarvis->syncProjectInfoToMemory();
         appendLog(QStringLiteral("СИСТЕМА"),
                   QStringLiteral("Переиндексировано: ")
                   + QString::number(m_jarvis->projectIndexer()->fileCount())
@@ -401,16 +416,10 @@ void MainWindow::onSend()
     if (text.isEmpty()) return;
     m_input->clear();
 
-    // Вайбкодинг: добавляем системный префикс к запросу
-    if (m_vibeCodingMode && m_jarvis->claudeApi()->hasApiKey()) {
-        if (m_jarvis->claudeApi()->shouldUseApi(text)) {
-            text = QStringLiteral(
-                "Ты — вайбкодинг-ассистент. Пользователь описывает что хочет создать. "
-                "Напиши полный, готовый к запуску код. Не объясняй — только код. "
-                "Если нужно несколько файлов — раздели их комментариями с именами файлов.\n\n"
-                "Запрос: ") + text;
-        }
-    }
+    // Режим вайбкодинга теперь полностью живёт в system prompt
+    // (через SessionMemory::setVibeMode + buildSystemPrompt).
+    // Обогащение запроса кодом из индекса делает Jarvis::buildProjectContext,
+    // так что здесь — ничего лишнего к тексту пользователя не добавляем.
 
     appendLog(QStringLiteral("ВЫ"), text.left(200), Theme::LogColors::user);
 
@@ -677,7 +686,6 @@ void MainWindow::buildUI()
     m_log->setObjectName(QStringLiteral("logArea"));
     m_log->setReadOnly(true);
     m_log->setFocusPolicy(Qt::NoFocus);
-    m_log->document()->setMaximumBlockCount(1000);
     vbox->addWidget(m_log, 1);
 
     // === Панель предложений (скрыта) ===
@@ -801,7 +809,7 @@ void MainWindow::appendLog(const QString& who, const QString& text, const QStrin
     QString html = QStringLiteral(
         "<div style='margin-bottom:6px;'>"
         "<span style='color:%1;'>[%2]</span> "
-        "<span style='color:%3;font-weight:bold;'>%4:</span> "
+        "<span style='color:%3;'>%4:</span> "
         "<span style='color:%5;'>%6</span></div>"
     ).arg(Theme::LogColors::timestamp, time, color, who, color,
           text.toHtmlEscaped().replace(QStringLiteral("\n"), QStringLiteral("<br>")));

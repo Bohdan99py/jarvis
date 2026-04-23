@@ -83,6 +83,21 @@ public:
     // История прошлых сессий (краткие summary)
     QJsonArray pastSessionSummaries() const { return m_pastSessions; }
 
+    // --- Режимы работы ---
+
+    // Вайбкодинг режим (агрессивный кодинг, минимум объяснений)
+    void setVibeMode(bool on)            { m_vibeMode = on; }
+    bool vibeMode() const                { return m_vibeMode; }
+
+    // Контекст проиндексированного проекта (карта файлов, root, имя)
+    // Передаётся сюда из Jarvis при каждой перестройке индекса.
+    void setProjectInfo(const QString& root,
+                        const QString& projectMap,
+                        int fileCount,
+                        int symbolCount);
+    void clearProjectInfo();
+    bool hasProjectInfo() const          { return !m_projectRoot.isEmpty(); }
+
     // Системный промпт с контекстом для Claude API
     QString buildSystemPrompt() const;
 
@@ -101,6 +116,15 @@ private:
     QJsonObject m_commandStats;       // {"блокнот": 15, "найди": 42, ...}
     QJsonArray  m_pastSessions;       // [{date, summary, commandCount}, ...]
 
+    // Режимы
+    bool m_vibeMode = false;
+
+    // Проект (для инъекции в system prompt)
+    QString m_projectRoot;
+    QString m_projectMap;
+    int     m_projectFileCount   = 0;
+    int     m_projectSymbolCount = 0;
+
     static constexpr int MAX_SESSION_MESSAGES = 100;
-    static constexpr int MAX_PAST_SESSIONS = 30;
+    static constexpr int MAX_PAST_SESSIONS    = 30;
 };

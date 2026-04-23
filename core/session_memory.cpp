@@ -51,8 +51,8 @@ QJsonObject TaskContext::toJson() const
 TaskContext TaskContext::fromJson(const QJsonObject& obj)
 {
     TaskContext ctx;
-    ctx.currentTask = obj[QStringLiteral("currentTask")].toString();
-    ctx.lastTopic   = obj[QStringLiteral("lastTopic")].toString();
+    ctx.currentTask  = obj[QStringLiteral("currentTask")].toString();
+    ctx.lastTopic    = obj[QStringLiteral("lastTopic")].toString();
     ctx.commandCount = obj[QStringLiteral("commandCount")].toInt();
 
     for (const auto& v : obj[QStringLiteral("recentApps")].toArray())
@@ -92,8 +92,8 @@ SessionMemory::~SessionMemory()
         sessionSummaryObj[QStringLiteral("lastTopic")]    = m_taskContext.lastTopic;
 
         QString summary;
-        int count = m_sessionMessages.size();
-        int show = qMin(count, 4);
+        const int count = m_sessionMessages.size();
+        const int show  = qMin(count, 4);
         for (int i = 0; i < show; ++i) {
             const auto& msg = m_sessionMessages[i];
             summary += msg.role + QStringLiteral(": ")
@@ -137,7 +137,7 @@ void SessionMemory::addMessage(const QString& role, const QString& content)
 QJsonArray SessionMemory::recentMessagesAsJson(int maxMessages) const
 {
     QJsonArray arr;
-    int start = qMax(0, m_sessionMessages.size() - maxMessages);
+    const int start = qMax(0, m_sessionMessages.size() - maxMessages);
     for (int i = start; i < m_sessionMessages.size(); ++i) {
         const auto& msg = m_sessionMessages[i];
         QJsonObject obj;
@@ -151,7 +151,7 @@ QJsonArray SessionMemory::recentMessagesAsJson(int maxMessages) const
 QString SessionMemory::sessionSummary() const
 {
     QString summary;
-    int start = qMax(0, m_sessionMessages.size() - 10);
+    const int start = qMax(0, m_sessionMessages.size() - 10);
     for (int i = start; i < m_sessionMessages.size(); ++i) {
         const auto& msg = m_sessionMessages[i];
         summary += msg.role + QStringLiteral(": ") + msg.content + QStringLiteral("\n");
@@ -169,7 +169,7 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
 
     m_taskContext.commandCount++;
 
-    QString lower = userInput.toLower();
+    const QString lower = userInput.toLower();
 
     if (lower.contains(QStringLiteral("найди")) || lower.contains(QStringLiteral("search"))
         || lower.contains(QStringLiteral("гугл"))) {
@@ -269,42 +269,116 @@ void SessionMemory::recordCommandUsage(const QString& command)
 }
 
 // ============================================================
+// Проект: инъекция информации из индексатора
+// ============================================================
+
+void SessionMemory::setProjectInfo(const QString& root,
+                                   const QString& projectMap,
+                                   int fileCount,
+                                   int symbolCount)
+{
+    m_projectRoot        = root;
+    m_projectMap         = projectMap;
+    m_projectFileCount   = fileCount;
+    m_projectSymbolCount = symbolCount;
+}
+
+void SessionMemory::clearProjectInfo()
+{
+    m_projectRoot.clear();
+    m_projectMap.clear();
+    m_projectFileCount   = 0;
+    m_projectSymbolCount = 0;
+}
+
+// ============================================================
 // Системный промпт для Claude API
 // ============================================================
 
 QString SessionMemory::buildSystemPrompt() const
 {
-    QString prompt = QStringLiteral(
-        "Ты — J.A.R.V.I.S., персональный ИИ-ассистент и IDE на Windows. "
-        "Отвечай кратко, по делу, на русском.\n\n"
-        "=== РЕЖИМ РАБОТЫ С ФАЙЛАМИ ===\n"
-        "Когда пользователь просит создать или изменить код, используй специальные блоки:\n\n"
-        "Создать/перезаписать файл:\n"
-        "[FILE:путь/к/файлу.cpp]\n"
-        "...полный код файла...\n"
-        "[/FILE]\n\n"
-        "Изменить фрагмент в существующем файле (экономит токены!):\n"
-        "[DIFF:путь/к/файлу.cpp]\n"
-        "[FIND]\n"
-        "...точный старый код который нужно найти...\n"
-        "[REPLACE]\n"
-        "...новый код на замену...\n"
-        "[/DIFF]\n\n"
-        "Создать папку: [MKDIR:путь/к/папке]\n"
-        "Удалить файл: [DELETE:путь/к/файлу]\n"
-        "Системная команда: [CMD:команда]\n\n"
-        "=== ПРАВИЛА ===\n"
-        "- Для небольших изменений ВСЕГДА используй [DIFF] — не переписывай весь файл\n"
-        "- Для новых файлов используй [FILE]\n"
-        "- Пиши полный рабочий код, не пропускай части с комментариями типа '// ...остальное'\n"
-        "- Кратко объясни что делаешь ПЕРЕД блоками кода\n"
-        "- Пути указывай относительно корня проекта\n"
-        "- Если вопрос разговорный — просто ответь текстом без блоков\n\n"
+    QString prompt;
+
+    // --- Базовая роль ---
+    prompt += QStringLiteral(
+        "Ты — J.A.R.V.I.S., персональный ИИ-ассистент и IDE-агент на Windows. "
+        "Отвечай на русском, кратко и по делу. Без смайликов, без воды.\n\n"
     );
 
-    // Факты о пользователе
+    // --- Режим работы ---
+    if (m_vibeMode) {
+        prompt += QStringLiteral(
+            "=== РЕЖИМ: ВАЙБКОДИНГ ===\n"
+            "Пользователь пишет короткие кодинг-запросы ('сделай X', 'оптимизируй Y', "
+            "'добавь функцию Z'). Твоя задача:\n"
+            "- Писать РАБОЧИЙ готовый код, а не псевдокод.\n"
+            "- Объяснение — 1-2 строки ПЕРЕД блоком кода, не после.\n"
+            "- Никаких '// остальной код без изменений' — всегда полные файлы либо точные DIFF.\n\n"
+        );
+    } else {
+        prompt += QStringLiteral(
+            "=== РЕЖИМ: ДИАЛОГ + КОДИНГ ===\n"
+            "Можешь и разговаривать, и писать код. На обычные вопросы — отвечай текстом. "
+            "На кодинг-запросы — используй блоки из раздела ниже.\n\n"
+        );
+    }
+
+    // --- Блоки кода ---
+    prompt += QStringLiteral(
+        "=== РАБОТА С ФАЙЛАМИ (JARVIS ИХ АВТОМАТИЧЕСКИ ПРИМЕНИТ) ===\n"
+        "Создать/перезаписать файл:\n"
+        "[FILE:relative/path/file.cpp]\n"
+        "...полный код файла...\n"
+        "[/FILE]\n\n"
+        "Точечное изменение (экономит токены, предпочтительно для мелких правок):\n"
+        "[DIFF:relative/path/file.cpp]\n"
+        "[FIND]\n"
+        "...точный старый код...\n"
+        "[REPLACE]\n"
+        "...новый код...\n"
+        "[/DIFF]\n\n"
+        "Создать папку: [MKDIR:relative/path]\n"
+        "Удалить файл:  [DELETE:relative/path/file]\n"
+        "Системная команда: [CMD:команда]\n\n"
+        "Правила:\n"
+        "- Мелкие правки → [DIFF]. Крупные рефакторинги или новые файлы → [FILE].\n"
+        "- Не пиши заглушки вида '// ...без изменений' внутри [FILE] — только полный код.\n"
+        "- Пути — ВСЕГДА относительные от корня проекта.\n"
+        "- Разговорный вопрос → просто текст, без блоков.\n\n"
+    );
+
+    // --- Проект ---
+    if (hasProjectInfo()) {
+        prompt += QStringLiteral("=== ПРОЕКТ ПОЛЬЗОВАТЕЛЯ ===\n");
+        prompt += QStringLiteral("Корень: ") + m_projectRoot + QStringLiteral("\n");
+        prompt += QStringLiteral("Индекс: ") + QString::number(m_projectFileCount)
+                + QStringLiteral(" файлов, ")
+                + QString::number(m_projectSymbolCount)
+                + QStringLiteral(" символов.\n\n");
+
+        // Критично: запретить Claude просить код, если индекс есть
+        prompt += QStringLiteral(
+            "ВАЖНО: проект уже проиндексирован и тебе автоматически приложат релевантные "
+            "фрагменты в блоке '--- Контекст из проекта ---' в конце пользовательского сообщения. "
+            "НЕ ПРОСИ у пользователя 'скинь код' или 'приложи файл' — у тебя уже есть индекс. "
+            "Если нужного фрагмента не хватает — явно скажи, какой файл/функция нужна, и JARVIS "
+            "подгрузит её в следующем сообщении.\n\n"
+        );
+
+        if (!m_projectMap.isEmpty()) {
+            // Ограничим карту проекта, чтобы не съела весь бюджет токенов
+            QString map = m_projectMap;
+            constexpr int MAX_MAP_CHARS = 4000;
+            if (map.size() > MAX_MAP_CHARS) {
+                map = map.left(MAX_MAP_CHARS) + QStringLiteral("\n...(обрезано)\n");
+            }
+            prompt += QStringLiteral("Карта проекта:\n") + map + QStringLiteral("\n");
+        }
+    }
+
+    // --- Факты о пользователе ---
     if (!m_persistentFacts.isEmpty()) {
-        prompt += QStringLiteral("Факты о пользователе:\n");
+        prompt += QStringLiteral("=== ФАКТЫ О ПОЛЬЗОВАТЕЛЕ ===\n");
         for (auto it = m_persistentFacts.begin(); it != m_persistentFacts.end(); ++it) {
             prompt += QStringLiteral("- ") + it.key() + QStringLiteral(": ")
                     + it.value().toString() + QStringLiteral("\n");
@@ -312,26 +386,39 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral("\n");
     }
 
-    // Контекст
+    // --- Текущая задача ---
+    bool hasTaskBlock = false;
+    QString taskBlock;
     if (!m_taskContext.currentTask.isEmpty()) {
-        prompt += QStringLiteral("Текущая задача: ") + m_taskContext.currentTask + QStringLiteral("\n");
+        taskBlock += QStringLiteral("Текущая задача: ") + m_taskContext.currentTask
+                   + QStringLiteral("\n");
+        hasTaskBlock = true;
     }
     if (!m_taskContext.lastTopic.isEmpty()) {
-        prompt += QStringLiteral("Последняя тема: ") + m_taskContext.lastTopic + QStringLiteral("\n");
+        taskBlock += QStringLiteral("Последняя тема: ") + m_taskContext.lastTopic
+                   + QStringLiteral("\n");
+        hasTaskBlock = true;
     }
     if (!m_taskContext.recentApps.isEmpty()) {
-        prompt += QStringLiteral("Недавние приложения: ")
-                + m_taskContext.recentApps.join(QStringLiteral(", ")) + QStringLiteral("\n");
+        taskBlock += QStringLiteral("Недавние приложения: ")
+                   + m_taskContext.recentApps.join(QStringLiteral(", "))
+                   + QStringLiteral("\n");
+        hasTaskBlock = true;
+    }
+    if (hasTaskBlock) {
+        prompt += QStringLiteral("=== КОНТЕКСТ СЕССИИ ===\n") + taskBlock + QStringLiteral("\n");
     }
 
-    // Прошлые сессии
+    // --- Прошлые сессии (только самые свежие) ---
     if (!m_pastSessions.isEmpty()) {
-        prompt += QStringLiteral("\nИз прошлых сессий:\n");
-        int show = qMin(m_pastSessions.size(), 3);
+        prompt += QStringLiteral("=== ИЗ ПРОШЛЫХ СЕССИЙ ===\n");
+        const int show = qMin(m_pastSessions.size(), 3);
         for (int i = m_pastSessions.size() - show; i < m_pastSessions.size(); ++i) {
-            QJsonObject s = m_pastSessions[i].toObject();
+            const QJsonObject s = m_pastSessions[i].toObject();
+            const QString topic = s[QStringLiteral("lastTopic")].toString();
+            if (topic.isEmpty()) continue;
             prompt += QStringLiteral("- ") + s[QStringLiteral("date")].toString()
-                    + QStringLiteral(": ") + s[QStringLiteral("lastTopic")].toString() + QStringLiteral("\n");
+                    + QStringLiteral(": ") + topic + QStringLiteral("\n");
         }
     }
 
