@@ -1,83 +1,69 @@
-; -------------------------------------------------------
-; installer.iss — Inno Setup для J.A.R.V.I.S.
-;
-; Включает: Jarvis.exe + Qt DLL + VC++ Runtime
-; Пользователю НЕ нужно ничего ставить отдельно.
-; -------------------------------------------------------
+; Inno Setup script for J.A.R.V.I.S.
+; Версия и MyAppBuildDir подставляются GitHub Actions при сборке.
 
-#define MyAppName "J.A.R.V.I.S."
-#define MyAppVersion "2.0.0"
-#define MyAppPublisher "JARVIS Project"
+#define MyAppName "JARVIS"
+#define MyAppVersion "2.4.8"
+#define MyAppPublisher "Bohdan99py"
 #define MyAppURL "https://github.com/Bohdan99py/jarvis"
-#define MyAppExeName "Jarvis.exe"
-#define MyAppBuildDir "build\release_package"
+#define MyAppExeName "jarvis.exe"
+#define MyAppBuildDir "release_package"
 
 [Setup]
-AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+AppId={{B0F5A4E2-1C3A-4E29-9D7E-AB2D5F8E9B11}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} v{#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}/issues
+AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={autopf}\JARVIS
+DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=build\installer
 OutputBaseFilename=JARVIS-Setup-{#MyAppVersion}
-Compression=lzma2/ultra64
+Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#MyAppExeName}
-CloseApplications=yes
-CloseApplicationsFilter=Jarvis.exe
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "autostart"; Description: "Запускать при старте Windows / Start with Windows"; GroupDescription: "Дополнительно / Additional:"
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Всё из release_package (exe + Qt DLL + платформы и т.д.)
-Source: "{#MyAppBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Главный исполняемый файл (теперь содержит ядро статически)
+Source: "{#MyAppBuildDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
-; VC++ Redistributable
-Source: "redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: not VCRedistInstalled
+; Все Qt-DLL и плагины Qt из release_package (windeployqt их туда положил)
+Source: "{#MyAppBuildDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; Папки от windeployqt: platforms, styles, imageformats, networkinformation, tls и т.п.
+Source: "{#MyAppBuildDir}\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\imageformats\*"; DestDir: "{app}\imageformats"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\iconengines\*"; DestDir: "{app}\iconengines"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\networkinformation\*"; DestDir: "{app}\networkinformation"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\generic\*"; DestDir: "{app}\generic"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+
+; Плагины JARVIS (если есть)
+Source: "{#MyAppBuildDir}\plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-    ValueType: string; ValueName: "JARVIS"; \
-    ValueData: """{app}\{#MyAppExeName}"""; \
-    Flags: uninsdeletevalue; Tasks: autostart
-
 [Run]
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; \
-    StatusMsg: "Installing Visual C++ Runtime..."; \
-    Flags: waituntilterminated; Check: not VCRedistInstalled
-
-Filename: "{app}\{#MyAppExeName}"; \
-    Description: "{cm:LaunchProgram,{#MyAppName}}"; \
-    Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\JARVIS Project"
-
-[Code]
-function VCRedistInstalled(): Boolean;
-begin
-    Result := RegKeyExists(HKLM,
-        'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64')
-        or RegKeyExists(HKLM,
-        'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64');
-end;
+; Удаляем всё что остаётся (логи, кэш JARVIS)
+Type: filesandordirs; Name: "{app}"
