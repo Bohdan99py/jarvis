@@ -1,7 +1,6 @@
 #pragma once
 // -------------------------------------------------------
-// session_memory.h — Контекстная память сессии и
-//                    постоянное хранилище (JSON)
+// session_memory.h — Контекстная память сессии
 // -------------------------------------------------------
 
 #include <QObject>
@@ -11,10 +10,11 @@
 #include <QVector>
 #include <QDateTime>
 
-// Одна запись в истории диалога
+#include "jarvis_core_export.h"
+
 struct ChatMessage
 {
-    QString role;       // "user" или "assistant"
+    QString role;
     QString content;
     QDateTime timestamp;
 
@@ -22,21 +22,20 @@ struct ChatMessage
     static ChatMessage fromJson(const QJsonObject& obj);
 };
 
-// Контекст текущей задачи
 struct TaskContext
 {
-    QString currentTask;           // Что сейчас делает пользователь
-    QString lastTopic;             // Последняя тема разговора
-    QStringList recentApps;        // Недавно запущенные приложения
-    QStringList recentSearches;    // Недавние поиски
-    int commandCount = 0;          // Число команд за сессию
+    QString currentTask;
+    QString lastTopic;
+    QStringList recentApps;
+    QStringList recentSearches;
+    int commandCount = 0;
 
     QJsonObject toJson() const;
     static TaskContext fromJson(const QJsonObject& obj);
     void clear();
 };
 
-class SessionMemory : public QObject
+class JARVIS_CORE_EXPORT SessionMemory : public QObject
 {
     Q_OBJECT
 
@@ -44,53 +43,31 @@ public:
     explicit SessionMemory(QObject* parent = nullptr);
     ~SessionMemory() override;
 
-    // --- Текущая сессия ---
-
-    // Добавить сообщение в историю
     void addMessage(const QString& role, const QString& content);
-
-    // Получить последние N сообщений для контекста API
     QJsonArray recentMessagesAsJson(int maxMessages = 20) const;
-
-    // Получить всю историю сессии как текст (для локального fallback)
     QString sessionSummary() const;
 
-    // Контекст задачи
     TaskContext& taskContext() { return m_taskContext; }
     const TaskContext& taskContext() const { return m_taskContext; }
 
-    // Обновить контекст на основе команды пользователя
     void updateContext(const QString& userInput, const QString& response);
-
-    // Количество сообщений в сессии
     int messageCount() const { return m_sessionMessages.size(); }
 
-    // --- Постоянная память (между сессиями) ---
-
-    // Загрузить / сохранить в JSON-файл
     void loadPersistent();
     void savePersistent();
 
-    // Добавить факт для долгосрочной памяти
     void rememberFact(const QString& key, const QString& value);
     QString recallFact(const QString& key) const;
     QJsonObject allFacts() const { return m_persistentFacts; }
 
-    // Статистика использования команд (для предугадывания)
     void recordCommandUsage(const QString& command);
     QJsonObject commandStats() const { return m_commandStats; }
 
-    // История прошлых сессий (краткие summary)
     QJsonArray pastSessionSummaries() const { return m_pastSessions; }
 
-    // --- Режимы работы ---
-
-    // Вайбкодинг режим (агрессивный кодинг, минимум объяснений)
     void setVibeMode(bool on)            { m_vibeMode = on; }
     bool vibeMode() const                { return m_vibeMode; }
 
-    // Контекст проиндексированного проекта (карта файлов, root, имя)
-    // Передаётся сюда из Jarvis при каждой перестройке индекса.
     void setProjectInfo(const QString& root,
                         const QString& projectMap,
                         int fileCount,
@@ -98,7 +75,6 @@ public:
     void clearProjectInfo();
     bool hasProjectInfo() const          { return !m_projectRoot.isEmpty(); }
 
-    // Системный промпт с контекстом для Claude API
     QString buildSystemPrompt() const;
 
 signals:
@@ -107,19 +83,15 @@ signals:
 private:
     QString persistentFilePath() const;
 
-    // Сессия
     QVector<ChatMessage> m_sessionMessages;
     TaskContext m_taskContext;
 
-    // Постоянная память
-    QJsonObject m_persistentFacts;    // {"имя_пользователя": "...", "предпочтения": "..."}
-    QJsonObject m_commandStats;       // {"блокнот": 15, "найди": 42, ...}
-    QJsonArray  m_pastSessions;       // [{date, summary, commandCount}, ...]
+    QJsonObject m_persistentFacts;
+    QJsonObject m_commandStats;
+    QJsonArray  m_pastSessions;
 
-    // Режимы
     bool m_vibeMode = false;
 
-    // Проект (для инъекции в system prompt)
     QString m_projectRoot;
     QString m_projectMap;
     int     m_projectFileCount   = 0;

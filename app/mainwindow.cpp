@@ -1,3 +1,4 @@
+
 // -------------------------------------------------------
 // mainwindow.cpp — Главное окно J.A.R.V.I.S.
 // -------------------------------------------------------
@@ -10,10 +11,12 @@
 #include "auto_updater.h"
 #include "project_indexer.h"
 #include "session_memory.h"
+#include "attachments_manager.h"
 
 #include <QApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QScrollArea>
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QScreen>
@@ -28,6 +31,10 @@
 #include <QUrl>
 #include <QFileDialog>
 #include <QDir>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QToolTip>
 
 // ============================================================
 // Конструктор
@@ -36,13 +43,12 @@
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
+    setAcceptDrops(true); // Включаем drag-n-drop файлов
+
     m_jarvis = new Jarvis(this);
 
-    // TTS
     connect(m_jarvis, &Jarvis::speakingChanged,
             this, &MainWindow::onSpeakingChanged);
-
-    // Виртуальная клавиатура
     connect(m_jarvis->keyEmulator(), &KeyEmulator::typingStarted,
             this, &MainWindow::onTypingStarted);
     connect(m_jarvis->keyEmulator(), &KeyEmulator::typingProgress,
@@ -50,17 +56,19 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_jarvis->keyEmulator(), &KeyEmulator::typingFinished,
             this, &MainWindow::onTypingFinished);
 
-    // Мозги: асинхронные ответы Claude API
     connect(m_jarvis, &Jarvis::asyncResponseReady,
             this, &MainWindow::onAsyncResponse);
     connect(m_jarvis, &Jarvis::asyncResponseError,
             this, &MainWindow::onAsyncError);
-
-    // Предложения действий
     connect(m_jarvis, &Jarvis::suggestionAvailable,
             this, &MainWindow::onSuggestion);
 
-    // Индикатор «Думаю...» при запросе к API
+    // Прикрепления
+    connect(m_jarvis->attachments(), &AttachmentsManager::changed,
+            this, &MainWindow::onAttachmentsChanged);
+    connect(m_jarvis, &Jarvis::attachmentsConsumed,
+            this, &MainWindow::onAttachmentsConsumed);
+
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestStarted,
             this, [this]() { setThinkingState(true); });
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestFinished,
@@ -76,7 +84,6 @@ MainWindow::MainWindow(QWidget* parent)
         Q_UNUSED(downloadUrl)
         showUpdateBar(newVersion);
     });
-
     connect(updater, &AutoUpdater::noUpdateAvailable,
             this, [this]() {
         appendLog(QStringLiteral("СИСТЕМА"),
@@ -84,7 +91,6 @@ MainWindow::MainWindow(QWidget* parent)
                   + QCoreApplication::applicationVersion() + QStringLiteral(")."),
                   Theme::LogColors::system);
     });
-
     connect(updater, &AutoUpdater::downloadProgress,
             this, [this](int percent) {
         m_status->setText(QStringLiteral("Скачивание: %1%").arg(percent));
@@ -93,7 +99,6 @@ MainWindow::MainWindow(QWidget* parent)
             m_updateProgress->setVisible(true);
         }
     });
-
     connect(updater, &AutoUpdater::downloadFinished,
             this, [this](const QString& path) {
         Q_UNUSED(path)
@@ -102,7 +107,6 @@ MainWindow::MainWindow(QWidget* parent)
                   Theme::LogColors::system);
         hideUpdateBar();
     });
-
     connect(updater, &AutoUpdater::updateError,
             this, [this](const QString& error) {
         appendLog(QStringLiteral("ОШИБКА"), error, Theme::LogColors::error);
@@ -127,7 +131,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     if (m_jarvis->claudeApi()->hasApiKey()) {
         appendLog(QStringLiteral("JARVIS"),
-                  QStringLiteral("Claude API подключён. Свободный диалог и вайбкодинг доступны."),
+                  QStringLiteral("Claude API подключён. Прикрепляйте файлы кнопкой 📎 "
+                                 "или перетаскиванием в окно."),
                   Theme::LogColors::system);
     } else {
         appendLog(QStringLiteral("JARVIS"),
@@ -136,7 +141,6 @@ MainWindow::MainWindow(QWidget* parent)
                   Theme::LogColors::jarvis);
     }
 
-    // Показываем статус индексатора если проект уже загружен из кэша
     if (m_jarvis->projectIndexer()->fileCount() > 0) {
         appendLog(QStringLiteral("JARVIS"),
                   QStringLiteral("Проект загружен из кэша: ")
@@ -144,8 +148,6 @@ MainWindow::MainWindow(QWidget* parent)
                   + QStringLiteral(" (") + QString::number(m_jarvis->projectIndexer()->fileCount())
                   + QStringLiteral(" файлов)"),
                   Theme::LogColors::system);
-
-        // Синхронизируем проектный контекст с памятью (system prompt)
         m_jarvis->syncProjectInfoToMemory();
     }
 
@@ -163,8 +165,39 @@ MainWindow::MainWindow(QWidget* parent)
     });
     m_pulseTimer->start(400);
 
-    // Проверяем обновления при старте (тихо)
     m_jarvis->autoUpdater()->checkForUpdates(true);
+}
+
+// ============================================================
+// Drag-n-drop: принимаем файлы
+// ============================================================
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* e)
+{
+    if (e->mimeData()->hasUrls()) {
+        e->acceptProposedAction();
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* e)
+{
+    if (!e->mimeData()->hasUrls()) return;
+
+    QStringList paths;
+    for (const QUrl& url : e->mimeData()->urls()) {
+        if (url.isLocalFile()) {
+            paths.append(url.toLocalFile());
+        }
+    }
+    if (paths.isEmpty()) return;
+
+    int added = m_jarvis->attachments()->addFiles(paths);
+    if (added > 0) {
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Прикреплено файлов: ") + QString::number(added),
+                  Theme::LogColors::system);
+    }
+    e->acceptProposedAction();
 }
 
 // ============================================================
@@ -182,6 +215,17 @@ void MainWindow::buildMenuBar()
 
     // --- Файл ---
     auto* fileMenu = menuBar->addMenu(QStringLiteral("Файл"));
+
+    auto* actAttach = fileMenu->addAction(QStringLiteral("Прикрепить файлы..."));
+    actAttach->setShortcut(QKeySequence(QStringLiteral("Ctrl+O")));
+    connect(actAttach, &QAction::triggered, this, &MainWindow::onAttachClicked);
+
+    auto* actClearAttach = fileMenu->addAction(QStringLiteral("Очистить прикрепления"));
+    connect(actClearAttach, &QAction::triggered, this, [this]() {
+        m_jarvis->attachments()->clear();
+    });
+
+    fileMenu->addSeparator();
 
     auto* actClear = fileMenu->addAction(QStringLiteral("Очистить лог"));
     connect(actClear, &QAction::triggered, this, [this]() { m_log->clear(); });
@@ -215,26 +259,33 @@ void MainWindow::buildMenuBar()
     actVibe->setChecked(m_vibeCodingMode);
     connect(actVibe, &QAction::toggled, this, [this](bool checked) {
         m_vibeCodingMode = checked;
-
-        // Прокидываем режим в SessionMemory — это меняет system prompt для Claude
-        // Никаких искусственных префиксов к пользовательскому тексту больше нет.
         m_jarvis->memory()->setVibeMode(checked);
 
         if (checked) {
             m_input->setPlaceholderText(
-                QStringLiteral("Опиши что сделать: «оптимизируй X», «добавь функцию Y», «исправь Z»..."));
+                QStringLiteral("Опиши что сделать: «оптимизируй X», «добавь Y», «исправь Z»..."));
             appendLog(QStringLiteral("JARVIS"),
                       QStringLiteral("Вайбкодинг включён. "
-                                     "Нужный код я возьму из индекса проекта сам — "
-                                     "достаточно коротких фраз типа «сделай виртуальную мышку» "
-                                     "или «оптимизируй session_memory.cpp»."),
+                                     "Нужный код я возьму из индекса либо из прикреплённых файлов."),
                       Theme::LogColors::system);
         } else {
             m_input->setPlaceholderText(QStringLiteral("Введите команду или вопрос..."));
             appendLog(QStringLiteral("JARVIS"),
-                      QStringLiteral("Вайбкодинг выключен. Обычный режим (диалог + команды)."),
+                      QStringLiteral("Вайбкодинг выключен. Обычный режим."),
                       Theme::LogColors::system);
         }
+    });
+
+    auto* actKeepAttach = settingsMenu->addAction(QStringLiteral("Держать прикрепления"));
+    actKeepAttach->setCheckable(true);
+    actKeepAttach->setChecked(false);
+    connect(actKeepAttach, &QAction::toggled, this, [this](bool checked) {
+        m_jarvis->attachments()->setKeepAfterSend(checked);
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  checked
+                    ? QStringLiteral("Прикрепления сохраняются между запросами.")
+                    : QStringLiteral("Прикрепления очищаются после каждой отправки."),
+                  Theme::LogColors::system);
     });
 
     settingsMenu->addSeparator();
@@ -247,13 +298,11 @@ void MainWindow::buildMenuBar()
 
     auto* actIndexProject = projectMenu->addAction(QStringLiteral("Индексировать папку..."));
     connect(actIndexProject, &QAction::triggered, this, [this]() {
-        // Начальная папка — последний проект или домашняя
         QString startDir = m_jarvis->projectIndexer()->projectRoot();
         if (startDir.isEmpty()) startDir = QDir::homePath();
 
         QString dir = QFileDialog::getExistingDirectory(this,
-            QStringLiteral("Выберите папку проекта"),
-            startDir,
+            QStringLiteral("Выберите папку проекта"), startDir,
             QFileDialog::ShowDirsOnly);
         if (dir.isEmpty()) return;
 
@@ -264,16 +313,12 @@ void MainWindow::buildMenuBar()
         m_jarvis->projectIndexer()->setProjectRoot(dir);
         m_jarvis->projectIndexer()->indexProject();
         m_jarvis->projectIndexer()->enableFileWatcher(true);
-
-        // Передаём данные индекса в SessionMemory (для system prompt)
         m_jarvis->syncProjectInfoToMemory();
 
         appendLog(QStringLiteral("JARVIS"),
                   QStringLiteral("Проект проиндексирован!\n"
                                  "Файлов: ") + QString::number(m_jarvis->projectIndexer()->fileCount())
-                  + QStringLiteral(", Символов: ") + QString::number(m_jarvis->projectIndexer()->symbolCount())
-                  + QStringLiteral("\nСлежение за изменениями включено.\n"
-                                   "Теперь при вопросах к Claude я автоматически найду нужный код."),
+                  + QStringLiteral(", Символов: ") + QString::number(m_jarvis->projectIndexer()->symbolCount()),
                   Theme::LogColors::jarvis);
     });
 
@@ -281,7 +326,7 @@ void MainWindow::buildMenuBar()
     connect(actProjectMap, &QAction::triggered, this, [this]() {
         if (m_jarvis->projectIndexer()->fileCount() == 0) {
             appendLog(QStringLiteral("СИСТЕМА"),
-                      QStringLiteral("Проект не проиндексирован. Используйте Проект → Индексировать папку."),
+                      QStringLiteral("Проект не проиндексирован."),
                       Theme::LogColors::error);
             return;
         }
@@ -293,7 +338,7 @@ void MainWindow::buildMenuBar()
     connect(actReindex, &QAction::triggered, this, [this]() {
         if (m_jarvis->projectIndexer()->projectRoot().isEmpty()) {
             appendLog(QStringLiteral("СИСТЕМА"),
-                      QStringLiteral("Сначала выберите папку: Проект → Индексировать папку."),
+                      QStringLiteral("Сначала выберите папку."),
                       Theme::LogColors::error);
             return;
         }
@@ -302,9 +347,7 @@ void MainWindow::buildMenuBar()
         appendLog(QStringLiteral("СИСТЕМА"),
                   QStringLiteral("Переиндексировано: ")
                   + QString::number(m_jarvis->projectIndexer()->fileCount())
-                  + QStringLiteral(" файлов, ")
-                  + QString::number(m_jarvis->projectIndexer()->symbolCount())
-                  + QStringLiteral(" символов."),
+                  + QStringLiteral(" файлов."),
                   Theme::LogColors::system);
     });
 
@@ -325,11 +368,9 @@ void MainWindow::buildMenuBar()
                      + QStringLiteral("\nСимволов: ") + QString::number(idx->symbolCount())
                      + QStringLiteral("\n\nКлассы:\n");
 
-        QStringList classes = idx->allClasses();
-        for (const auto& cls : classes) {
+        for (const auto& cls : idx->allClasses()) {
             info += QStringLiteral("  • ") + cls + QStringLiteral("\n");
         }
-
         appendLog(QStringLiteral("JARVIS"), info.trimmed(), Theme::LogColors::jarvis);
     });
 
@@ -338,8 +379,7 @@ void MainWindow::buildMenuBar()
 
     auto* actCheck = updateMenu->addAction(QStringLiteral("Проверить обновления"));
     connect(actCheck, &QAction::triggered, this, [this]() {
-        appendLog(QStringLiteral("СИСТЕМА"),
-                  QStringLiteral("Проверяю обновления..."),
+        appendLog(QStringLiteral("СИСТЕМА"), QStringLiteral("Проверяю обновления..."),
                   Theme::LogColors::system);
         m_jarvis->autoUpdater()->checkForUpdates(false);
     });
@@ -348,21 +388,15 @@ void MainWindow::buildMenuBar()
     connect(actDownload, &QAction::triggered, this, [this]() {
         auto* upd = m_jarvis->autoUpdater();
         if (upd->hasPendingUpdate()) {
-            appendLog(QStringLiteral("СИСТЕМА"),
-                      QStringLiteral("Скачиваю v") + upd->pendingVersion() + QStringLiteral("..."),
-                      Theme::LogColors::system);
             upd->downloadPendingUpdate();
         } else {
-            appendLog(QStringLiteral("СИСТЕМА"),
-                      QStringLiteral("Нет доступных обновлений. Проверьте сначала."),
-                      Theme::LogColors::system);
             upd->checkForUpdates(false);
         }
     });
 
     updateMenu->addSeparator();
 
-    auto* actReleases = updateMenu->addAction(QStringLiteral("Открыть страницу релизов"));
+    auto* actReleases = updateMenu->addAction(QStringLiteral("Страница релизов"));
     connect(actReleases, &QAction::triggered, this, []() {
         QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/releases")));
     });
@@ -374,10 +408,7 @@ void MainWindow::buildMenuBar()
     connect(actAbout, &QAction::triggered, this, [this]() {
         QMessageBox::about(this, QStringLiteral("J.A.R.V.I.S."),
             QStringLiteral("J.A.R.V.I.S. — Personal AI Assistant\n\n"
-                           "Версия: v%1\n"
-                           "Движок: Claude API (Anthropic)\n"
-                           "Автор: Bohdan99py\n\n"
-                           "github.com/Bohdan99py/jarvis")
+                           "Версия: v%1\nДвижок: Claude API\nАвтор: Bohdan99py")
                 .arg(QCoreApplication::applicationVersion()));
     });
 
@@ -413,17 +444,34 @@ void MainWindow::keyPressEvent(QKeyEvent* e)
 void MainWindow::onSend()
 {
     QString text = m_input->text().trimmed();
-    if (text.isEmpty()) return;
+
+    // Если текст пустой, но есть прикрепления — не даём «молча» отправить
+    const bool hasAttach = !m_jarvis->attachments()->isEmpty();
+    if (text.isEmpty() && !hasAttach) return;
+    if (text.isEmpty() && hasAttach) {
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Напишите запрос — прикреплённые файлы будут отправлены вместе с ним."),
+                  Theme::LogColors::error);
+        return;
+    }
+
     m_input->clear();
 
-    // Режим вайбкодинга теперь полностью живёт в system prompt
-    // (через SessionMemory::setVibeMode + buildSystemPrompt).
-    // Обогащение запроса кодом из индекса делает Jarvis::buildProjectContext,
-    // так что здесь — ничего лишнего к тексту пользователя не добавляем.
+    // Собираем блок прикреплений (читает файлы)
+    const QString attachmentBlock = m_jarvis->attachments()->buildAttachmentBlock();
 
-    appendLog(QStringLiteral("ВЫ"), text.left(200), Theme::LogColors::user);
+    // Лог: показываем и текст, и список прикреплений
+    QString userLog = text.left(200);
+    if (hasAttach) {
+        userLog += QStringLiteral("   [📎 ")
+                 + QString::number(m_jarvis->attachments()->count())
+                 + QStringLiteral(" файл(ов), ")
+                 + m_jarvis->attachments()->totalSizeHuman()
+                 + QStringLiteral("]");
+    }
+    appendLog(QStringLiteral("ВЫ"), userLog, Theme::LogColors::user);
 
-    QString response = m_jarvis->processCommand(text);
+    QString response = m_jarvis->processCommand(text, attachmentBlock);
 
     if (!response.isEmpty()) {
         appendLog(QStringLiteral("JARVIS"), response, Theme::LogColors::jarvis);
@@ -474,13 +522,12 @@ void MainWindow::onTypingFinished()
 }
 
 // ============================================================
-// Slots: Claude API (мозги)
+// Slots: Claude API
 // ============================================================
 
 void MainWindow::onAsyncResponse(const QString& response)
 {
     appendLog(QStringLiteral("JARVIS"), response, Theme::LogColors::jarvis);
-
     if (response.length() <= 200) {
         m_jarvis->speakAsync(response);
     }
@@ -496,6 +543,50 @@ void MainWindow::onSuggestion(const QString& description, const QString& action)
     m_pendingSuggestionAction = action;
     m_suggestionText->setText(QStringLiteral("→ ") + description);
     m_suggestionBar->setVisible(true);
+}
+
+// ============================================================
+// Slots: прикрепления
+// ============================================================
+
+void MainWindow::onAttachClicked()
+{
+    QString startDir = m_jarvis->projectIndexer()->projectRoot();
+    if (startDir.isEmpty()) startDir = QDir::homePath();
+
+    QStringList files = QFileDialog::getOpenFileNames(this,
+        QStringLiteral("Прикрепить файлы к следующему запросу"),
+        startDir,
+        QStringLiteral("Все файлы (*);;Исходный код (*.cpp *.h *.hpp *.c *.py *.js *.ts);;"
+                       "Конфиги (*.json *.yaml *.yml *.toml *.ini *.cmake);;"
+                       "Текст (*.txt *.md *.log)"));
+    if (files.isEmpty()) return;
+
+    int added = m_jarvis->attachments()->addFiles(files);
+    if (added == 0) {
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Файлы уже прикреплены или лимит достигнут."),
+                  Theme::LogColors::error);
+    } else if (added < files.size()) {
+        appendLog(QStringLiteral("СИСТЕМА"),
+                  QStringLiteral("Прикреплено ") + QString::number(added)
+                  + QStringLiteral(" из ") + QString::number(files.size())
+                  + QStringLiteral(" файлов (остальные — дубликаты или сверх лимита)."),
+                  Theme::LogColors::system);
+    }
+}
+
+void MainWindow::onAttachmentsChanged()
+{
+    rebuildAttachmentsBar();
+}
+
+void MainWindow::onAttachmentsConsumed()
+{
+    // Если пользователь не просил держать — чистим после успешной отправки
+    if (!m_jarvis->attachments()->keepAfterSend()) {
+        m_jarvis->attachments()->clear();
+    }
 }
 
 // ============================================================
@@ -531,8 +622,7 @@ void MainWindow::showUpdateBar(const QString& version)
     m_updateBar->setVisible(true);
 
     appendLog(QStringLiteral("СИСТЕМА"),
-              QStringLiteral("Доступно обновление v") + version
-              + QStringLiteral(". Нажмите кнопку «Обновить» или Обновление → Скачать обновление."),
+              QStringLiteral("Доступно обновление v") + version,
               Theme::LogColors::system);
 }
 
@@ -542,7 +632,7 @@ void MainWindow::hideUpdateBar()
 }
 
 // ============================================================
-// Клавиатура: показать/скрыть
+// Клавиатура
 // ============================================================
 
 void MainWindow::toggleKeyboard()
@@ -575,6 +665,102 @@ void MainWindow::toggleKeyboard()
 }
 
 // ============================================================
+// Перестройка панели прикреплений
+// ============================================================
+
+void MainWindow::rebuildAttachmentsBar()
+{
+    if (!m_attachBar || !m_attachLayout) return;
+
+    // Удаляем всё из горизонтального layout
+    while (QLayoutItem* item = m_attachLayout->takeAt(0)) {
+        if (auto* w = item->widget()) w->deleteLater();
+        delete item;
+    }
+
+    const auto* mgr = m_jarvis->attachments();
+
+    if (mgr->isEmpty()) {
+        m_attachBar->setVisible(false);
+        m_attachSummary->setText(QString());
+        return;
+    }
+
+    m_attachBar->setVisible(true);
+
+    // Чипсы — по одному на файл
+    for (int i = 0; i < mgr->count(); ++i) {
+        const auto& a = mgr->items()[i];
+
+        auto* chip = new QWidget(m_attachBar);
+        chip->setStyleSheet(
+            QStringLiteral("background-color: #0f2438; border: 1px solid #1a4a70; "
+                           "border-radius: 10px; padding: 2px 4px;"));
+
+        auto* chipLay = new QHBoxLayout(chip);
+        chipLay->setContentsMargins(8, 2, 4, 2);
+        chipLay->setSpacing(4);
+
+        QString iconEmoji;
+        QString iconColor;
+        if (a.isTooLarge) {
+            iconEmoji = QStringLiteral("⚠");
+            iconColor = QStringLiteral("#ff6b6b");
+        } else if (a.isBinary) {
+            iconEmoji = QStringLiteral("▣");
+            iconColor = QStringLiteral("#ffaa00");
+        } else {
+            iconEmoji = QStringLiteral("📄");
+            iconColor = QStringLiteral("#00d4ff");
+        }
+
+        auto* icon = new QLabel(iconEmoji, chip);
+        icon->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; border: none; background: transparent;").arg(iconColor));
+
+        auto* nameLabel = new QLabel(chip);
+        QString displayText = a.displayName;
+        if (displayText.length() > 28) {
+            displayText = displayText.left(25) + QStringLiteral("...");
+        }
+        nameLabel->setText(displayText + QStringLiteral("  ")
+                         + QStringLiteral("<span style='color:#5a7a90;'>(")
+                         + AttachmentsManager::humanSize(a.sizeBytes)
+                         + QStringLiteral(")</span>"));
+        nameLabel->setStyleSheet(
+            QStringLiteral("color: #c0dceb; font-size: 11px; border: none; background: transparent;"));
+        nameLabel->setToolTip(a.filePath);
+
+        auto* closeBtn = new QPushButton(QStringLiteral("✕"), chip);
+        closeBtn->setFixedSize(18, 18);
+        closeBtn->setCursor(Qt::PointingHandCursor);
+        closeBtn->setStyleSheet(
+            QStringLiteral("QPushButton { background: transparent; color: #5a7a90; border: none; "
+                           "font-size: 12px; padding: 0; } "
+                           "QPushButton:hover { color: #ff6b6b; }"));
+        const int index = i;
+        connect(closeBtn, &QPushButton::clicked, this, [this, index]() {
+            m_jarvis->attachments()->removeAt(index);
+        });
+
+        chipLay->addWidget(icon);
+        chipLay->addWidget(nameLabel);
+        chipLay->addWidget(closeBtn);
+
+        m_attachLayout->addWidget(chip);
+    }
+
+    m_attachLayout->addStretch(1);
+
+    // Summary: «3 файла, 127.4 КБ»
+    m_attachSummary->setText(QStringLiteral("📎 ")
+                           + QString::number(mgr->count())
+                           + (mgr->count() == 1
+                              ? QStringLiteral(" файл, ")
+                              : QStringLiteral(" файлов, "))
+                           + mgr->totalSizeHuman());
+}
+
+// ============================================================
 // UI
 // ============================================================
 
@@ -582,8 +768,8 @@ void MainWindow::buildUI()
 {
     setWindowTitle(QStringLiteral("J.A.R.V.I.S. — Personal Assistant v")
                    + QCoreApplication::applicationVersion());
-    setMinimumSize(620, 540);
-    resize(700, 650);
+    setMinimumSize(680, 560);
+    resize(760, 680);
 
     if (auto* scr = QApplication::primaryScreen()) {
         QRect g = scr->availableGeometry();
@@ -599,7 +785,6 @@ void MainWindow::buildUI()
 
     // === Заголовок ===
     auto* topBar = new QHBoxLayout();
-
     auto* title = new QLabel(QStringLiteral("⬡  J.A.R.V.I.S."), this);
     title->setObjectName(QStringLiteral("titleLabel"));
 
@@ -671,15 +856,11 @@ void MainWindow::buildUI()
     connect(m_updateBtn, &QPushButton::clicked, this, [this]() {
         m_updateBtn->setVisible(false);
         m_updateProgress->setVisible(true);
-        appendLog(QStringLiteral("СИСТЕМА"),
-                  QStringLiteral("Скачиваю обновление..."),
+        appendLog(QStringLiteral("СИСТЕМА"), QStringLiteral("Скачиваю обновление..."),
                   Theme::LogColors::system);
         m_jarvis->autoUpdater()->downloadPendingUpdate();
     });
-
-    connect(m_updateDismiss, &QPushButton::clicked, this, [this]() {
-        hideUpdateBar();
-    });
+    connect(m_updateDismiss, &QPushButton::clicked, this, [this]() { hideUpdateBar(); });
 
     // === Лог ===
     m_log = new QTextEdit(this);
@@ -718,7 +899,6 @@ void MainWindow::buildUI()
     sugLayout->addWidget(m_suggestionText, 1);
     sugLayout->addWidget(m_suggestionBtn);
     sugLayout->addWidget(sugDismiss);
-
     vbox->addWidget(m_suggestionBar);
 
     connect(m_suggestionBtn, &QPushButton::clicked, this, [this]() {
@@ -732,9 +912,73 @@ void MainWindow::buildUI()
         m_suggestionBar->setVisible(false);
     });
 
-    // === Ввод + кнопка ===
+    // === Панель прикреплений (над полем ввода, скрыта пока пусто) ===
+    m_attachBar = new QWidget(this);
+    m_attachBar->setVisible(false);
+    m_attachBar->setStyleSheet(
+        QStringLiteral("background-color: #0a1828; border: 1px solid #1a3050; "
+                       "border-radius: 4px;"));
+
+    auto* attachVBox = new QVBoxLayout(m_attachBar);
+    attachVBox->setContentsMargins(6, 4, 6, 4);
+    attachVBox->setSpacing(4);
+
+    // Summary-строка
+    auto* summaryRow = new QHBoxLayout();
+    summaryRow->setSpacing(8);
+    m_attachSummary = new QLabel(this);
+    m_attachSummary->setStyleSheet(
+        QStringLiteral("color: #80b4d0; font-size: 11px; border: none; background: transparent;"));
+
+    auto* clearAllBtn = new QPushButton(QStringLiteral("очистить"), this);
+    clearAllBtn->setStyleSheet(
+        QStringLiteral("QPushButton { background: transparent; color: #5a7a90; "
+                       "border: none; font-size: 10px; text-decoration: underline; } "
+                       "QPushButton:hover { color: #ff8080; }"));
+    clearAllBtn->setCursor(Qt::PointingHandCursor);
+    clearAllBtn->setFixedHeight(18);
+    connect(clearAllBtn, &QPushButton::clicked, this, [this]() {
+        m_jarvis->attachments()->clear();
+    });
+
+    summaryRow->addWidget(m_attachSummary);
+    summaryRow->addStretch(1);
+    summaryRow->addWidget(clearAllBtn);
+    attachVBox->addLayout(summaryRow);
+
+    // Горизонтальный прокручиваемый контейнер для чипсов
+    m_attachScroll = new QScrollArea(this);
+    m_attachScroll->setFrameShape(QFrame::NoFrame);
+    m_attachScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_attachScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_attachScroll->setWidgetResizable(true);
+    m_attachScroll->setFixedHeight(32);
+    m_attachScroll->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+
+    auto* attachInner = new QWidget(this);
+    attachInner->setStyleSheet(QStringLiteral("background: transparent;"));
+    m_attachLayout = new QHBoxLayout(attachInner);
+    m_attachLayout->setContentsMargins(0, 0, 0, 0);
+    m_attachLayout->setSpacing(6);
+
+    m_attachScroll->setWidget(attachInner);
+    attachVBox->addWidget(m_attachScroll);
+
+    vbox->addWidget(m_attachBar);
+
+    // === Ввод + кнопки (скрепка + отправить) ===
     auto* inputBar = new QHBoxLayout();
     inputBar->setSpacing(8);
+
+    m_attachBtn = new QPushButton(QStringLiteral("📎"), this);
+    m_attachBtn->setFixedSize(40, 34);
+    m_attachBtn->setToolTip(QStringLiteral("Прикрепить файлы (Ctrl+O) — можно также перетащить в окно"));
+    m_attachBtn->setCursor(Qt::PointingHandCursor);
+    m_attachBtn->setStyleSheet(
+        QStringLiteral("QPushButton { background-color: #0a1828; color: #80b4d0; "
+                       "border: 1px solid #1a3050; border-radius: 4px; font-size: 16px; } "
+                       "QPushButton:hover { background-color: #0f2438; color: #00d4ff; }"));
+    connect(m_attachBtn, &QPushButton::clicked, this, &MainWindow::onAttachClicked);
 
     m_input = new QLineEdit(this);
     m_input->setObjectName(QStringLiteral("inputField"));
@@ -745,6 +989,7 @@ void MainWindow::buildUI()
     sendBtn->setFixedWidth(50);
     sendBtn->setToolTip(QStringLiteral("Отправить (Enter)"));
 
+    inputBar->addWidget(m_attachBtn);
     inputBar->addWidget(m_input, 1);
     inputBar->addWidget(sendBtn);
     vbox->addLayout(inputBar);
@@ -780,7 +1025,6 @@ void MainWindow::buildUI()
 
     m_keyboard = new VirtualKeyboardWidget(m_kbContainer);
     kbLayout->addWidget(m_keyboard);
-
     vbox->addWidget(m_kbContainer);
 
     // === Подключения ===

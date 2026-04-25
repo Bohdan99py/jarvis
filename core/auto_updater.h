@@ -7,10 +7,12 @@
 #include <QString>
 #include <QUrl>
 
+#include "jarvis_core_export.h"
+
 class QNetworkAccessManager;
 class QNetworkReply;
 
-class AutoUpdater : public QObject
+class JARVIS_CORE_EXPORT AutoUpdater : public QObject
 {
     Q_OBJECT
 
@@ -25,13 +27,11 @@ public:
 
     QString currentVersion() const { return m_currentVersion; }
 
-    // Последнее найденное обновление (сохраняется если пользователь нажал "Нет")
     bool    hasPendingUpdate() const { return !m_pendingUrl.isEmpty(); }
     QString pendingVersion()   const { return m_pendingVersion; }
     QUrl    pendingUrl()       const { return m_pendingUrl; }
     QString pendingNotes()     const { return m_pendingNotes; }
 
-    // Скачать отложенное обновление
     void downloadPendingUpdate();
 
 signals:
@@ -56,7 +56,6 @@ private:
     QString m_githubRepo;
     QString m_downloadPath;
 
-    // Отложенное обновление
     QString m_pendingVersion;
     QUrl    m_pendingUrl;
     QString m_pendingNotes;

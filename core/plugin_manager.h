@@ -1,9 +1,6 @@
 #pragma once
 // -------------------------------------------------------
 // plugin_manager.h — Загрузчик и менеджер плагинов
-//
-// Сканирует папку plugins/, загружает DLL,
-// проверяет совместимость API, управляет жизненным циклом.
 // -------------------------------------------------------
 
 #include <QObject>
@@ -12,23 +9,24 @@
 #include <QMap>
 #include <QPluginLoader>
 
+#include "jarvis_core_export.h"
 #include "plugin_interface.h"
 
 class PluginHost;
 
 struct PluginInfo
 {
-    QString name;           // Имя плагина
-    QString displayName;    // Человекочитаемое имя
-    QString version;        // Версия
-    QString filePath;       // Путь к DLL
-    bool loaded = false;    // Загружен ли
-    bool enabled = true;    // Включён ли
+    QString name;
+    QString displayName;
+    QString version;
+    QString filePath;
+    bool loaded = false;
+    bool enabled = true;
     JarvisPlugin* instance = nullptr;
     QPluginLoader* loader = nullptr;
 };
 
-class PluginManager : public QObject
+class JARVIS_CORE_EXPORT PluginManager : public QObject
 {
     Q_OBJECT
 
@@ -36,23 +34,14 @@ public:
     explicit PluginManager(PluginHost* host, QObject* parent = nullptr);
     ~PluginManager() override;
 
-    // Сканировать и загрузить плагины из директории
     void loadPlugins(const QString& pluginsDir);
-
-    // Выгрузить все плагины
     void unloadAll();
-
-    // Перезагрузить конкретный плагин (hot-reload)
     bool reloadPlugin(const QString& name);
 
-    // Список плагинов
     QVector<PluginInfo> plugins() const { return m_plugins; }
 
-    // Попытка обработки команды через плагины
-    // Возвращает true если какой-то плагин обработал
     bool tryHandleCommand(const QString& input, QString& response);
 
-    // Включить/выключить плагин
     void setPluginEnabled(const QString& name, bool enabled);
 
 signals:

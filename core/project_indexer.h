@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -11,6 +10,8 @@
 #include <QJsonArray>
 #include <QFileSystemWatcher>
 #include <QSet>
+
+#include "jarvis_core_export.h"
 
 // Один символ (класс, функция, переменная, макрос и т.д.)
 struct CodeSymbol
@@ -31,19 +32,17 @@ struct CodeSymbol
     };
 
     Kind    kind      = Unknown;
-    QString name;             // Имя символа
-    QString parentClass;      // Для методов — имя класса
-    QString signature;        // Полная сигнатура (для функций)
-    QString filePath;         // Абсолютный путь к файлу
-    int     lineStart = 0;    // Начальная строка
-    int     lineEnd   = 0;    // Конечная строка (приблизительно)
-    QString brief;            // Краткое описание (из комментариев)
+    QString name;
+    QString parentClass;
+    QString signature;
+    QString filePath;
+    int     lineStart = 0;
+    int     lineEnd   = 0;
+    QString brief;
 
-    // Для JSON
     QJsonObject toJson() const;
     static CodeSymbol fromJson(const QJsonObject& obj);
 
-    // Человекочитаемый вид
     QString kindToString() const;
 };
 
@@ -51,19 +50,19 @@ struct CodeSymbol
 struct IndexedFile
 {
     QString filePath;
-    QString relativePath;     // Относительный путь от корня проекта
+    QString relativePath;
     qint64  fileSize = 0;
     int     lineCount = 0;
     QDateTime lastModified;
     QDateTime lastIndexed;
-    QStringList includes;     // #include в файле
+    QStringList includes;
     QVector<CodeSymbol> symbols;
 
     QJsonObject toJson() const;
     static IndexedFile fromJson(const QJsonObject& obj);
 };
 
-class ProjectIndexer : public QObject
+class JARVIS_CORE_EXPORT ProjectIndexer : public QObject
 {
     Q_OBJECT
 
@@ -72,26 +71,16 @@ public:
     ~ProjectIndexer() override;
 
     // === Управление проектом ===
-
-    // Установить корневую папку проекта
     void setProjectRoot(const QString& path);
     QString projectRoot() const { return m_projectRoot; }
 
-    // Полная индексация (вызвать один раз или для refresh)
     void indexProject();
-
-    // Индексировать один файл
     void indexFile(const QString& filePath);
 
     // === Поиск ===
-
-    // Найти символ по имени (точный или partial match)
     QVector<CodeSymbol> findSymbol(const QString& name, bool exact = false) const;
-
-    // Найти файл по имени
     QVector<IndexedFile> findFile(const QString& name) const;
 
-    // Поиск по содержимому (grep)
     struct GrepResult {
         QString filePath;
         int     line;
@@ -99,33 +88,23 @@ public:
     };
     QVector<GrepResult> grep(const QString& pattern, int maxResults = 20) const;
 
-    // Получить фрагмент кода вокруг символа (для отправки в API)
     QString getCodeSnippet(const CodeSymbol& symbol, int contextLines = 10) const;
-
-    // Получить фрагмент файла по строкам
     QString getFileLines(const QString& filePath, int startLine, int endLine) const;
 
     // === Статистика ===
-
     int fileCount() const { return m_files.size(); }
     int symbolCount() const;
     QStringList allClasses() const;
     QStringList allFiles() const;
 
-    // Краткая карта проекта (для system prompt)
     QString projectMap() const;
-
-    // Детальная карта (для отладки)
     QString detailedMap() const;
 
     // === Сохранение/загрузка индекса ===
-
     void saveIndex() const;
     void loadIndex();
 
     // === Автообновление ===
-
-    // Включить слежение за изменениями файлов
     void enableFileWatcher(bool enable = true);
 
     bool isIndexing() const { return m_indexing; }
@@ -141,24 +120,21 @@ private slots:
     void onDirectoryChanged(const QString& path);
 
 private:
-    // Парсинг файла
     IndexedFile parseFile(const QString& filePath) const;
     void parseSymbols(IndexedFile& file, const QStringList& lines) const;
     void rebuildCaches();
     bool shouldSkipPath(const QString& path) const;
 
-    // Утилиты
     QStringList collectSourceFiles(const QString& dir) const;
     QString relativePath(const QString& absPath) const;
     QString indexFilePath() const;
 
     QString m_projectRoot;
-    QMap<QString, IndexedFile> m_files;  // filePath → IndexedFile
+    QMap<QString, IndexedFile> m_files;
     QFileSystemWatcher* m_watcher = nullptr;
     bool m_indexing = false;
     bool m_watcherEnabled = false;
     int m_symbolCount = 0;
 
-    // Расширения файлов для индексации
     static const QStringList s_sourceExtensions;
 };

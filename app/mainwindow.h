@@ -15,6 +15,10 @@
 
 class Jarvis;
 class VirtualKeyboardWidget;
+class QScrollArea;
+class QHBoxLayout;
+class QDragEnterEvent;
+class QDropEvent;
 
 class MainWindow : public QMainWindow
 {
@@ -25,6 +29,10 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent* e) override;
+
+    // Drag-n-drop файлов (работает как прикрепление через «скрепку»)
+    void dragEnterEvent(QDragEnterEvent* e) override;
+    void dropEvent(QDropEvent* e) override;
 
 private slots:
     void onSend();
@@ -39,11 +47,17 @@ private slots:
     void onAsyncError(const QString& error);
     void onSuggestion(const QString& description, const QString& action);
 
+    // Прикрепления
+    void onAttachClicked();
+    void onAttachmentsChanged();
+    void onAttachmentsConsumed();
+
 private:
     void buildUI();
     void buildMenuBar();
     void appendLog(const QString& who, const QString& text, const QString& color);
     void setThinkingState(bool thinking);
+    void rebuildAttachmentsBar();
 
     // Обновление UI
     void showUpdateBar(const QString& version);
@@ -74,6 +88,13 @@ private:
     QPushButton*            m_updateBtn       = nullptr;
     QPushButton*            m_updateDismiss   = nullptr;
     QProgressBar*           m_updateProgress  = nullptr;
+
+    // Панель прикреплений (над полем ввода)
+    QWidget*                m_attachBar       = nullptr;
+    QHBoxLayout*            m_attachLayout    = nullptr;
+    QScrollArea*            m_attachScroll    = nullptr;
+    QLabel*                 m_attachSummary   = nullptr;
+    QPushButton*            m_attachBtn       = nullptr;  // скрепка в input bar
 
     // Вайбкодинг
     bool                    m_vibeCodingMode  = false;

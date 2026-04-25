@@ -14,31 +14,27 @@
 #include <QGridLayout>
 #include <QPushButton>
 #include <QMap>
+#include <QVector>
 #include <windows.h>
 #include <atomic>
 #include <initializer_list>
+
+#include "jarvis_core_export.h"
 
 // ============================================================
 // Эмуляция клавиатуры через SendInput
 // ============================================================
 
-class KeyEmulator : public QObject
+class JARVIS_CORE_EXPORT KeyEmulator : public QObject
 {
     Q_OBJECT
 
 public:
     explicit KeyEmulator(QObject* parent = nullptr);
 
-    // Напечатать строку посимвольно (в отдельном потоке)
     void typeText(const QString& text, int delayMs = 30);
-
-    // Нажать одну виртуальную клавишу
     void pressKey(WORD vkCode);
-
-    // Нажать комбинацию клавиш
     void pressCombo(std::initializer_list<WORD> keys);
-
-    // Остановить набор
     void stopTyping();
 
     bool isTyping() const { return m_typing.load(); }
@@ -60,7 +56,7 @@ private:
 // Виджет виртуальной клавиатуры (QWERTY-панель)
 // ============================================================
 
-class VirtualKeyboardWidget : public QWidget
+class JARVIS_CORE_EXPORT VirtualKeyboardWidget : public QWidget
 {
     Q_OBJECT
 
@@ -68,7 +64,7 @@ public:
     explicit VirtualKeyboardWidget(QWidget* parent = nullptr);
 
 signals:
-    void charPressed(const QString& ch);   // символ для поля ввода
+    void charPressed(const QString& ch);
     void backspacePressed();
     void enterPressed();
 
@@ -80,7 +76,7 @@ private:
     void rebuildKeys();
 
     QGridLayout* m_grid = nullptr;
-    bool m_russian = true; // стартуем с русской раскладки
+    bool m_russian = true;
 
     struct KeyDef {
         QString labelRu;

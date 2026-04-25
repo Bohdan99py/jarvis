@@ -16,6 +16,7 @@
 #include <objbase.h>
 #include <atomic>
 
+#include "jarvis_core_export.h"
 #include "command_registry.h"
 
 class KeyEmulator;
@@ -25,6 +26,7 @@ class ActionPredictor;
 class AutoUpdater;
 class ProjectIndexer;
 class CodeActions;
+class AttachmentsManager;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -41,7 +43,7 @@ private:
     HRESULT m_hr = E_FAIL;
 };
 
-class Jarvis : public QObject
+class JARVIS_CORE_EXPORT Jarvis : public QObject
 {
     Q_OBJECT
 
@@ -49,19 +51,21 @@ public:
     explicit Jarvis(QObject* parent = nullptr);
     ~Jarvis() override;
 
-    QString processCommand(const QString& input);
+    QString processCommand(const QString& input,
+                           const QString& attachmentBlock = QString());
+
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
 
-    KeyEmulator*     keyEmulator()      const { return m_keyEmulator; }
-    SessionMemory*   memory()           const { return m_memory; }
-    ClaudeApi*       claudeApi()        const { return m_claudeApi; }
-    ActionPredictor* actionPredictor()  const { return m_predictor; }
-    AutoUpdater*     autoUpdater()      const { return m_updater; }
-    ProjectIndexer*  projectIndexer()   const { return m_indexer; }
-    CodeActions*     codeActions()      const { return m_codeActions; }
+    KeyEmulator*        keyEmulator()        const { return m_keyEmulator; }
+    SessionMemory*      memory()             const { return m_memory; }
+    ClaudeApi*          claudeApi()          const { return m_claudeApi; }
+    ActionPredictor*    actionPredictor()    const { return m_predictor; }
+    AutoUpdater*        autoUpdater()        const { return m_updater; }
+    ProjectIndexer*     projectIndexer()     const { return m_indexer; }
+    CodeActions*        codeActions()        const { return m_codeActions; }
+    AttachmentsManager* attachments()        const { return m_attachments; }
 
-    // Синхронизировать данные индексатора с SessionMemory (зовётся после индексации)
     void syncProjectInfoToMemory();
 
 signals:
@@ -69,24 +73,15 @@ signals:
     void asyncResponseReady(const QString& response);
     void asyncResponseError(const QString& error);
     void suggestionAvailable(const QString& description, const QString& action);
+    void attachmentsConsumed();
 
 private:
     void registerCommands();
 
-    // === Контекст для Claude ===
-
-    // Детектор "коддинг-интента" в запросе
-    // ("сделай функцию", "оптимизируй", "добавь", "рефакторинг" и т.п.)
     static bool isCodingIntent(const QString& input);
-
-    // Список токенов для поиска в проекте (очищенный от предлогов/мусора)
     static QStringList extractKeywords(const QString& input);
-
-    // Собрать блок "--- Контекст из проекта ---" для запроса
-    // Учитывает вид интента (coding vs обычный) и подбирает разные стратегии.
     QString buildProjectContext(const QString& userQuery) const;
 
-    // === Команды ===
     QString cmdTime(const QString& input);
     QString cmdDate(const QString& input);
     QString cmdGreeting(const QString& input);
@@ -101,17 +96,14 @@ private:
     QString cmdPressKey(const QString& input);
     QString cmdCombo(const QString& input);
 
-    // Память и API
     QString cmdSetApiKey(const QString& input);
     QString cmdRememberFact(const QString& input);
     QString cmdRecallFact(const QString& input);
     QString cmdShowMemory(const QString& input);
     QString cmdShowStats(const QString& input);
 
-    // Обновление
     QString cmdCheckUpdate(const QString& input);
 
-    // Индексатор
     QString cmdIndexProject(const QString& input);
     QString cmdFindSymbol(const QString& input);
     QString cmdProjectMap(const QString& input);
@@ -122,15 +114,16 @@ private:
     static QString extractArg(const QString& input, const QStringList& prefixes);
     static WORD parseVirtualKey(const QString& name);
 
-    ComInitializer   m_com;
-    CommandRegistry  m_registry;
-    KeyEmulator*     m_keyEmulator  = nullptr;
-    SessionMemory*   m_memory       = nullptr;
-    ClaudeApi*       m_claudeApi    = nullptr;
-    ActionPredictor* m_predictor    = nullptr;
-    AutoUpdater*     m_updater      = nullptr;
-    ProjectIndexer*  m_indexer      = nullptr;
-    CodeActions*     m_codeActions  = nullptr;
+    ComInitializer      m_com;
+    CommandRegistry     m_registry;
+    KeyEmulator*        m_keyEmulator  = nullptr;
+    SessionMemory*      m_memory       = nullptr;
+    ClaudeApi*          m_claudeApi    = nullptr;
+    ActionPredictor*    m_predictor    = nullptr;
+    AutoUpdater*        m_updater      = nullptr;
+    ProjectIndexer*     m_indexer      = nullptr;
+    CodeActions*        m_codeActions  = nullptr;
+    AttachmentsManager* m_attachments  = nullptr;
 
     std::atomic<bool> m_speaking{false};
     QMutex m_ttsMutex;
