@@ -98,4 +98,16 @@ private:
 
     // Вайбкодинг
     bool                    m_vibeCodingMode  = false;
+
+    // Язык интерфейса
+    enum class Lang { Russian, English };
+    Lang                    m_lang = Lang::Russian;
+
+    // Строки интерфейса (зависят от языка)
+    QString tr(const char* ru, const char* en) const {
+        return m_lang == Lang::English ? QString::fromUtf8(en) : QString::fromUtf8(ru);
+    }
+
+    void setLanguage(Lang lang);
+    void retranslateUi();
 };
