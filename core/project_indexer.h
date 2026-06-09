@@ -97,6 +97,9 @@ public:
     QStringList allClasses() const;
     QStringList allFiles() const;
 
+    // Для Brain::captureSnapshot — файлы отсортированные по дате изменения
+    QStringList recentFiles(int n = 10) const;
+
     QString projectMap() const;
     QString detailedMap() const;
 

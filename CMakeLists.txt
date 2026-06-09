@@ -8,7 +8,7 @@
 ## ============================================================
 
 cmake_minimum_required(VERSION 3.16)
-project(jarvis VERSION 2.4.8 LANGUAGES CXX)
+project(jarvis VERSION 2.5.0 LANGUAGES CXX)
 
 # --- C++17, без расширений ---
 set(CMAKE_CXX_STANDARD 17)
@@ -60,7 +60,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH OR CMAKE_PREFIX_PATH STREQUAL "")
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent)
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
 # --- Версия и GitHub ---
@@ -70,8 +70,7 @@ add_compile_definitions(
     JARVIS_GITHUB_REPO="jarvis"
 )
 
-# --- Глобальный define: говорит макросу JARVIS_CORE_EXPORT
-#     раскрываться в пустоту (статическая сборка не нуждается в экспорте). ---
+# --- Статическая сборка: JARVIS_CORE_EXPORT раскрывается в пустоту ---
 add_compile_definitions(JARVIS_CORE_STATIC)
 
 # ============================================================
@@ -79,8 +78,11 @@ add_compile_definitions(JARVIS_CORE_STATIC)
 # ============================================================
 
 add_library(JarvisCore STATIC
-    # Экспорт-макрос (теперь пустой)
+    # Экспорт-макрос (пустой при статической сборке)
     core/jarvis_core_export.h
+
+    # Строки интерфейса (RU/EN) — только заголовок, cpp не нужен
+    core/lang.h
 
     # Ядро
     core/jarvis.h
@@ -98,10 +100,18 @@ add_library(JarvisCore STATIC
     core/claude_api.cpp
     core/embedded_key.h
 
+    # Gemini API (бесплатный, для простых бесед)
+    core/gemini_api.h
+    core/gemini_api.cpp
+
     # Интеллект
     core/action_predictor.h
+    core/brain.cpp
     core/action_predictor.cpp
-
+    core/brain.h
+    core/context_snapshot.h
+    core/search_router.h
+    core/search_router.cpp
     # Прикрепления файлов
     core/attachments_manager.h
     core/attachments_manager.cpp
@@ -141,6 +151,8 @@ target_link_libraries(JarvisCore PUBLIC
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
+    Qt6::Sql
+    Qt6::Concurrent
 )
 
 target_link_libraries(JarvisCore PRIVATE
@@ -149,7 +161,7 @@ target_link_libraries(JarvisCore PRIVATE
     shell32
     user32
     advapi32
-    sapi
+    psapi
 )
 
 if(MSVC)

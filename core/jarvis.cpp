@@ -6,6 +6,7 @@
 #include "virtual_keyboard.h"
 #include "session_memory.h"
 #include "claude_api.h"
+#include "gemini_api.h"
 #include "action_predictor.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
@@ -14,10 +15,7 @@
 
 #include <sapi.h>
 #include <shellapi.h>
-#include <lmcons.h>
 #include <QDateTime>
-#include <QDesktopServices>
-#include <QUrl>
 #include <QThread>
 #include <QMutexLocker>
 #include <QMap>
@@ -113,198 +111,109 @@ void Jarvis::syncProjectInfoToMemory()
 
 void Jarvis::registerCommands()
 {
+    // После появления Brain здесь остаются только команды которые
+    // должны срабатывать независимо от контекста — без всякой
+    // семантической логики. Brain в MainWindow::onSend() уже
+    // обработал намерение и обогатил запрос если нужно.
+    //
+    // Правило: если пользователь может иметь в виду ЧТО-ТО ЕЩЁ
+    // помимо команды — её здесь быть не должно. Brain разберётся.
+
+    // --- Ключи API (всегда явный префикс) ---
     m_registry.registerCommand(
         {QStringLiteral("apikey "), QStringLiteral("ключ ")},
         [this](const QString& s) { return cmdSetApiKey(s); },
         QStringLiteral("apikey <ключ> — установить Claude API-ключ"),
-        true
+        /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
-        {QStringLiteral("обновление"), QStringLiteral("обнови"),
-         QStringLiteral("update"), QStringLiteral("версия"), QStringLiteral("version")},
-        [this](const QString& s) { return cmdCheckUpdate(s); },
-        QStringLiteral("обновление — проверить обновления")
+        {QStringLiteral("geminikey "), QStringLiteral("gemini ")},
+        [this](const QString& s) { return cmdSetGeminiKey(s); },
+        QStringLiteral("geminikey <ключ> — установить Gemini API-ключ"),
+        /*prefixMatch=*/true
     );
 
+    // --- Индексация проекта (явный префикс) ---
     m_registry.registerCommand(
-        {QStringLiteral("индекс "), QStringLiteral("index "),
-         QStringLiteral("проект "), QStringLiteral("project ")},
+        {QStringLiteral("индекс "), QStringLiteral("index ")},
         [this](const QString& s) { return cmdIndexProject(s); },
         QStringLiteral("индекс <путь> — индексировать C++ проект"),
-        true
+        /*prefixMatch=*/true
     );
 
+    // --- Поиск по индексу (явный префикс) ---
     m_registry.registerCommand(
-        {QStringLiteral("найди символ "), QStringLiteral("find "),
-         QStringLiteral("символ "), QStringLiteral("symbol ")},
+        {QStringLiteral("символ "), QStringLiteral("symbol ")},
         [this](const QString& s) { return cmdFindSymbol(s); },
-        QStringLiteral("найди символ <имя> — найти класс/функцию"),
-        true
+        QStringLiteral("символ <имя> — найти класс/функцию в индексе"),
+        /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
-        {QStringLiteral("карта"), QStringLiteral("map"),
-         QStringLiteral("структура"), QStringLiteral("structure")},
-        [this](const QString& s) { return cmdProjectMap(s); },
-        QStringLiteral("карта — карта проекта")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("grep "), QStringLiteral("поиск ")},
+        {QStringLiteral("grep ")},
         [this](const QString& s) { return cmdGrep(s); },
-        QStringLiteral("grep <текст> — поиск в файлах"),
-        true
+        QStringLiteral("grep <текст> — поиск текста в файлах проекта"),
+        /*prefixMatch=*/true
     );
 
+    // --- Память (явный префикс) ---
     m_registry.registerCommand(
         {QStringLiteral("запомни "), QStringLiteral("remember ")},
         [this](const QString& s) { return cmdRememberFact(s); },
-        QStringLiteral("запомни <ключ>=<значение>"),
-        true
+        QStringLiteral("запомни ключ=значение — сохранить факт"),
+        /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("вспомни "), QStringLiteral("recall ")},
         [this](const QString& s) { return cmdRecallFact(s); },
-        QStringLiteral("вспомни <ключ>"),
-        true
+        QStringLiteral("вспомни <ключ> — вспомнить факт"),
+        /*prefixMatch=*/true
     );
 
-    m_registry.registerCommand(
-        {QStringLiteral("память"), QStringLiteral("memory")},
-        [this](const QString& s) { return cmdShowMemory(s); },
-        QStringLiteral("память — показать факты")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("статистика"), QStringLiteral("stats")},
-        [this](const QString& s) { return cmdShowStats(s); },
-        QStringLiteral("статистика — статистика использования")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("привет"), QStringLiteral("здравств"),
-         QStringLiteral("hello"), QStringLiteral("hi")},
-        [this](const QString& s) { return cmdGreeting(s); },
-        QStringLiteral("привет — приветствие")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("время"), QStringLiteral("time"), QStringLiteral("час")},
-        [this](const QString& s) { return cmdTime(s); },
-        QStringLiteral("время — текущее время")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("дата"), QStringLiteral("date"), QStringLiteral("день")},
-        [this](const QString& s) { return cmdDate(s); },
-        QStringLiteral("дата — текущая дата")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("кто я"), QStringLiteral("имя"), QStringLiteral("username")},
-        [this](const QString& s) { return cmdUserName(s); },
-        QStringLiteral("кто я — имя пользователя")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("блокнот"), QStringLiteral("notepad")},
-        [this](const QString&) { return cmdLaunchApp(QStringLiteral("notepad.exe")); },
-        QStringLiteral("блокнот — открыть Notepad")
-    );
-    m_registry.registerCommand(
-        {QStringLiteral("калькулятор"), QStringLiteral("calc")},
-        [this](const QString&) { return cmdLaunchApp(QStringLiteral("calc.exe")); },
-        QStringLiteral("калькулятор — открыть калькулятор")
-    );
-    m_registry.registerCommand(
-        {QStringLiteral("проводник"), QStringLiteral("explorer")},
-        [this](const QString&) { return cmdLaunchApp(QStringLiteral("explorer.exe")); },
-        QStringLiteral("проводник — открыть Explorer")
-    );
-    m_registry.registerCommand(
-        {QStringLiteral("диспетчер"), QStringLiteral("taskmgr")},
-        [this](const QString&) { return cmdLaunchApp(QStringLiteral("taskmgr.exe")); },
-        QStringLiteral("диспетчер — диспетчер задач")
-    );
-    m_registry.registerCommand(
-        {QStringLiteral("настройки"), QStringLiteral("settings")},
-        [this](const QString&) { return cmdLaunchApp(QStringLiteral("ms-settings:")); },
-        QStringLiteral("настройки — параметры Windows")
-    );
-    m_registry.registerCommand(
-        {QStringLiteral("браузер"), QStringLiteral("chrome"), QStringLiteral("browser")},
-        [this](const QString& s) { return cmdBrowser(s); },
-        QStringLiteral("браузер — открыть Google")
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("запусти "), QStringLiteral("открой "), QStringLiteral("launch ")},
-        [this](const QString& s) {
-            QString app = extractArg(s, {QStringLiteral("запусти "),
-                                         QStringLiteral("открой "),
-                                         QStringLiteral("launch ")});
-            return cmdLaunchApp(app);
-        },
-        QStringLiteral("запусти <программа>"),
-        true
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("найди "), QStringLiteral("search "), QStringLiteral("гугл")},
-        [this](const QString& s) {
-            QString q = extractArg(s, {QStringLiteral("найди "),
-                                       QStringLiteral("search "),
-                                       QStringLiteral("гугл ")});
-            return cmdWebSearch(q);
-        },
-        QStringLiteral("найди <запрос>"),
-        true
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("youtube"), QStringLiteral("ютуб")},
-        [this](const QString& s) {
-            QString q = extractArg(s, {QStringLiteral("youtube "),
-                                       QStringLiteral("ютуб ")});
-            return cmdYoutube(q);
-        },
-        QStringLiteral("youtube <запрос>"),
-        true
-    );
-
-    m_registry.registerCommand(
-        {QStringLiteral("заблокируй"), QStringLiteral("lock")},
-        [this](const QString& s) { return cmdLock(s); },
-        QStringLiteral("заблокируй — блокировка экрана")
-    );
-
+    // --- Виртуальная клавиатура (явный префикс) ---
     m_registry.registerCommand(
         {QStringLiteral("напечатай "), QStringLiteral("type ")},
         [this](const QString& s) { return cmdTypeText(s); },
-        QStringLiteral("напечатай <текст>"),
-        true
+        QStringLiteral("напечатай <текст> — набрать в активном окне"),
+        /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("нажми "), QStringLiteral("press ")},
         [this](const QString& s) { return cmdPressKey(s); },
-        QStringLiteral("нажми <клавиша>"),
-        true
+        QStringLiteral("нажми <клавиша> — нажать клавишу"),
+        /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("комбо "), QStringLiteral("combo ")},
         [this](const QString& s) { return cmdCombo(s); },
-        QStringLiteral("комбо <клавиши>"),
-        true
+        QStringLiteral("комбо <ctrl+c> — нажать комбинацию клавиш"),
+        /*prefixMatch=*/true
+    );
+
+    // --- Информация (точное совпадение одного слова) ---
+    m_registry.registerCommand(
+        {QStringLiteral("память"), QStringLiteral("memory")},
+        [this](const QString& s) { return cmdShowMemory(s); },
+        QStringLiteral("память — показать сохранённые факты"),
+        /*prefixMatch=*/false
     );
 
     m_registry.registerCommand(
-        {QStringLiteral("помощь"), QStringLiteral("help"), QStringLiteral("команд")},
+        {QStringLiteral("статистика"), QStringLiteral("stats")},
+        [this](const QString& s) { return cmdShowStats(s); },
+        QStringLiteral("статистика — частота использования команд"),
+        /*prefixMatch=*/false
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("помощь"), QStringLiteral("help")},
         [this](const QString&) { return cmdHelp(QString()); },
-        QStringLiteral("помощь — список команд")
+        QStringLiteral("помощь — этот список"),
+        /*prefixMatch=*/false
     );
 }
 
@@ -690,13 +599,13 @@ void Jarvis::speakAsync(const QString& text)
 QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock)
 {
     QString s = input.trimmed();
-    if (s.isEmpty()) {
-        return QStringLiteral("Введите команду или напишите «помощь».");
-    }
+    if (s.isEmpty()) return QString();
 
     m_memory->addMessage(QStringLiteral("user"), s);
 
-    // 1. Локальные команды — прикрепления им не нужны
+    // 1. Системные команды из реестра (только явные prefix-команды:
+    //    apikey, запомни, напечатай, нажми и т.д.)
+    //    Brain в MainWindow уже отфильтровал всё неоднозначное.
     auto result = m_registry.tryExecute(s);
     if (result.matched) {
         m_memory->addMessage(QStringLiteral("assistant"), result.response);
@@ -711,64 +620,71 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         return result.response;
     }
 
-    // 2. Claude API
-    if (m_claudeApi->shouldUseApi(s)) {
-        if (!m_indexer->projectRoot().isEmpty()) {
-            m_codeActions->setProjectRoot(m_indexer->projectRoot());
-        }
+    // 2. Claude API — дефолт для всего остального.
+    //    Brain уже определил намерение и при необходимости обогатил
+    //    запрос суффиксом домена (например " в проекте").
+    //    Здесь просто отправляем в API.
+    if (!m_indexer->projectRoot().isEmpty()) {
+        m_codeActions->setProjectRoot(m_indexer->projectRoot());
+    }
 
-        // Обогащение: [запрос] + [автопоиск из индекса] + [прикрепления пользователя]
-        const QString projectContext = buildProjectContext(s);
+    // Обогащение: автопоиск из индекса + прикрепления пользователя
+    const QString projectContext = buildProjectContext(s);
 
-        QString enrichedMessage = s;
-        if (!projectContext.isEmpty()) {
-            enrichedMessage += projectContext;
-        }
-        // Прикрепления — АВТОРИТЕТНЕЕ автопоиска, идут ПОСЛЕ него,
-        // чтобы быть ближе к хвосту промпта (модели лучше запоминают хвост).
-        if (!attachmentBlock.isEmpty()) {
-            enrichedMessage += attachmentBlock;
-        }
+    QString enrichedMessage = s;
+    if (!projectContext.isEmpty()) {
+        enrichedMessage += projectContext;
+    }
+    if (!attachmentBlock.isEmpty()) {
+        enrichedMessage += attachmentBlock;
+    }
 
-        const bool hadAttachments = !attachmentBlock.isEmpty();
+    const bool hadAttachments = !attachmentBlock.isEmpty();
 
-        m_claudeApi->sendMessage(enrichedMessage,
-                                 [this, s, hadAttachments](bool success, const QString& response) {
+    // Мультиагентный роутинг
+    if (m_multiAgentMode && !routeToClaude(s, attachmentBlock)) {
+        emit agentSelected(QStringLiteral("🤖 Gemini"));
+        m_geminiApi->sendMessage(enrichedMessage,
+                                 [this, s](bool success, const QString& response) {
             if (success) {
-                QString fileReport      = m_codeActions->processResponse(response);
-                QString displayResponse = m_codeActions->cleanResponseForDisplay(response);
-
-                m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
-                m_memory->updateContext(s, displayResponse);
-                handleClaudeResponse(response);
+                m_memory->addMessage(QStringLiteral("assistant"), response);
+                m_memory->updateContext(s, response);
                 m_predictor->recordSequence(s);
-
-                QString fullResponse = displayResponse;
-                if (!fileReport.isEmpty()) {
-                    fullResponse += QStringLiteral("\n\n") + fileReport;
-                }
-                emit asyncResponseReady(fullResponse);
-
-                // Сообщаем UI: прикрепления можно чистить (если пользователь не просил держать)
-                if (hadAttachments) {
-                    emit attachmentsConsumed();
-                }
+                emit asyncResponseReady(response);
             } else {
                 emit asyncResponseError(response);
-                // При ошибке прикрепления НЕ чистим — пусть пользователь повторит
             }
         });
-
         return QString();
     }
 
-    // 3. Fallback
-    QString fallback = QStringLiteral(
-        "Не понял команду. Напишите «помощь» для списка команд.\n"
-        "Для свободного диалога установите API-ключ: apikey <ваш-ключ>"
-    );
-    m_memory->addMessage(QStringLiteral("assistant"), fallback);
-    return fallback;
+    emit agentSelected(QStringLiteral("🤖 Claude"));
+    m_claudeApi->sendMessage(enrichedMessage,
+                             [this, s, hadAttachments](bool success, const QString& response) {
+        if (success) {
+            QString fileReport      = m_codeActions->processResponse(response);
+            QString displayResponse = m_codeActions->cleanResponseForDisplay(response);
+
+            m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
+            m_memory->updateContext(s, displayResponse);
+            handleClaudeResponse(response);
+            m_predictor->recordSequence(s);
+
+            QString fullResponse = displayResponse;
+            if (!fileReport.isEmpty()) {
+                fullResponse += QStringLiteral("\n\n") + fileReport;
+            }
+            emit asyncResponseReady(fullResponse);
+
+            if (hadAttachments) {
+                emit attachmentsConsumed();
+            }
+        } else {
+            emit asyncResponseError(response);
+        }
+    });
+
+    return QString();
 }
 
 // ============================================================
@@ -1041,63 +957,66 @@ QString Jarvis::cmdGrep(const QString& input)
 }
 
 // ============================================================
-// Остальные команды
+// Мультиагентный режим
 // ============================================================
 
-QString Jarvis::cmdTime(const QString&)
+void Jarvis::setMultiAgentMode(bool enabled)
 {
-    return QStringLiteral("Сейчас ") + QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
+    m_multiAgentMode = enabled;
 }
 
-QString Jarvis::cmdDate(const QString&)
+// ============================================================
+// Мультиагентный роутинг
+// ============================================================
+
+bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock) const
 {
-    QDate d = QDate::currentDate();
-    static const char* months[] = {
-        "", "января", "февраля", "марта", "апреля", "мая", "июня",
-        "июля", "августа", "сентября", "октября", "ноября", "декабря"
+    if (!attachmentBlock.isEmpty()) return true;
+    if (isCodingIntent(input))      return true;
+
+    const QString lower = input.toLower();
+    static const QStringList chatSignals = {
+        QStringLiteral("расскажи"), QStringLiteral("что такое"),
+        QStringLiteral("объясни"),  QStringLiteral("почему"),
+        QStringLiteral("как дела"), QStringLiteral("привет"),
+        QStringLiteral("what is"),  QStringLiteral("tell me"),
+        QStringLiteral("explain"),  QStringLiteral("why "),
     };
-    static const char* days[] = {
-        "", "понедельник", "вторник", "среда", "четверг",
-        "пятница", "суббота", "воскресенье"
-    };
-    return QString::fromUtf8("%1, %2 %3 %4")
-        .arg(QString::fromUtf8(days[d.dayOfWeek()]))
-        .arg(d.day())
-        .arg(QString::fromUtf8(months[d.month()]))
-        .arg(d.year());
-}
-
-QString Jarvis::cmdGreeting(const QString&)
-{
-    int hour = QTime::currentTime().hour();
-    QString g;
-    if      (hour < 6)  g = QStringLiteral("Доброй ночи");
-    else if (hour < 12) g = QStringLiteral("Доброе утро");
-    else if (hour < 18) g = QStringLiteral("Добрый день");
-    else                g = QStringLiteral("Добрый вечер");
-
-    QString name = cmdUserName(QString()).replace(QStringLiteral("Вы — "), QString());
-    return g + QStringLiteral(", ") + name + QStringLiteral("! Чем могу помочь?");
-}
-
-QString Jarvis::cmdUserName(const QString&)
-{
-    wchar_t buf[UNLEN + 1];
-    DWORD sz = UNLEN + 1;
-    if (GetUserNameW(buf, &sz)) {
-        return QStringLiteral("Вы — ") + QString::fromWCharArray(buf);
+    for (const auto& sig : chatSignals) {
+        if (lower.contains(sig)) return false;
     }
-    return QStringLiteral("Не удалось определить имя.");
+    return true;
 }
+
+// ============================================================
+// Gemini API-ключ
+// ============================================================
+
+QString Jarvis::cmdSetGeminiKey(const QString& input)
+{
+    QString key = extractArg(input, {QStringLiteral("geminikey "),
+                                      QStringLiteral("gemini ")});
+    if (key.isEmpty()) {
+        return m_geminiApi->hasApiKey()
+            ? QStringLiteral("Gemini API-ключ установлен. Для замены: geminikey <новый-ключ>")
+            : QStringLiteral("Укажите ключ: geminikey <ваш-google-api-key>");
+    }
+    m_geminiApi->setApiKey(key);
+    return QStringLiteral("Gemini API-ключ сохранён.");
+}
+
+// ============================================================
+// Справка
+// ============================================================
 
 QString Jarvis::cmdHelp(const QString&)
 {
     QString help = m_registry.helpText();
     help += QStringLiteral("\n\n— Свободный диалог —\n"
-                           "Любой вопрос → Claude API (нужен apikey)");
+                           "Любой вопрос, задача или запрос → Claude API.\n"
+                           "«Найди X», «открой Y», «объясни Z» — Brain сам разберётся.");
     help += QStringLiteral("\n\n— Прикрепление файлов —\n"
-                           "Кнопка 📎 или перетащи файлы в окно. "
-                           "Они попадут в следующий запрос к Claude.");
+                           "Кнопка 📎 или перетащи файлы в окно.");
     if (m_indexer->fileCount() > 0) {
         help += QStringLiteral("\n\n— Проект «")
               + QFileInfo(m_indexer->projectRoot()).fileName()
@@ -1106,57 +1025,6 @@ QString Jarvis::cmdHelp(const QString&)
               + QString::number(m_indexer->symbolCount()) + QStringLiteral(" символов");
     }
     return help;
-}
-
-QString Jarvis::cmdLaunchApp(const QString& app)
-{
-    if (app.isEmpty()) {
-        return QStringLiteral("Укажите приложение для запуска.");
-    }
-    std::wstring wapp = app.toStdWString();
-    HINSTANCE result = ShellExecuteW(
-        nullptr, L"open", wapp.c_str(), nullptr, nullptr, SW_SHOWNORMAL
-    );
-    if (reinterpret_cast<intptr_t>(result) > 32) {
-        return QStringLiteral("Запускаю: ") + app;
-    }
-    return QStringLiteral("Не удалось запустить: ") + app;
-}
-
-QString Jarvis::cmdWebSearch(const QString& query)
-{
-    if (query.isEmpty()) {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.google.com")));
-        return QStringLiteral("Открываю Google.");
-    }
-    QString url = QStringLiteral("https://www.google.com/search?q=")
-                  + QString::fromUtf8(QUrl::toPercentEncoding(query));
-    QDesktopServices::openUrl(QUrl(url));
-    return QStringLiteral("Ищу: ") + query;
-}
-
-QString Jarvis::cmdYoutube(const QString& query)
-{
-    if (query.isEmpty()) {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.youtube.com")));
-        return QStringLiteral("Открываю YouTube.");
-    }
-    QString url = QStringLiteral("https://www.youtube.com/results?search_query=")
-                  + QString::fromUtf8(QUrl::toPercentEncoding(query));
-    QDesktopServices::openUrl(QUrl(url));
-    return QStringLiteral("Ищу на YouTube: ") + query;
-}
-
-QString Jarvis::cmdLock(const QString&)
-{
-    LockWorkStation();
-    return QStringLiteral("Блокирую экран.");
-}
-
-QString Jarvis::cmdBrowser(const QString&)
-{
-    QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.google.com")));
-    return QStringLiteral("Открываю браузер.");
 }
 
 // ============================================================

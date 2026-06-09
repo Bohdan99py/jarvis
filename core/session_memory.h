@@ -47,6 +47,11 @@ public:
     QJsonArray recentMessagesAsJson(int maxMessages = 20) const;
     QString sessionSummary() const;
 
+    // Для Brain::captureSnapshot — история команд пользователя
+    QStringList recentCommands(int n = 8) const;
+    // Последний ответ Джарвиса (для контекста уточнений)
+    QString lastResponse() const;
+
     TaskContext& taskContext() { return m_taskContext; }
     const TaskContext& taskContext() const { return m_taskContext; }
 

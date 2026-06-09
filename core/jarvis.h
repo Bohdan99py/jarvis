@@ -16,12 +16,12 @@
 #include <objbase.h>
 #include <atomic>
 
-#include "jarvis_core_export.h"
 #include "command_registry.h"
 
 class KeyEmulator;
 class SessionMemory;
 class ClaudeApi;
+class GeminiApi;
 class ActionPredictor;
 class AutoUpdater;
 class ProjectIndexer;
@@ -43,7 +43,7 @@ private:
     HRESULT m_hr = E_FAIL;
 };
 
-class JARVIS_CORE_EXPORT Jarvis : public QObject
+class Jarvis : public QObject
 {
     Q_OBJECT
 
@@ -51,6 +51,9 @@ public:
     explicit Jarvis(QObject* parent = nullptr);
     ~Jarvis() override;
 
+    // Обработка пользовательского ввода.
+    // Brain в MainWindow уже определил намерение.
+    // attachmentBlock — готовый блок из AttachmentsManager::buildAttachmentBlock().
     QString processCommand(const QString& input,
                            const QString& attachmentBlock = QString());
 
@@ -60,12 +63,18 @@ public:
     KeyEmulator*        keyEmulator()        const { return m_keyEmulator; }
     SessionMemory*      memory()             const { return m_memory; }
     ClaudeApi*          claudeApi()          const { return m_claudeApi; }
+    GeminiApi*          geminiApi()          const { return m_geminiApi; }
     ActionPredictor*    actionPredictor()    const { return m_predictor; }
     AutoUpdater*        autoUpdater()        const { return m_updater; }
     ProjectIndexer*     projectIndexer()     const { return m_indexer; }
     CodeActions*        codeActions()        const { return m_codeActions; }
     AttachmentsManager* attachments()        const { return m_attachments; }
 
+    // Мультиагентный режим: true = Claude для кода, Gemini для бесед
+    void setMultiAgentMode(bool enabled);
+    bool multiAgentMode() const { return m_multiAgentMode; }
+
+    // Синхронизировать данные индексатора с SessionMemory (system prompt)
     void syncProjectInfoToMemory();
 
 signals:
@@ -74,40 +83,37 @@ signals:
     void asyncResponseError(const QString& error);
     void suggestionAvailable(const QString& description, const QString& action);
     void attachmentsConsumed();
+    void agentSelected(const QString& agentName);
 
 private:
     void registerCommands();
 
+    // === Контекст для Claude (RAG) ===
     static bool isCodingIntent(const QString& input);
     static QStringList extractKeywords(const QString& input);
     QString buildProjectContext(const QString& userQuery) const;
 
-    QString cmdTime(const QString& input);
-    QString cmdDate(const QString& input);
-    QString cmdGreeting(const QString& input);
-    QString cmdUserName(const QString& input);
-    QString cmdHelp(const QString& input);
-    QString cmdLaunchApp(const QString& app);
-    QString cmdWebSearch(const QString& query);
-    QString cmdYoutube(const QString& query);
-    QString cmdLock(const QString& input);
-    QString cmdBrowser(const QString& input);
-    QString cmdTypeText(const QString& input);
-    QString cmdPressKey(const QString& input);
-    QString cmdCombo(const QString& input);
+    // === Роутинг агентов ===
+    bool routeToClaude(const QString& input, const QString& attachmentBlock) const;
 
+    // === Системные команды реестра ===
     QString cmdSetApiKey(const QString& input);
+    QString cmdSetGeminiKey(const QString& input);
     QString cmdRememberFact(const QString& input);
     QString cmdRecallFact(const QString& input);
     QString cmdShowMemory(const QString& input);
     QString cmdShowStats(const QString& input);
-
+    QString cmdHelp(const QString& input);
     QString cmdCheckUpdate(const QString& input);
-
     QString cmdIndexProject(const QString& input);
     QString cmdFindSymbol(const QString& input);
     QString cmdProjectMap(const QString& input);
     QString cmdGrep(const QString& input);
+
+    // === Виртуальная клавиатура ===
+    QString cmdTypeText(const QString& input);
+    QString cmdPressKey(const QString& input);
+    QString cmdCombo(const QString& input);
 
     void handleClaudeResponse(const QString& response);
 
@@ -119,12 +125,14 @@ private:
     KeyEmulator*        m_keyEmulator  = nullptr;
     SessionMemory*      m_memory       = nullptr;
     ClaudeApi*          m_claudeApi    = nullptr;
+    GeminiApi*          m_geminiApi    = nullptr;
     ActionPredictor*    m_predictor    = nullptr;
     AutoUpdater*        m_updater      = nullptr;
     ProjectIndexer*     m_indexer      = nullptr;
     CodeActions*        m_codeActions  = nullptr;
     AttachmentsManager* m_attachments  = nullptr;
 
+    bool              m_multiAgentMode = false;
     std::atomic<bool> m_speaking{false};
-    QMutex m_ttsMutex;
+    QMutex            m_ttsMutex;
 };

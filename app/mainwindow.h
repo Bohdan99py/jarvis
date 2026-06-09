@@ -30,7 +30,7 @@ public:
 protected:
     void keyPressEvent(QKeyEvent* e) override;
 
-    // Drag-n-drop файлов (работает как прикрепление через «скрепку»)
+    // Drag-n-drop файлов
     void dragEnterEvent(QDragEnterEvent* e) override;
     void dropEvent(QDropEvent* e) override;
 
@@ -42,15 +42,21 @@ private slots:
     void onTypingFinished();
     void toggleKeyboard();
 
-    // Мозги
+    // API ответы
     void onAsyncResponse(const QString& response);
     void onAsyncError(const QString& error);
     void onSuggestion(const QString& description, const QString& action);
+
+    // Мультиагент
+    void onAgentSelected(const QString& agentName);
 
     // Прикрепления
     void onAttachClicked();
     void onAttachmentsChanged();
     void onAttachmentsConsumed();
+
+    // Уточнение от Brain (кнопки в панели)
+    void onClarificationChoice(int choice);
 
 private:
     void buildUI();
@@ -59,15 +65,23 @@ private:
     void setThinkingState(bool thinking);
     void rebuildAttachmentsBar();
 
+    // Панель уточнения (заменяет suggestionBar для вопросов Brain)
+    void showClarification(const QString& question, const QStringList& options);
+    void hideClarification();
+
     // Обновление UI
     void showUpdateBar(const QString& version);
     void hideUpdateBar();
+
+    // Язык
+    void applyLanguage(bool english);
 
     Jarvis*                 m_jarvis     = nullptr;
     QTextEdit*              m_log        = nullptr;
     QLineEdit*              m_input      = nullptr;
     QLabel*                 m_dot        = nullptr;
     QLabel*                 m_status     = nullptr;
+    QLabel*                 m_agentLabel = nullptr;
     QTimer*                 m_pulseTimer = nullptr;
     bool                    m_pulse      = false;
 
@@ -76,11 +90,17 @@ private:
     QPropertyAnimation*     m_kbAnim      = nullptr;
     bool                    m_kbVisible   = false;
 
-    // Панель предложений
+    // Панель предложений (ActionPredictor)
     QWidget*                m_suggestionBar  = nullptr;
     QLabel*                 m_suggestionText = nullptr;
     QPushButton*            m_suggestionBtn  = nullptr;
     QString                 m_pendingSuggestionAction;
+
+    // Панель уточнения Brain (кнопки выбора домена)
+    QWidget*                m_clarifyBar     = nullptr;
+    QLabel*                 m_clarifyText    = nullptr;
+    QHBoxLayout*            m_clarifyBtnLay  = nullptr;
+    QString                 m_pendingInput;   // ввод ждущий уточнения
 
     // Панель обновления
     QWidget*                m_updateBar       = nullptr;
@@ -89,25 +109,13 @@ private:
     QPushButton*            m_updateDismiss   = nullptr;
     QProgressBar*           m_updateProgress  = nullptr;
 
-    // Панель прикреплений (над полем ввода)
+    // Панель прикреплений
     QWidget*                m_attachBar       = nullptr;
     QHBoxLayout*            m_attachLayout    = nullptr;
     QScrollArea*            m_attachScroll    = nullptr;
     QLabel*                 m_attachSummary   = nullptr;
-    QPushButton*            m_attachBtn       = nullptr;  // скрепка в input bar
+    QPushButton*            m_attachBtn       = nullptr;
 
     // Вайбкодинг
     bool                    m_vibeCodingMode  = false;
-
-    // Язык интерфейса
-    enum class Lang { Russian, English };
-    Lang                    m_lang = Lang::Russian;
-
-    // Строки интерфейса (зависят от языка)
-    QString tr(const char* ru, const char* en) const {
-        return m_lang == Lang::English ? QString::fromUtf8(en) : QString::fromUtf8(ru);
-    }
-
-    void setLanguage(Lang lang);
-    void retranslateUi();
 };

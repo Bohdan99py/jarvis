@@ -148,6 +148,29 @@ QJsonArray SessionMemory::recentMessagesAsJson(int maxMessages) const
     return arr;
 }
 
+// Возвращает последние N команд пользователя (только role == "user")
+QStringList SessionMemory::recentCommands(int n) const
+{
+    QStringList result;
+    for (int i = m_sessionMessages.size() - 1; i >= 0 && result.size() < n; --i) {
+        if (m_sessionMessages[i].role == QStringLiteral("user")) {
+            result.prepend(m_sessionMessages[i].content);
+        }
+    }
+    return result;
+}
+
+// Возвращает последний ответ ассистента
+QString SessionMemory::lastResponse() const
+{
+    for (int i = m_sessionMessages.size() - 1; i >= 0; --i) {
+        if (m_sessionMessages[i].role == QStringLiteral("assistant")) {
+            return m_sessionMessages[i].content;
+        }
+    }
+    return QString();
+}
+
 QString SessionMemory::sessionSummary() const
 {
     QString summary;
