@@ -53,6 +53,11 @@ public:
     // Сразу возвращает пустую строку, результат придёт через searchFinished.
     void searchAsync(const Intent& intent, const ContextSnapshot& ctx);
 
+    // Пути к реальным файлам из последнего поиска.
+    // Заполняются внутри formatResults() после каждого search().
+    // Используются в MainWindow для открытия FileViewer.
+    QStringList lastFoundFilePaths() const { return m_lastFoundPaths; }
+
 signals:
     void searchFinished(const QString& formattedResult);
 
@@ -75,9 +80,10 @@ private:
 
     QString openWebSearch(const QString& query) const;
 
-    static QString formatResults(const SearchResults& results,
-                                  const QString& domain,
-                                  const QString& query);
+    // formatResults теперь НЕ static — нужен доступ к m_lastFoundPaths
+    QString formatResults(const SearchResults& results,
+                          const QString& domain,
+                          const QString& query);
 
     ProjectIndexer* m_indexer = nullptr;
     SessionMemory*  m_memory  = nullptr;
@@ -86,6 +92,9 @@ private:
     QFutureWatcher<SearchResults>* m_fsWatcher = nullptr;
     QString                         m_fsQuery;
     QString                         m_fsDomainLabel;
+
+    // Пути к найденным файлам на диске (для FileViewer в MainWindow)
+    QStringList                     m_lastFoundPaths;
 
     static constexpr int kMaxResults = 8;
 };

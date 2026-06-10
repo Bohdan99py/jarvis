@@ -926,6 +926,21 @@ QString SearchRouter::formatResults(const SearchResults& results,
                                      const QString& domain,
                                      const QString& query)
 {
+    // ── Сохраняем пути к реальным файлам на диске для FileViewer ──
+    m_lastFoundPaths.clear();
+    for (const auto& r : results) {
+        if (r.source != QLatin1String("browser")
+            && r.source != QLatin1String("chat")
+            && r.source != QLatin1String("memory")
+            && !r.path.isEmpty()
+            && !r.path.startsWith(QStringLiteral("http"))
+            && QFileInfo::exists(r.path))
+        {
+            if (!m_lastFoundPaths.contains(r.path))
+                m_lastFoundPaths.append(r.path);
+        }
+    }
+
     if (results.isEmpty()) {
         return IS_EN
             ? QStringLiteral("Nothing found in ") + domain

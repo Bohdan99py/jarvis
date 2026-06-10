@@ -6,7 +6,7 @@
 #include "virtual_keyboard.h"
 #include "session_memory.h"
 #include "claude_api.h"
-#include "gemini_api.h"
+#include "ollama_api.h"
 #include "action_predictor.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
@@ -45,6 +45,7 @@ Jarvis::Jarvis(QObject* parent)
 {
     m_memory       = new SessionMemory(this);
     m_claudeApi    = new ClaudeApi(m_memory, this);
+    m_geminiApi    = new OllamaApi(this);   // Ollama — локальный LLM для быстрых ответов
     m_predictor    = new ActionPredictor(m_memory, this);
     m_keyEmulator  = new KeyEmulator(this);
     m_indexer      = new ProjectIndexer(this);
@@ -128,9 +129,9 @@ void Jarvis::registerCommands()
     );
 
     m_registry.registerCommand(
-        {QStringLiteral("geminikey "), QStringLiteral("gemini ")},
+        {QStringLiteral("ollamamodel "), QStringLiteral("модель ")},
         [this](const QString& s) { return cmdSetGeminiKey(s); },
-        QStringLiteral("geminikey <ключ> — установить Gemini API-ключ"),
+        QStringLiteral("ollamamodel <имя> — выбрать модель Ollama (например: llama3, mistral)"),
         /*prefixMatch=*/true
     );
 
@@ -596,7 +597,7 @@ void Jarvis::speakAsync(const QString& text)
 // Обработка команд (гибридный режим)
 // ============================================================
 
-QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock)
+QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction)
 {
     QString s = input.trimmed();
     if (s.isEmpty()) return QString();
@@ -641,18 +642,44 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     const bool hadAttachments = !attachmentBlock.isEmpty();
 
+    // Языковая инструкция — добавляем в начало сообщения как скрытую системную заметку
+    // Claude читает её и отвечает на нужном языке
+    if (!langInstruction.isEmpty()) {
+        enrichedMessage = QStringLiteral("[LANG_INSTRUCTION: ")
+                        + langInstruction
+                        + QStringLiteral("]\n\n")
+                        + enrichedMessage;
+    }
+
     // Мультиагентный роутинг
     if (m_multiAgentMode && !routeToClaude(s, attachmentBlock)) {
-        emit agentSelected(QStringLiteral("🤖 Gemini"));
+        emit agentSelected(QStringLiteral("🦙 Ollama (") + m_geminiApi->model() + QStringLiteral(")"));
         m_geminiApi->sendMessage(enrichedMessage,
-                                 [this, s](bool success, const QString& response) {
+                                 [this, s, enrichedMessage, hadAttachments](bool success, const QString& response) {
             if (success) {
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
                 m_predictor->recordSequence(s);
                 emit asyncResponseReady(response);
             } else {
-                emit asyncResponseError(response);
+                // Ollama упала или недоступна — fallback на Claude
+                emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
+                m_claudeApi->sendMessage(enrichedMessage,
+                                         [this, s, hadAttachments](bool ok, const QString& resp) {
+                    if (ok) {
+                        QString fileReport      = m_codeActions->processResponse(resp);
+                        QString displayResponse = m_codeActions->cleanResponseForDisplay(resp);
+                        m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
+                        m_memory->updateContext(s, displayResponse);
+                        m_predictor->recordSequence(s);
+                        QString full = displayResponse;
+                        if (!fileReport.isEmpty()) full += QStringLiteral("\n\n") + fileReport;
+                        emit asyncResponseReady(full);
+                        if (hadAttachments) emit attachmentsConsumed();
+                    } else {
+                        emit asyncResponseError(resp);
+                    }
+                });
             }
         });
         return QString();
@@ -994,15 +1021,16 @@ bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock)
 
 QString Jarvis::cmdSetGeminiKey(const QString& input)
 {
-    QString key = extractArg(input, {QStringLiteral("geminikey "),
-                                      QStringLiteral("gemini ")});
-    if (key.isEmpty()) {
-        return m_geminiApi->hasApiKey()
-            ? QStringLiteral("Gemini API-ключ установлен. Для замены: geminikey <новый-ключ>")
-            : QStringLiteral("Укажите ключ: geminikey <ваш-google-api-key>");
+    // Переиспользован под управление Ollama-моделью
+    QString model = extractArg(input, {QStringLiteral("ollamamodel "),
+                                        QStringLiteral("модель ")});
+    if (model.isEmpty()) {
+        return QStringLiteral("Текущая модель Ollama: ") + m_geminiApi->model()
+             + QStringLiteral("\nДля смены: ollamamodel <имя>\n"
+               "Доступные модели: ollama list (в терминале)");
     }
-    m_geminiApi->setApiKey(key);
-    return QStringLiteral("Gemini API-ключ сохранён.");
+    m_geminiApi->setModel(model);
+    return QStringLiteral("Модель Ollama установлена: ") + model;
 }
 
 // ============================================================

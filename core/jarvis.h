@@ -21,7 +21,7 @@
 class KeyEmulator;
 class SessionMemory;
 class ClaudeApi;
-class GeminiApi;
+class OllamaApi;
 class ActionPredictor;
 class AutoUpdater;
 class ProjectIndexer;
@@ -55,7 +55,8 @@ public:
     // Brain в MainWindow уже определил намерение.
     // attachmentBlock — готовый блок из AttachmentsManager::buildAttachmentBlock().
     QString processCommand(const QString& input,
-                           const QString& attachmentBlock = QString());
+                           const QString& attachmentBlock = QString(),
+                           const QString& langInstruction = QString());
 
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
@@ -63,7 +64,7 @@ public:
     KeyEmulator*        keyEmulator()        const { return m_keyEmulator; }
     SessionMemory*      memory()             const { return m_memory; }
     ClaudeApi*          claudeApi()          const { return m_claudeApi; }
-    GeminiApi*          geminiApi()          const { return m_geminiApi; }
+    OllamaApi*          ollamaApi()          const { return m_geminiApi; }  // m_geminiApi хранит OllamaApi
     ActionPredictor*    actionPredictor()    const { return m_predictor; }
     AutoUpdater*        autoUpdater()        const { return m_updater; }
     ProjectIndexer*     projectIndexer()     const { return m_indexer; }
@@ -125,7 +126,7 @@ private:
     KeyEmulator*        m_keyEmulator  = nullptr;
     SessionMemory*      m_memory       = nullptr;
     ClaudeApi*          m_claudeApi    = nullptr;
-    GeminiApi*          m_geminiApi    = nullptr;
+    OllamaApi*          m_geminiApi    = nullptr;   // переименован логически в OllamaApi
     ActionPredictor*    m_predictor    = nullptr;
     AutoUpdater*        m_updater      = nullptr;
     ProjectIndexer*     m_indexer      = nullptr;

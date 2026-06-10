@@ -100,9 +100,8 @@ add_library(JarvisCore STATIC
         core/claude_api.cpp
         core/embedded_key.h
 
-        # Gemini API (бесплатный, для простых бесед)
-        core/gemini_api.h
-        core/gemini_api.cpp
+        # Ollama API (локальный LLM, OpenAI-compatible)
+        core/ollama_api.h
 
         # Интеллект
         core/action_predictor.h

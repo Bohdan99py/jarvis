@@ -23,6 +23,14 @@ class QHBoxLayout;
 class QDragEnterEvent;
 class QDropEvent;
 
+// ── Новые модули ──────────────────────────────────────────
+#include "brain.h"
+#include "applauncher.h"
+#include "systemcontroller.h"
+#include "languagedetector.h"
+// fileviewer.h подключается только в .cpp (тяжёлый Qt-виджет,
+// не нужен в заголовке — избегаем лишних зависимостей)
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -32,9 +40,8 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent* e) override;
-    void closeEvent(QCloseEvent* e) override;  // скрывает в трей
+    void closeEvent(QCloseEvent* e) override;
 
-    // Drag-n-drop файлов
     void dragEnterEvent(QDragEnterEvent* e) override;
     void dropEvent(QDropEvent* e) override;
 
@@ -46,20 +53,16 @@ private slots:
     void onTypingFinished();
     void toggleKeyboard();
 
-    // API ответы
     void onAsyncResponse(const QString& response);
     void onAsyncError(const QString& error);
     void onSuggestion(const QString& description, const QString& action);
 
-    // Мультиагент
     void onAgentSelected(const QString& agentName);
 
-    // Прикрепления
     void onAttachClicked();
     void onAttachmentsChanged();
     void onAttachmentsConsumed();
 
-    // Уточнение от Brain (кнопки в панели)
     void onClarificationChoice(int choice);
 
 private:
@@ -69,17 +72,20 @@ private:
     void setThinkingState(bool thinking);
     void rebuildAttachmentsBar();
 
-    // Панель уточнения (заменяет suggestionBar для вопросов Brain)
     void showClarification(const QString& question, const QStringList& options);
     void hideClarification();
 
-    // Обновление UI
     void showUpdateBar(const QString& version);
     void hideUpdateBar();
 
-    // Язык
     void applyLanguage(bool english);
 
+    // ── Обработка команд (новые) ───────────────────────────
+    // Возвращает true если команда обработана и не нужно идти в Claude
+    bool tryOpenApp(const QString& userText, const Intent& intent);
+    bool trySystemControl(const QString& userText);
+
+    // ── Основные виджеты ──────────────────────────────────
     Jarvis*                 m_jarvis     = nullptr;
     QTextEdit*              m_log        = nullptr;
     QLineEdit*              m_input      = nullptr;
@@ -94,35 +100,33 @@ private:
     QPropertyAnimation*     m_kbAnim      = nullptr;
     bool                    m_kbVisible   = false;
 
-    // Панель предложений (ActionPredictor)
     QWidget*                m_suggestionBar  = nullptr;
     QLabel*                 m_suggestionText = nullptr;
     QPushButton*            m_suggestionBtn  = nullptr;
     QString                 m_pendingSuggestionAction;
 
-    // Панель уточнения Brain (кнопки выбора домена)
     QWidget*                m_clarifyBar     = nullptr;
     QLabel*                 m_clarifyText    = nullptr;
     QHBoxLayout*            m_clarifyBtnLay  = nullptr;
-    QString                 m_pendingInput;   // ввод ждущий уточнения
+    QString                 m_pendingInput;
 
-    // Панель обновления
     QWidget*                m_updateBar       = nullptr;
     QLabel*                 m_updateLabel     = nullptr;
     QPushButton*            m_updateBtn       = nullptr;
     QPushButton*            m_updateDismiss   = nullptr;
     QProgressBar*           m_updateProgress  = nullptr;
 
-    // Панель прикреплений
     QWidget*                m_attachBar       = nullptr;
     QHBoxLayout*            m_attachLayout    = nullptr;
     QScrollArea*            m_attachScroll    = nullptr;
     QLabel*                 m_attachSummary   = nullptr;
     QPushButton*            m_attachBtn       = nullptr;
 
-    // Вайбкодинг
     bool                    m_vibeCodingMode  = false;
 
-    // Системный трей
     QSystemTrayIcon*        m_trayIcon        = nullptr;
+
+    // ── Новые члены ───────────────────────────────────────
+    AppLauncher             m_appLauncher;      // умный запуск приложений
+    LanguageDetector        m_langDetector;     // авто-определение языка
 };

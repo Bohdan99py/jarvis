@@ -7,7 +7,6 @@
 #include "theme.h"
 #include "virtual_keyboard.h"
 #include "claude_api.h"
-#include "gemini_api.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
 #include "session_memory.h"
@@ -15,6 +14,8 @@
 #include "lang.h"
 #include "brain.h"
 #include "search_router.h"
+#include "fileviewer.h"
+#include "ollama_api.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -48,6 +49,7 @@
 #include <QCoreApplication>
 #include <QSystemTrayIcon>
 #include <QTimer>
+#include <QRegularExpression>
 
 // ============================================================
 // Конструктор
@@ -58,10 +60,12 @@ MainWindow::MainWindow(QWidget* parent)
 {
     setAcceptDrops(true);
 
-    // Загружаем язык из настроек
+    // Загружаем язык из настроек (для UI-строк)
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
     bool english = cfg.value(QStringLiteral("ui/english"), false).toBool();
     gUiLanguage() = english ? UiLanguage::English : UiLanguage::Russian;
+    // Синхронизируем детектор языка с настройкой
+    // (дефолт — русский, совпадает с конструктором LanguageDetector)
 
     m_jarvis = new Jarvis(this);
 
@@ -83,23 +87,17 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_jarvis, &Jarvis::agentSelected,
             this, &MainWindow::onAgentSelected);
 
-    // Прикрепления
     connect(m_jarvis->attachments(), &AttachmentsManager::changed,
             this, &MainWindow::onAttachmentsChanged);
     connect(m_jarvis, &Jarvis::attachmentsConsumed,
             this, &MainWindow::onAttachmentsConsumed);
 
-    // Thinking state
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestStarted,
             this, [this]() { setThinkingState(true); });
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestFinished,
             this, [this]() { setThinkingState(false); });
-    connect(m_jarvis->geminiApi(), &GeminiApi::requestStarted,
-            this, [this]() { setThinkingState(true); });
-    connect(m_jarvis->geminiApi(), &GeminiApi::requestFinished,
-            this, [this]() { setThinkingState(false); });
+    // Ollama: thinking state управляется через asyncResponseReady/asyncResponseError
 
-    // Автообновление
     auto* updater = m_jarvis->autoUpdater();
     connect(updater, &AutoUpdater::updateAvailable,
             this, [this](const QString& newVersion, const QString&, const QUrl&) {
@@ -143,8 +141,7 @@ MainWindow::MainWindow(QWidget* parent)
     buildMenuBar();
     qApp->setStyleSheet(Theme::globalStyleSheet());
 
-    // ── Системный трей ────────────────────────────────────────────────────────
-    // Иконка: пробуем ресурс, потом файл рядом с exe, потом стандартную Qt
+    // ── Системный трей ────────────────────────────────────
     QIcon trayIcon;
     if (!QIcon(QStringLiteral(":/jarvis.ico")).isNull())
         trayIcon = QIcon(QStringLiteral(":/jarvis.ico"));
@@ -172,7 +169,6 @@ MainWindow::MainWindow(QWidget* parent)
     m_trayIcon->setContextMenu(trayMenu);
     m_trayIcon->show();
 
-    // Левый клик — показать/скрыть окно
     connect(m_trayIcon, &QSystemTrayIcon::activated, this,
             [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
@@ -213,7 +209,6 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_input->setFocus();
 
-    // Пульсация
     m_pulseTimer = new QTimer(this);
     connect(m_pulseTimer, &QTimer::timeout, this, [this]() {
         m_pulse = !m_pulse;
@@ -312,7 +307,6 @@ void MainWindow::buildMenuBar()
     // --- Настройки ---
     auto* settingsMenu = menuBar->addMenu(Str::menuSettings());
 
-    // Claude API-ключ
     auto* actApiKey = settingsMenu->addAction(Str::menuApiKey());
     connect(actApiKey, &QAction::triggered, this, [this]() {
         bool ok;
@@ -325,35 +319,69 @@ void MainWindow::buildMenuBar()
         }
     });
 
-    // Gemini API-ключ
-    auto* actGeminiKey = settingsMenu->addAction(Str::menuGeminiKey());
-    connect(actGeminiKey, &QAction::triggered, this, [this]() {
+    auto* actOllamaModel = settingsMenu->addAction(
+        IS_EN ? QStringLiteral("Ollama model...") : QStringLiteral("Модель Ollama..."));
+    connect(actOllamaModel, &QAction::triggered, this, [this]() {
         bool ok;
-        QString key = QInputDialog::getText(this,
-            Str::dlgGeminiKeyTitle(), Str::dlgGeminiKeyLabel(),
-            QLineEdit::Password, QString(), &ok);
-        if (ok && !key.trimmed().isEmpty()) {
-            m_jarvis->geminiApi()->setApiKey(key.trimmed());
-            appendLog(Str::logSystem(), Str::apiGeminiKeySaved(), Theme::LogColors::system);
+        QString model = QInputDialog::getText(this,
+            QStringLiteral("Ollama"),
+            IS_EN ? QStringLiteral("Model name (e.g. llama3, mistral, phi3):")
+                  : QStringLiteral("Имя модели (например: llama3, mistral, phi3):"),
+            QLineEdit::Normal,
+            m_jarvis->ollamaApi()->model(), &ok);
+        if (ok && !model.trimmed().isEmpty()) {
+            m_jarvis->ollamaApi()->setModel(model.trimmed());
+            appendLog(Str::logSystem(),
+                      IS_EN ? QStringLiteral("Ollama model set: ") + model.trimmed()
+                            : QStringLiteral("Модель Ollama: ") + model.trimmed(),
+                      Theme::LogColors::system);
         }
     });
 
     settingsMenu->addSeparator();
 
-    // Мультиагентный режим
     auto* actAgent = settingsMenu->addAction(Str::menuAgentMode());
     actAgent->setCheckable(true);
     actAgent->setChecked(false);
-    connect(actAgent, &QAction::toggled, this, [this](bool checked) {
-        m_jarvis->setMultiAgentMode(checked);
+    connect(actAgent, &QAction::toggled, this, [this, actAgent](bool checked) {
         if (checked) {
-            if (!m_jarvis->geminiApi()->hasApiKey()) {
-                appendLog(Str::logSystem(), Str::agentNoGeminiKey(), Theme::LogColors::error);
-            }
-            m_agentLabel->setVisible(true);
-            m_agentLabel->setText(QStringLiteral("🤖 Claude"));
-            appendLog(Str::logJarvis(), Str::agentModeOn(), Theme::LogColors::system);
+            // Пингуем Ollama перед включением
+            appendLog(Str::logSystem(),
+                      IS_EN ? QStringLiteral("Checking Ollama availability...")
+                            : QStringLiteral("Проверяю доступность Ollama..."),
+                      Theme::LogColors::system);
+
+            m_jarvis->ollamaApi()->checkAvailability(
+                [this, actAgent](bool available, const QString& info) {
+                    if (available) {
+                        m_jarvis->setMultiAgentMode(true);
+                        m_agentLabel->setVisible(true);
+                        m_agentLabel->setText(QStringLiteral("🦙 Ollama"));
+                        appendLog(Str::logJarvis(),
+                                  (IS_EN ? QStringLiteral("Agent mode ON. Code → Claude, Chat → Ollama (")
+                                         : QStringLiteral("Агент мод ВКЛ. Код → Claude, Беседа → Ollama ("))
+                                  + m_jarvis->ollamaApi()->model()
+                                  + QStringLiteral(")\n") + info,
+                                  Theme::LogColors::system);
+                    } else {
+                        // Ollama недоступна — откатываем чекбокс, режим не включаем
+                        actAgent->setChecked(false);
+                        appendLog(Str::logError(),
+                                  IS_EN ? QStringLiteral(
+                                      "Ollama is not running.\n"
+                                      "Start it with: ollama serve\n"
+                                      "Or install from: https://ollama.com\n"
+                                      "Agent mode stays OFF — Claude handles everything.")
+                                        : QStringLiteral(
+                                      "Ollama не запущена.\n"
+                                      "Запусти её: ollama serve\n"
+                                      "Или скачай с: https://ollama.com\n"
+                                      "Агент мод ВЫКЛ — всё обрабатывает Claude."),
+                                  Theme::LogColors::error);
+                    }
+                });
         } else {
+            m_jarvis->setMultiAgentMode(false);
             m_agentLabel->setVisible(false);
             appendLog(Str::logJarvis(), Str::agentModeOff(), Theme::LogColors::system);
         }
@@ -361,7 +389,6 @@ void MainWindow::buildMenuBar()
 
     settingsMenu->addSeparator();
 
-    // Вайбкодинг
     auto* actVibe = settingsMenu->addAction(Str::menuVibeCoding());
     actVibe->setCheckable(true);
     actVibe->setChecked(m_vibeCodingMode);
@@ -374,7 +401,6 @@ void MainWindow::buildMenuBar()
                   Theme::LogColors::system);
     });
 
-    // Держать прикрепления
     auto* actKeepAttach = settingsMenu->addAction(Str::menuKeepAttach());
     actKeepAttach->setCheckable(true);
     actKeepAttach->setChecked(false);
@@ -387,13 +413,11 @@ void MainWindow::buildMenuBar()
 
     settingsMenu->addSeparator();
 
-    // Виртуальная клавиатура
     auto* actKeyboard = settingsMenu->addAction(Str::menuKeyboard());
     connect(actKeyboard, &QAction::triggered, this, &MainWindow::toggleKeyboard);
 
     settingsMenu->addSeparator();
 
-    // Язык
     auto* langMenu = settingsMenu->addMenu(Str::menuLanguage());
 
     auto* actLangRu = langMenu->addAction(Str::menuLangRu());
@@ -518,7 +542,6 @@ void MainWindow::keyPressEvent(QKeyEvent* e)
     QMainWindow::keyPressEvent(e);
 }
 
-// Закрытие окна → скрываем в трей (не завершаем процесс)
 void MainWindow::closeEvent(QCloseEvent* e)
 {
     if (m_trayIcon && m_trayIcon->isVisible()) {
@@ -532,6 +555,90 @@ void MainWindow::closeEvent(QCloseEvent* e)
     } else {
         e->accept();
     }
+}
+
+// ============================================================
+// trySystemControl — управление системой (звук, яркость и т.д.)
+// Возвращает true если команда обработана
+// ============================================================
+
+bool MainWindow::trySystemControl(const QString& userText)
+{
+    auto result = SystemController::tryExecuteSystemCommand(userText);
+    if (!result.success || result.message.isEmpty()) {
+        // success=false, message="" → не системная команда
+        // success=false, message!="" → системная команда, но ошибка
+        if (!result.message.isEmpty()) {
+            // Была попытка, но ошибка — сообщаем и считаем обработанной
+            appendLog(Str::logJarvis(), result.message, Theme::LogColors::error);
+            m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+            m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result.message);
+            return true;
+        }
+        return false; // не системная команда → идёт дальше
+    }
+    // Успешно выполнено
+    appendLog(Str::logJarvis(), result.message, Theme::LogColors::jarvis);
+    m_jarvis->speakAsync(result.message);
+    m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+    m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result.message);
+    return true;
+}
+
+// ============================================================
+// tryOpenApp — умное открытие приложений через AppLauncher
+// Возвращает true если приложение найдено и запущено/попытка была
+// ============================================================
+
+bool MainWindow::tryOpenApp(const QString& userText, const Intent& intent)
+{
+    if (intent.action != Intent::Action::Open) return false;
+
+    // Целевое имя: сначала targetApp из Brain, потом query
+    const QString target = intent.targetApp.isEmpty()
+        ? intent.query
+        : intent.targetApp;
+
+    if (target.isEmpty()) return false;
+
+    // Пробуем AppLauncher — он ищет через реестр, PATH и жёсткие пути
+    auto result = m_appLauncher.launch(target);
+    if (result.success) {
+        const QString appName = QFileInfo(result.resolvedPath).baseName();
+        const QString resp = IS_EN
+            ? QStringLiteral("Opening: ") + appName
+            : QStringLiteral("Открываю: ") + appName;
+        appendLog(Str::logJarvis(), resp, Theme::LogColors::jarvis);
+        m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+        m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+        return true;
+    }
+
+    // AppLauncher не нашёл — пробуем напрямую через ShellExecuteW
+    // (может сработать для URL, ms-settings: и прочих схем)
+    {
+        const std::wstring wexe = target.toStdWString();
+        HINSTANCE hr = ShellExecuteW(
+            nullptr, L"open", wexe.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<intptr_t>(hr) > 32) {
+            const QString resp = IS_EN
+                ? QStringLiteral("Opening: ") + target
+                : QStringLiteral("Открываю: ") + target;
+            appendLog(Str::logJarvis(), resp, Theme::LogColors::jarvis);
+            m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+            m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+            return true;
+        }
+    }
+
+    // Совсем не нашли — сообщаем
+    const QString resp = IS_EN
+        ? QStringLiteral("Could not find application: ") + target
+        : QStringLiteral("Не могу найти приложение: ") + target;
+    appendLog(Str::logJarvis(), resp, Theme::LogColors::jarvis);
+    m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+    m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+    return true; // считаем обработанной (не пускаем в Claude)
 }
 
 // ============================================================
@@ -555,9 +662,21 @@ void MainWindow::onSend()
     m_input->clear();
     hideClarification();
 
+    // ── 1. Автоопределение языка ──────────────────────────
+    // Обновляем язык по каждому сообщению пользователя.
+    // Языковая инструкция инжектируется в системный промпт Claude
+    // в методе buildClaudeSystemPrompt() через m_langDetector.systemInstruction().
+    m_langDetector.update(text);
+
+    // ── 2. Системные команды (звук, яркость, блокировка и т.д.)
+    // Проверяем ДО Brain, потому что "громкость 50" — не вопрос к AI
+    if (trySystemControl(text)) {
+        m_input->setFocus();
+        return;
+    }
+
     const QString attachmentBlock = m_jarvis->attachments()->buildAttachmentBlock();
 
-    // Отображаем ввод пользователя
     QString userLog = text.left(200);
     if (hasAttach) {
         userLog += QStringLiteral("   [📎 ")
@@ -568,14 +687,11 @@ void MainWindow::onSend()
     }
     appendLog(Str::logSender(), userLog, Theme::LogColors::user);
 
-    // Сброс агент-лейбла
     if (m_jarvis->multiAgentMode()) {
         m_agentLabel->setText(Str::agentClaude());
     }
 
-    // --------------------------------------------------------
-    // Brain: анализируем намерение
-    // --------------------------------------------------------
+    // ── 3. Brain: анализируем намерение ──────────────────
     ContextSnapshot ctx = Brain::captureSnapshot(
         m_jarvis->memory()->recentCommands(8),
         m_jarvis->memory()->lastResponse(),
@@ -589,7 +705,6 @@ void MainWindow::onSend()
     Brain brain;
     Intent intent = brain.analyze(text, ctx);
 
-    // Нужно уточнение — показываем кнопки, запоминаем ввод
     if (intent.needsClarification) {
         m_pendingInput = text;
         showClarification(
@@ -607,9 +722,7 @@ void MainWindow::onSend()
         return;
     }
 
-    // --------------------------------------------------------
-    // Debug: показываем что понял Brain (убрать после отладки)
-    // --------------------------------------------------------
+    // ── Debug-строка Brain ────────────────────────────────
     {
         static const auto actionStr = [](Intent::Action a) -> QString {
             switch (a) {
@@ -646,72 +759,23 @@ void MainWindow::onSend()
                   QStringLiteral("#4a6080"));
     }
 
-    // --------------------------------------------------------
-    // Open: открыть приложение или файл через ShellExecute
-    // --------------------------------------------------------
-    if (intent.action == Intent::Action::Open)
-    {
-        const QString target = intent.targetApp.isEmpty()
-            ? intent.query : intent.targetApp;
-
-        if (!target.isEmpty()) {
-            // Маппинг известных имён → исполняемые файлы
-            static const QMap<QString, QString> appMap = {
-                {QStringLiteral("блокнот"),    QStringLiteral("notepad.exe")},
-                {QStringLiteral("notepad"),    QStringLiteral("notepad.exe")},
-                {QStringLiteral("калькулятор"),QStringLiteral("calc.exe")},
-                {QStringLiteral("calc"),       QStringLiteral("calc.exe")},
-                {QStringLiteral("проводник"),  QStringLiteral("explorer.exe")},
-                {QStringLiteral("explorer"),   QStringLiteral("explorer.exe")},
-                {QStringLiteral("диспетчер"),  QStringLiteral("taskmgr.exe")},
-                {QStringLiteral("taskmgr"),    QStringLiteral("taskmgr.exe")},
-                {QStringLiteral("настройки"),  QStringLiteral("ms-settings:")},
-                {QStringLiteral("settings"),   QStringLiteral("ms-settings:")},
-                {QStringLiteral("chrome"),     QStringLiteral("chrome.exe")},
-                {QStringLiteral("discord"),    QStringLiteral("discord.exe")},
-                {QStringLiteral("telegram"),   QStringLiteral("telegram.exe")},
-                {QStringLiteral("blender"),    QStringLiteral("blender.exe")},
-                {QStringLiteral("clion"),      QStringLiteral("clion64.exe")},
-                {QStringLiteral("rider"),      QStringLiteral("rider64.exe")},
-            };
-
-            const QString tLow = target.toLower();
-            const QString exe  = appMap.contains(tLow) ? appMap[tLow] : target;
-
-            const std::wstring wexe = exe.toStdWString();
-            HINSTANCE hr = ShellExecuteW(
-                nullptr, L"open", wexe.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-
-            QString resp;
-            if (reinterpret_cast<intptr_t>(hr) > 32) {
-                resp = IS_EN
-                    ? QStringLiteral("Opening: ") + target
-                    : QStringLiteral("Открываю: ") + target;
-            } else {
-                resp = IS_EN
-                    ? QStringLiteral("Could not open: ") + target
-                    : QStringLiteral("Не удалось открыть: ") + target;
-            }
-
-            appendLog(Str::logJarvis(), resp, Theme::LogColors::jarvis);
-            m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
-            m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+    // ── 4. Open: умное открытие через AppLauncher ─────────
+    if (intent.action == Intent::Action::Open) {
+        if (tryOpenApp(text, intent)) {
             m_input->setFocus();
             return;
         }
-        // Если target пустой — падаем в Search ниже
+        // Если tryOpenApp вернул false (target пустой) — идём в Search/Claude
     }
 
-    // --------------------------------------------------------
-    // Search: поисковые намерения локально без Claude
-    // --------------------------------------------------------
+    // ── 5. Search: поиск + FileViewer для файлов ─────────
     if (intent.action == Intent::Action::Search)
     {
         auto* router = new SearchRouter(m_jarvis->projectIndexer(),
                                         m_jarvis->memory(),
                                         this);
 
-        // Когда асинхронный поиск по ФС завершится — показываем результат
+        // Захватываем this для FileViewer — окно показываем из основного потока
         connect(router, &SearchRouter::searchFinished,
                 this, [this, router, text](const QString& result) {
             appendLog(Str::logJarvis(), result, Theme::LogColors::jarvis);
@@ -719,6 +783,13 @@ void MainWindow::onSend()
             m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
             m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result);
             setThinkingState(false);
+
+            // Открываем FileViewer для результатов файловой системы
+            const QStringList filePaths = router->lastFoundFilePaths();
+            if (!filePaths.isEmpty()) {
+                FileViewer::showFiles(filePaths, this);
+            }
+
             router->deleteLater();
         });
 
@@ -730,11 +801,15 @@ void MainWindow::onSend()
             m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
             m_jarvis->memory()->addMessage(QStringLiteral("assistant"), searchResult);
 
-            // Если поиск синхронный (не ФС) — router больше не нужен
+            // Синхронный поиск (проект, история браузера, etc.) — показываем FileViewer сразу
             if (!searchResult.contains(QStringLiteral("..."))) {
+                const QStringList filePaths = router->lastFoundFilePaths();
+                if (!filePaths.isEmpty()) {
+                    FileViewer::showFiles(filePaths, this);
+                }
                 router->deleteLater();
             } else {
-                // ФС поиск — показываем "Ищу..."
+                // Асинхронный ФС поиск — ждём searchFinished
                 setThinkingState(true);
             }
         }
@@ -743,10 +818,9 @@ void MainWindow::onSend()
         return;
     }
 
-    // --------------------------------------------------------
-    // Всё остальное (Ask, Explain, Modify, Create) → Jarvis/Claude
-    // --------------------------------------------------------
-    QString response = m_jarvis->processCommand(text, attachmentBlock);
+    // ── 6. Всё остальное → Jarvis/Claude ─────────────────
+    QString response = m_jarvis->processCommand(
+        text, attachmentBlock, m_langDetector.systemInstruction());
 
     if (!response.isEmpty()) {
         appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
@@ -766,13 +840,11 @@ void MainWindow::showClarification(const QString& question, const QStringList& o
 
     m_clarifyText->setText(question);
 
-    // Удаляем старые кнопки
     while (QLayoutItem* item = m_clarifyBtnLay->takeAt(0)) {
         if (auto* w = item->widget()) w->deleteLater();
         delete item;
     }
 
-    // Создаём кнопку для каждого варианта
     for (int i = 0; i < options.size(); ++i) {
         auto* btn = new QPushButton(options[i], m_clarifyBar);
         btn->setStyleSheet(
@@ -802,15 +874,13 @@ void MainWindow::onClarificationChoice(int choice)
 {
     if (m_pendingInput.isEmpty()) return;
 
-    // Добавляем к сохранённому вводу явный домен-суффикс
-    // чтобы Brain на следующем проходе распознал его однозначно
     static const QStringList domainSuffixes = {
-        QString(),                        // 0 — не используется
-        QStringLiteral(" в проекте"),     // 1
-        QStringLiteral(" на компьютере"), // 2
-        QStringLiteral(" в истории браузера"), // 3
-        QStringLiteral(" в интернете"),   // 4
-        QStringLiteral(" в нашем разговоре"), // 5
+        QString(),
+        QStringLiteral(" в проекте"),
+        QStringLiteral(" на компьютере"),
+        QStringLiteral(" в истории браузера"),
+        QStringLiteral(" в интернете"),
+        QStringLiteral(" в нашем разговоре"),
     };
 
     QString enriched = m_pendingInput;
@@ -819,8 +889,6 @@ void MainWindow::onClarificationChoice(int choice)
     }
 
     hideClarification();
-
-    // Подставляем обогащённый запрос и переотправляем
     m_input->setText(enriched);
     onSend();
 }
@@ -841,10 +909,6 @@ void MainWindow::onSpeakingChanged(bool speaking)
         m_status->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 12px;"));
     }
 }
-
-// ============================================================
-// Slots: виртуальная клавиатура
-// ============================================================
 
 void MainWindow::onTypingStarted()
 {
@@ -889,10 +953,6 @@ void MainWindow::onSuggestion(const QString& description, const QString& action)
     m_suggestionText->setText(QStringLiteral("→ ") + description);
     m_suggestionBar->setVisible(true);
 }
-
-// ============================================================
-// Slot: агент выбран
-// ============================================================
 
 void MainWindow::onAgentSelected(const QString& agentName)
 {
@@ -942,10 +1002,7 @@ void MainWindow::onAttachClicked()
     }
 }
 
-void MainWindow::onAttachmentsChanged()
-{
-    rebuildAttachmentsBar();
-}
+void MainWindow::onAttachmentsChanged() { rebuildAttachmentsBar(); }
 
 void MainWindow::onAttachmentsConsumed()
 {
@@ -992,10 +1049,7 @@ void MainWindow::showUpdateBar(const QString& version)
               Theme::LogColors::system);
 }
 
-void MainWindow::hideUpdateBar()
-{
-    m_updateBar->setVisible(false);
-}
+void MainWindow::hideUpdateBar() { m_updateBar->setVisible(false); }
 
 // ============================================================
 // Клавиатура
@@ -1031,7 +1085,7 @@ void MainWindow::toggleKeyboard()
 }
 
 // ============================================================
-// Перестройка панели прикреплений
+// Прикрепления
 // ============================================================
 
 void MainWindow::rebuildAttachmentsBar()
@@ -1085,9 +1139,9 @@ void MainWindow::rebuildAttachmentsBar()
 
         auto* nameLabel = new QLabel(chip);
         QString displayText = a.displayName;
-        if (displayText.length() > 28) {
+        if (displayText.length() > 28)
             displayText = displayText.left(25) + QStringLiteral("...");
-        }
+
         nameLabel->setText(displayText + QStringLiteral("  ")
                          + QStringLiteral("<span style='color:#5a7a90;'>(")
                          + AttachmentsManager::humanSize(a.sizeBytes)
@@ -1126,7 +1180,7 @@ void MainWindow::rebuildAttachmentsBar()
 }
 
 // ============================================================
-// buildUI
+// buildUI — без изменений в логике, только без мёртвого кода
 // ============================================================
 
 void MainWindow::buildUI()
@@ -1176,13 +1230,12 @@ void MainWindow::buildUI()
     topBar->addWidget(m_status);
     vbox->addLayout(topBar);
 
-    // === Разделитель ===
     auto* sep = new QLabel(this);
     sep->setObjectName(QStringLiteral("separator"));
     sep->setFixedHeight(1);
     vbox->addWidget(sep);
 
-    // === Панель обновления (скрыта) ===
+    // === Панель обновления ===
     m_updateBar = new QWidget(this);
     m_updateBar->setVisible(false);
     m_updateBar->setStyleSheet(
@@ -1241,7 +1294,7 @@ void MainWindow::buildUI()
     m_log->setFocusPolicy(Qt::NoFocus);
     vbox->addWidget(m_log, 1);
 
-    // === Панель предложений ActionPredictor (скрыта) ===
+    // === Панель предложений ===
     m_suggestionBar = new QWidget(this);
     m_suggestionBar->setVisible(false);
     m_suggestionBar->setStyleSheet(
@@ -1283,7 +1336,7 @@ void MainWindow::buildUI()
         m_suggestionBar->setVisible(false);
     });
 
-    // === Панель уточнения Brain (скрыта) ===
+    // === Панель уточнения Brain ===
     m_clarifyBar = new QWidget(this);
     m_clarifyBar->setVisible(false);
     m_clarifyBar->setStyleSheet(
@@ -1320,7 +1373,7 @@ void MainWindow::buildUI()
     clarifyVBox->addWidget(clarifyBtnWidget);
     vbox->addWidget(m_clarifyBar);
 
-    // === Панель прикреплений (скрыта пока пусто) ===
+    // === Панель прикреплений ===
     m_attachBar = new QWidget(this);
     m_attachBar->setVisible(false);
     m_attachBar->setStyleSheet(
@@ -1370,7 +1423,7 @@ void MainWindow::buildUI()
     attachVBox->addWidget(m_attachScroll);
     vbox->addWidget(m_attachBar);
 
-    // === Ввод + кнопки ===
+    // === Ввод ===
     auto* inputBar = new QHBoxLayout();
     inputBar->setSpacing(8);
 
@@ -1420,7 +1473,7 @@ void MainWindow::buildUI()
     bottomBar->addWidget(kbBtn);
     vbox->addLayout(bottomBar);
 
-    // === Виртуальная клавиатура (скрыта) ===
+    // === Виртуальная клавиатура ===
     m_kbContainer = new QWidget(this);
     m_kbContainer->setMaximumHeight(0);
     m_kbContainer->setVisible(false);
@@ -1449,7 +1502,7 @@ void MainWindow::buildUI()
 }
 
 // ============================================================
-// Лог
+// appendLog
 // ============================================================
 
 void MainWindow::appendLog(const QString& who, const QString& text, const QString& color)
