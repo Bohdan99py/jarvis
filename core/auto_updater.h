@@ -22,43 +22,35 @@ public:
                          const QString& githubRepo,
                          QObject* parent = nullptr);
 
-    void checkForUpdates(bool silent = true);
-    void downloadAndInstall(const QUrl& installerUrl);
-
-    QString currentVersion() const { return m_currentVersion; }
-
-    bool    hasPendingUpdate() const { return !m_pendingUrl.isEmpty(); }
-    QString pendingVersion()   const { return m_pendingVersion; }
-    QUrl    pendingUrl()       const { return m_pendingUrl; }
-    QString pendingNotes()     const { return m_pendingNotes; }
-
+    void checkForUpdates(bool silent = false);
     void downloadPendingUpdate();
 
-signals:
-    void updateAvailable(const QString& newVersion,
-                         const QString& releaseNotes,
-                         const QUrl& downloadUrl);
-    void noUpdateAvailable();
-    void downloadProgress(int percent);
-    void downloadFinished(const QString& installerPath);
-    void updateError(const QString& error);
+    QString pendingVersion() const { return m_pendingVersion; }
+    bool    hasUpdate()      const { return !m_pendingVersion.isEmpty(); }
 
-private slots:
-    void onCheckFinished(QNetworkReply* reply, bool silent);
-    void onDownloadFinished(QNetworkReply* reply);
+    signals:
+        void updateAvailable(const QString& version, const QString& releaseNotes, const QUrl& url);
+    void noUpdateAvailable();
+    void downloadProgress(int percent);          // 0..100
+    void downloadFinished(const QString& path);  // файл скачан на диск
+    void installerLaunched();                    // ShellExecuteW успешно запущен
+    void updateError(const QString& message);
 
 private:
+    void downloadAndInstall(const QUrl& installerUrl);
+    void onCheckFinished(QNetworkReply* reply, bool silent);
+    void onDownloadFinished(QNetworkReply* reply);
     bool isNewerVersion(const QString& remote, const QString& current) const;
 
-    QNetworkAccessManager* m_network = nullptr;
-    QString m_currentVersion;
-    QString m_githubUser;
-    QString m_githubRepo;
-    QString m_downloadPath;
+    QString  m_currentVersion;
+    QString  m_githubUser;
+    QString  m_githubRepo;
+    QString  m_downloadPath;
 
-    QString m_pendingVersion;
-    QUrl    m_pendingUrl;
-    QString m_pendingNotes;
+    QString  m_pendingVersion;
+    QUrl     m_pendingUrl;
+    QString  m_pendingNotes;
 
-    QNetworkReply* m_downloadReply = nullptr;
+    QNetworkAccessManager* m_network       = nullptr;
+    QNetworkReply*         m_downloadReply = nullptr;
 };

@@ -46,6 +46,8 @@
 #include <QToolTip>
 #include <QSettings>
 #include <QCoreApplication>
+#include <QSystemTrayIcon>
+#include <QTimer>
 
 // ============================================================
 // Конструктор
@@ -122,6 +124,16 @@ MainWindow::MainWindow(QWidget* parent)
         appendLog(Str::logSystem(), Str::updDownloaded(), Theme::LogColors::system);
         hideUpdateBar();
     });
+    connect(updater, &AutoUpdater::installerLaunched,
+            this, [this]() {
+        appendLog(Str::logSystem(),
+                  IS_EN ? QStringLiteral("Installer launched. Closing in 3 seconds...")
+                        : QStringLiteral("Установщик запущен. Закрываю через 3 секунды..."),
+                  Theme::LogColors::system);
+        QTimer::singleShot(3000, this, []() {
+            QCoreApplication::quit();
+        });
+    });
     connect(updater, &AutoUpdater::updateError,
             this, [this](const QString& error) {
         appendLog(Str::logError(), error, Theme::LogColors::error);
@@ -130,6 +142,44 @@ MainWindow::MainWindow(QWidget* parent)
     buildUI();
     buildMenuBar();
     qApp->setStyleSheet(Theme::globalStyleSheet());
+
+    // ── Системный трей ────────────────────────────────────────────────────────
+    // Иконка: пробуем ресурс, потом файл рядом с exe, потом стандартную Qt
+    QIcon trayIcon;
+    if (!QIcon(QStringLiteral(":/jarvis.ico")).isNull())
+        trayIcon = QIcon(QStringLiteral(":/jarvis.ico"));
+    else if (!QIcon(QStringLiteral(":/jarvis.png")).isNull())
+        trayIcon = QIcon(QStringLiteral(":/jarvis.png"));
+    else
+        trayIcon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);
+
+    m_trayIcon = new QSystemTrayIcon(trayIcon, this);
+    m_trayIcon->setToolTip(QStringLiteral("J.A.R.V.I.S. v")
+                           + QCoreApplication::applicationVersion());
+
+    auto* trayMenu = new QMenu(this);
+    auto* actShow = trayMenu->addAction(
+        IS_EN ? QStringLiteral("Show / Hide") : QStringLiteral("Показать / Скрыть"));
+    connect(actShow, &QAction::triggered, this, [this]() {
+        if (isVisible()) { hide(); }
+        else             { show(); raise(); activateWindow(); }
+    });
+    trayMenu->addSeparator();
+    auto* actQuit = trayMenu->addAction(
+        IS_EN ? QStringLiteral("Quit") : QStringLiteral("Выход"));
+    connect(actQuit, &QAction::triggered, qApp, &QApplication::quit);
+
+    m_trayIcon->setContextMenu(trayMenu);
+    m_trayIcon->show();
+
+    // Левый клик — показать/скрыть окно
+    connect(m_trayIcon, &QSystemTrayIcon::activated, this,
+            [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
+            if (isVisible()) { hide(); }
+            else             { show(); raise(); activateWindow(); }
+        }
+    });
 
     // Приветствие
     int hour = QTime::currentTime().hour();
@@ -466,6 +516,22 @@ void MainWindow::keyPressEvent(QKeyEvent* e)
         return;
     }
     QMainWindow::keyPressEvent(e);
+}
+
+// Закрытие окна → скрываем в трей (не завершаем процесс)
+void MainWindow::closeEvent(QCloseEvent* e)
+{
+    if (m_trayIcon && m_trayIcon->isVisible()) {
+        e->ignore();
+        hide();
+        m_trayIcon->showMessage(
+            QStringLiteral("J.A.R.V.I.S."),
+            IS_EN ? QStringLiteral("Running in the system tray. Right-click to quit.")
+                  : QStringLiteral("Работает в трее. ПКМ → Выход."),
+            QSystemTrayIcon::Information, 2000);
+    } else {
+        e->accept();
+    }
 }
 
 // ============================================================

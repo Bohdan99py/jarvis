@@ -12,6 +12,9 @@
 #include <QPropertyAnimation>
 #include <QMenuBar>
 #include <QProgressBar>
+#include <QCloseEvent>
+#include <QSystemTrayIcon>
+#include <QStyle>
 
 class Jarvis;
 class VirtualKeyboardWidget;
@@ -29,6 +32,7 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent* e) override;
+    void closeEvent(QCloseEvent* e) override;  // скрывает в трей
 
     // Drag-n-drop файлов
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -118,4 +122,7 @@ private:
 
     // Вайбкодинг
     bool                    m_vibeCodingMode  = false;
+
+    // Системный трей
+    QSystemTrayIcon*        m_trayIcon        = nullptr;
 };

@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file>jarvis.ico</file>
+        <file>jarvis.png</file>
+    </qresource>
+</RCC>

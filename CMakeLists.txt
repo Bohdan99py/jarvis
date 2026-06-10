@@ -193,7 +193,14 @@ qt_add_executable(jarvis WIN32
         app/main.cpp
         app/mainwindow.h
         app/mainwindow.cpp
+        jarvis.rc              # Windows resource — иконка в exe/проводнике/таскбаре
 )
+
+# Подключаем иконки через Qt-ресурсы если файл существует
+set(_qrc "${CMAKE_CURRENT_SOURCE_DIR}/assets/resources.qrc")
+if(EXISTS "${_qrc}")
+    target_sources(jarvis PRIVATE "${_qrc}")
+endif()
 
 target_link_libraries(jarvis PRIVATE
         JarvisCore

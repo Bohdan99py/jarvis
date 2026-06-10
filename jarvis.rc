@@ -1,0 +1,5 @@
+// jarvis.rc — Windows resource file
+// Встраивает иконку в jarvis.exe (отображается в проводнике и таскбаре)
+// Этот файл должен лежать рядом с CMakeLists.txt
+
+IDI_ICON1 ICON "assets/jarvis.ico"

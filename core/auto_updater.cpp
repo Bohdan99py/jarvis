@@ -179,31 +179,30 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
     if (!installerPath.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
         return;
 
-    // Используем ShellExecuteW вместо QProcess::startDetached
-    // Это ВАЖНО: ShellExecuteW показывает диалог Windows SmartScreen
-    // ("Windows защитил ваш ПК → Всё равно запустить")
-    // QProcess::startDetached тихо блокируется SmartScreen без окна
-
-    std::wstring wPath = installerPath.toStdWString();
+    // Запускаем через explorer.exe — он всегда работает в пользовательском
+    // контексте и не наследует UAC-ограничения родительского процесса.
+    // Это решает проблему когда ShellExecuteW молча блокируется при запуске
+    // из-под IDE или любого elevated процесса.
+    const std::wstring wExplorer = L"explorer.exe";
+    const std::wstring wPath     = installerPath.toStdWString();
 
     HINSTANCE result = ShellExecuteW(
-        nullptr,            // hwnd
-        L"open",            // операция
-        wPath.c_str(),      // путь к exe
-        nullptr,            // без аргументов — покажет визард
-        nullptr,            // рабочая директория
-        SW_SHOWNORMAL       // показать окно
+        nullptr,
+        L"open",
+        wExplorer.c_str(),  // explorer.exe как лаунчер
+        wPath.c_str(),      // путь к установщику — аргумент explorer
+        nullptr,
+        SW_SHOWNORMAL
     );
 
-    // ShellExecuteW возвращает > 32 при успехе
     if (reinterpret_cast<intptr_t>(result) > 32) {
-        // Установщик запущен — закрываем JARVIS через 2 секунды
-        QTimer::singleShot(2000, qApp, []() {
-            QCoreApplication::exit(0);
+        // Установщик запущен — ждём 3 сек и закрываемся корректно
+        QTimer::singleShot(3000, this, []() {
+            QCoreApplication::quit();
         });
     } else {
         emit updateError(QStringLiteral("Не удалось запустить установщик.\n"
-                                        "Попробуйте вручную: ") + installerPath);
+                                        "Откройте вручную: ") + installerPath);
     }
 }
 
