@@ -5,6 +5,8 @@
 #include "search_router.h"
 #include "project_indexer.h"
 #include "session_memory.h"
+#include "semantic_mapper.h"
+#include "content_search.h"
 #include "lang.h"
 
 #include <QDir>
@@ -264,12 +266,50 @@ SearchResults SearchRouter::searchFilesystem(const QString& query,
 {
     SearchResults results;
 
+    // --- Семантическое расширение запроса ---
+    SemanticMapper mapper(m_memory);
+    QStringList searchPatterns;  // все паттерны по которым будем искать
+    QStringList priorityExtensions;
+
+    if (mapper.needsSemanticExpansion(query)) {
+        const SemanticMatch match = mapper.map(query);
+        searchPatterns    = match.fileNamePatterns;
+        priorityExtensions = match.extensions;
+    }
+
+    // Всегда добавляем оригинальный запрос последним
+    if (!searchPatterns.contains(query.toLower()))
+        searchPatterns.append(query.toLower());
+
 #ifdef Q_OS_WIN
-    results = windowsSearch(query);
-    if (!results.isEmpty()) return results;
+    // Пробуем Windows Search сначала для каждого паттерна
+    for (const QString& pattern : searchPatterns) {
+        if (results.size() >= kMaxResults) break;
+        const auto hits = windowsSearch(pattern);
+        for (const auto& r : hits) {
+            // Фильтруем по расширению если есть приоритеты
+            if (!priorityExtensions.isEmpty()) {
+                const QString ext = QFileInfo(r.path).suffix().toLower();
+                if (!priorityExtensions.contains(ext)) continue;
+            }
+            bool dup = false;
+            for (const auto& existing : results) {
+                if (existing.path == r.path) { dup = true; break; }
+            }
+            if (!dup) results.append(r);
+        }
+    }
+    if (!results.isEmpty()) {
+        // Запоминаем связь для будущих запросов
+        if (mapper.needsSemanticExpansion(query) && !results.isEmpty()) {
+            SemanticMapper learnMapper(m_memory);
+            learnMapper.learnFromResult(query, results.first().path);
+        }
+        return results;
+    }
 #endif
 
-    // Fallback: обход пользовательских папок
+    // Fallback: QDirIterator по конкретным папкам
     static const auto getRoots = []() -> QStringList {
         return {
             QStandardPaths::writableLocation(QStandardPaths::DesktopLocation),
@@ -281,21 +321,21 @@ SearchResults SearchRouter::searchFilesystem(const QString& query,
         };
     };
 
+    // Фильтры по расширению — из семантики или из хинта
     QStringList filters;
-    const QString hint = fileTypeHint.toLower();
-    if (hint.contains(QStringLiteral("image")) || hint.contains(QStringLiteral("картинк"))
-        || hint.contains(QStringLiteral("фото")) || hint.contains(QStringLiteral("скрин"))) {
-        filters = {QStringLiteral("*.png"), QStringLiteral("*.jpg"),
-                   QStringLiteral("*.jpeg"), QStringLiteral("*.gif"), QStringLiteral("*.webp")};
-    } else if (hint.contains(QStringLiteral("video")) || hint.contains(QStringLiteral("видео"))) {
-        filters = {QStringLiteral("*.mp4"), QStringLiteral("*.avi"),
-                   QStringLiteral("*.mkv"), QStringLiteral("*.mov")};
-    } else if (hint.contains(QStringLiteral("doc")) || hint.contains(QStringLiteral("документ"))) {
-        filters = {QStringLiteral("*.docx"), QStringLiteral("*.pdf"),
-                   QStringLiteral("*.txt"), QStringLiteral("*.md")};
+    if (!priorityExtensions.isEmpty()) {
+        for (const auto& ext : priorityExtensions)
+            filters.append(QStringLiteral("*.") + ext);
+    } else {
+        const QString hint = fileTypeHint.toLower();
+        if (hint.contains(QStringLiteral("image")) || hint.contains(QStringLiteral("картинк"))) {
+            filters = {QStringLiteral("*.png"), QStringLiteral("*.jpg"),
+                       QStringLiteral("*.jpeg"), QStringLiteral("*.gif"), QStringLiteral("*.webp")};
+        } else if (hint.contains(QStringLiteral("video")) || hint.contains(QStringLiteral("видео"))) {
+            filters = {QStringLiteral("*.mp4"), QStringLiteral("*.avi"),
+                       QStringLiteral("*.mkv"), QStringLiteral("*.mov")};
+        }
     }
-
-    const QString queryLower = query.toLower();
 
     for (const QString& root : getRoots()) {
         if (results.size() >= kMaxResults) break;
@@ -311,7 +351,26 @@ SearchResults SearchRouter::searchFilesystem(const QString& query,
             ++depth;
             it.next();
             const QFileInfo fi = it.fileInfo();
-            if (!fi.fileName().toLower().contains(queryLower)) continue;
+            const QString nameLower = fi.fileName().toLower();
+
+            // Проверяем совпадение с любым из семантических паттернов
+            bool matched = false;
+            int  bestRelevance = 0;
+            for (const QString& pattern : searchPatterns) {
+                if (nameLower.contains(pattern)) {
+                    matched = true;
+                    const int rel = (fi.baseName().toLower() == pattern) ? 100
+                                  : nameLower.startsWith(pattern)        ? 90 : 70;
+                    bestRelevance = qMax(bestRelevance, rel);
+                }
+            }
+            if (!matched) continue;
+
+            bool dup = false;
+            for (const auto& existing : results) {
+                if (existing.path == fi.absoluteFilePath()) { dup = true; break; }
+            }
+            if (dup) continue;
 
             SearchResult r;
             r.title     = fi.fileName();
@@ -319,8 +378,42 @@ SearchResults SearchRouter::searchFilesystem(const QString& query,
             r.snippet   = fi.lastModified().toString(QStringLiteral("dd.MM.yyyy HH:mm"))
                         + QStringLiteral("  ") + formatFileSize(fi.size());
             r.source    = QStringLiteral("filesystem");
-            r.relevance = (fi.baseName().toLower() == queryLower) ? 100 : 70;
+            r.relevance = bestRelevance;
             results.append(r);
+        }
+    }
+
+    // Если по имени ничего не нашли — ищем по содержимому файлов
+    if (results.isEmpty()) {
+        QStringList contentKeywords;
+        QStringList contentExtensions;
+
+        if (mapper.needsSemanticExpansion(query)) {
+            // Семантический запрос — используем расширенные ключевые слова
+            const SemanticMatch match = mapper.map(query);
+            contentKeywords  = match.contentKeywords;
+            contentExtensions = match.extensions;
+        }
+
+        // Если семантики нет или keywords пустые — ищем по словам самого запроса
+        if (contentKeywords.isEmpty()) {
+            // Разбиваем query на слова длиннее 3 символов — они как ключевые слова
+            for (const QString& word : query.split(QChar(' '), Qt::SkipEmptyParts)) {
+                if (word.length() > 3) contentKeywords.append(word);
+            }
+            // Если запрос короткий — берём целиком
+            if (contentKeywords.isEmpty() && !query.isEmpty()) {
+                contentKeywords.append(query);
+            }
+        }
+
+        if (!contentKeywords.isEmpty()) {
+            const auto contentHits = searchByContent(
+                contentKeywords,
+                contentExtensions,  // пусто = все документы
+                kMaxResults
+            );
+            results.append(contentHits);
         }
     }
 
@@ -328,6 +421,12 @@ SearchResults SearchRouter::searchFilesystem(const QString& query,
               [](const SearchResult& a, const SearchResult& b) {
                   return a.relevance > b.relevance;
               });
+
+    // Запоминаем лучший результат для будущих запросов
+    if (!results.isEmpty() && mapper.needsSemanticExpansion(query)) {
+        SemanticMapper learnMapper(m_memory);
+        learnMapper.learnFromResult(query, results.first().path);
+    }
 
     return results;
 }
@@ -438,6 +537,74 @@ SearchResults SearchRouter::windowsSearch(const QString& query) const
                   return a.relevance > b.relevance;
               });
 #endif
+
+    return results;
+}
+
+// ============================================================
+// searchByContent — поиск внутри файлов по ключевым словам
+// ============================================================
+
+SearchResults SearchRouter::searchByContent(const QStringList& keywords,
+                                             const QStringList& extensions,
+                                             int maxResults) const
+{
+    SearchResults results;
+    if (keywords.isEmpty()) return results;
+
+    // Собираем кандидатов — файлы нужных расширений из пользовательских папок
+    static const QStringList searchRoots = {
+        QStandardPaths::writableLocation(QStandardPaths::DesktopLocation),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
+    };
+
+    QStringList candidates;
+    for (const QString& root : searchRoots) {
+        if (root.isEmpty() || !QDir(root).exists()) continue;
+
+        QStringList filters;
+        if (!extensions.isEmpty()) {
+            for (const auto& ext : extensions)
+                filters.append(QStringLiteral("*.") + ext);
+        } else {
+            // По умолчанию — документы
+            filters = {QStringLiteral("*.pdf"), QStringLiteral("*.docx"),
+                       QStringLiteral("*.txt"), QStringLiteral("*.md"),
+                       QStringLiteral("*.xlsx"), QStringLiteral("*.pptx")};
+        }
+
+        QDirIterator it(root, filters,
+                        QDir::Files | QDir::NoDotAndDotDot,
+                        QDirIterator::Subdirectories);
+
+        int depth = 0;
+        while (it.hasNext() && candidates.size() < 50 && depth < 5000) {
+            ++depth;
+            it.next();
+            // Пропускаем слишком маленькие (< 1KB) и слишком большие (> 20MB)
+            const qint64 sz = it.fileInfo().size();
+            if (sz < 1024 || sz > 20 * 1024 * 1024) continue;
+            candidates.append(it.filePath());
+        }
+    }
+
+    if (candidates.isEmpty()) return results;
+
+    // Запускаем ContentSearch по кандидатам
+    ContentSearch cs;
+    const auto hits = cs.search(candidates, keywords, maxResults);
+
+    for (const auto& hit : hits) {
+        SearchResult r;
+        r.title     = hit.fileName;
+        r.path      = hit.filePath;
+        r.snippet   = QStringLiteral("«") + hit.matchedWord
+                    + QStringLiteral("»: ") + hit.matchedLine;
+        r.source    = QStringLiteral("content");
+        r.relevance = hit.relevance;
+        results.append(r);
+    }
 
     return results;
 }

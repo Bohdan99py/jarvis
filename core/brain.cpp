@@ -487,21 +487,47 @@ QString Brain::extractQuery(const QString& input, Intent::Action action) const
 
     // 1. Убираем командные слова-префиксы (длинные — первыми)
     static const QStringList prefixesToStrip = {
-        QStringLiteral("найди мне "),    QStringLiteral("найди "),
-        QStringLiteral("поищи мне "),    QStringLiteral("поищи "),
-        QStringLiteral("открой мне "),   QStringLiteral("открой "),
-        QStringLiteral("запусти мне "),  QStringLiteral("запусти "),
-        QStringLiteral("объясни мне "),  QStringLiteral("объясни "),
-        QStringLiteral("расскажи мне "), QStringLiteral("расскажи "),
-        QStringLiteral("покажи мне "),   QStringLiteral("покажи "),
-        QStringLiteral("где находится "),QStringLiteral("где искать "),
-        QStringLiteral("где у меня "),   QStringLiteral("где "),
-        QStringLiteral("помню была "),   QStringLiteral("помню был "),
+        // Русские составные
+        QStringLiteral("найди мне файл "),   QStringLiteral("найди файл "),
+        QStringLiteral("найди мне документ "),QStringLiteral("найди документ "),
+        QStringLiteral("найди мне папку "),   QStringLiteral("найди папку "),
+        QStringLiteral("найди мне картинку "),QStringLiteral("найди картинку "),
+        QStringLiteral("найди мне видео "),   QStringLiteral("найди видео "),
+        QStringLiteral("найди мне фото "),    QStringLiteral("найди фото "),
+        QStringLiteral("найди мне скрин "),   QStringLiteral("найди скрин "),
+        QStringLiteral("найди мне "),         QStringLiteral("найди "),
+        QStringLiteral("поищи мне "),         QStringLiteral("поищи "),
+        QStringLiteral("открой мне "),        QStringLiteral("открой "),
+        QStringLiteral("запусти мне "),       QStringLiteral("запусти "),
+        QStringLiteral("объясни мне "),       QStringLiteral("объясни "),
+        QStringLiteral("расскажи мне "),      QStringLiteral("расскажи "),
+        QStringLiteral("покажи мне файл "),   QStringLiteral("покажи файл "),
+        QStringLiteral("покажи мне "),        QStringLiteral("покажи "),
+        QStringLiteral("найди документ где написано "),
+        QStringLiteral("найди файл где написано "),
+        QStringLiteral("найди где написано "),
+        QStringLiteral("найди где упоминается "),
+        QStringLiteral("найди где есть "),
+        QStringLiteral("найди документ с "),
+        QStringLiteral("найди файл с "),
+        QStringLiteral("find document with "),
+        QStringLiteral("find file with "),
+        QStringLiteral("find where it says "),
+        QStringLiteral("где написано "),      QStringLiteral("где упоминается "),
+        QStringLiteral("где встречается "),   QStringLiteral("где есть слово "),
+        QStringLiteral("где находится "),     QStringLiteral("где искать "),
+        QStringLiteral("где у меня "),        QStringLiteral("где "),
+        QStringLiteral("помню была "),        QStringLiteral("помню был "),
         QStringLiteral("помню "),
-        QStringLiteral("find me "),      QStringLiteral("find "),
-        QStringLiteral("search for "),   QStringLiteral("search "),
-        QStringLiteral("open "),         QStringLiteral("show me "),
-        QStringLiteral("look for "),     QStringLiteral("where is "),
+        // Английские составные
+        QStringLiteral("find me the file "),  QStringLiteral("find the file "),
+        QStringLiteral("find me file "),      QStringLiteral("find file "),
+        QStringLiteral("find me the "),       QStringLiteral("find me "),
+        QStringLiteral("find "),
+        QStringLiteral("search for file "),   QStringLiteral("search for "),
+        QStringLiteral("search "),
+        QStringLiteral("open "),              QStringLiteral("show me "),
+        QStringLiteral("look for "),          QStringLiteral("where is "),
         QStringLiteral("where can i find "),
     };
 
@@ -539,18 +565,34 @@ QString Brain::extractQuery(const QString& input, Intent::Action action) const
     }
 
     // 4. Убираем шумовые слова которые мешают поиску
+    // Важно: применяем только если слово НЕ является единственным значимым словом
     static const QStringList noiseWords = {
-        QStringLiteral("мне"), QStringLiteral("меня"), QStringLiteral("мой"),
-        QStringLiteral("моя"), QStringLiteral("моё"),  QStringLiteral("моих"),
-        QStringLiteral("ту"),  QStringLiteral("тот"),  QStringLiteral("то"),
-        QStringLiteral("эту"), QStringLiteral("этот"), QStringLiteral("это"),
+        // Местоимения
+        QStringLiteral("мне"),     QStringLiteral("меня"),  QStringLiteral("мой"),
+        QStringLiteral("моя"),     QStringLiteral("моё"),   QStringLiteral("моих"),
+        QStringLiteral("ту"),      QStringLiteral("тот"),   QStringLiteral("то"),
+        QStringLiteral("эту"),     QStringLiteral("этот"),  QStringLiteral("это"),
         QStringLiteral("которую"), QStringLiteral("которой"),
+        QStringLiteral("какой"),   QStringLiteral("какую"),
+        // Слова-обёртки типа файла (убираем если они НЕ единственное слово)
+        // "найди файл readme" → после стрипа prefix остаётся "файл readme" → убираем "файл"
+        QStringLiteral("файл"),    QStringLiteral("файла"),  QStringLiteral("файлы"),
+        QStringLiteral("папку"),   QStringLiteral("папка"),  QStringLiteral("папки"),
+        QStringLiteral("скрин"),   QStringLiteral("скрины"), QStringLiteral("скриншот"),
+        QStringLiteral("file"),    QStringLiteral("files"),
+        QStringLiteral("folder"),  QStringLiteral("folders"),
+        // Частицы и союзы
+        QStringLiteral("с"),   QStringLiteral("со"),
+        QStringLiteral("из"),  QStringLiteral("по"),
+        QStringLiteral("про"), QStringLiteral("для"),
+        QStringLiteral("the"), QStringLiteral("a"), QStringLiteral("an"),
+        QStringLiteral("of"),  QStringLiteral("with"), QStringLiteral("for"),
     };
 
-    // Применяем только если запрос многословный (≥ 3 слов)
-    // и если убирание не опустошит строку
+    // Применяем только если запрос многословный (≥ 2 слов)
+    // и убирание не опустошит строку
     QStringList words = q.split(QChar(' '), Qt::SkipEmptyParts);
-    if (words.size() >= 3) {
+    if (words.size() >= 2) {
         QStringList filtered;
         for (const auto& w : words) {
             if (!noiseWords.contains(w.toLower())) {

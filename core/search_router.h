@@ -4,6 +4,7 @@
 // -------------------------------------------------------
 
 #include "brain.h"
+#include "semantic_mapper.h"
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -59,6 +60,9 @@ private:
     SearchResults searchProjectFiles(const QString& query) const;
     SearchResults searchFilesystem(const QString& query,
                                    const QString& fileTypeHint = QString()) const;
+    SearchResults searchByContent(const QStringList& keywords,
+                                   const QStringList& extensions,
+                                   int maxResults = 5) const;
     SearchResults searchBrowserHistory(const QString& query) const;
     SearchResults parseBrowserSqlite(const QString& dbPath,
                                       const QString& query) const;
