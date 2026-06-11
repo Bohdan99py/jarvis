@@ -42,7 +42,7 @@ static constexpr int     ANTHROPIC_KEY_SIZE    = 0;
 #endif
 
 inline QString claudeKey() {
-    if (ANTHROPIC_KEY_SIZE == 0) return {};
+    if constexpr (ANTHROPIC_KEY_SIZE == 0) return {};
     return decode(ANTHROPIC_KEY_DATA, ANTHROPIC_KEY_SIZE);
 }
 
@@ -65,7 +65,7 @@ static constexpr int GEMINI_KEY_SIZE = 39;
 #endif
 
 inline QString geminiKey() {
-    if (GEMINI_KEY_SIZE == 0) return {};
+    if constexpr (GEMINI_KEY_SIZE == 0) return {};
     return decode(GEMINI_KEY_DATA, GEMINI_KEY_SIZE);
 }
 
