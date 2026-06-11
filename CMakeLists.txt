@@ -103,6 +103,10 @@ add_library(JarvisCore STATIC
         # Ollama API (локальный LLM, OpenAI-compatible)
         core/ollama_api.h
 
+        # Gemini API (Google, fallback если Ollama недоступна)
+        core/gemini_api.h
+        core/gemini_api.cpp
+
         # Интеллект
         core/action_predictor.h
         core/action_predictor.cpp

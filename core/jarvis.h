@@ -22,6 +22,7 @@ class KeyEmulator;
 class SessionMemory;
 class ClaudeApi;
 class OllamaApi;
+class GeminiApi;
 class ActionPredictor;
 class AutoUpdater;
 class ProjectIndexer;
@@ -65,6 +66,7 @@ public:
     SessionMemory*      memory()             const { return m_memory; }
     ClaudeApi*          claudeApi()          const { return m_claudeApi; }
     OllamaApi*          ollamaApi()          const { return m_geminiApi; }  // m_geminiApi хранит OllamaApi
+    GeminiApi*          geminiBackup()       const { return m_geminiBackup; }
     ActionPredictor*    actionPredictor()    const { return m_predictor; }
     AutoUpdater*        autoUpdater()        const { return m_updater; }
     ProjectIndexer*     projectIndexer()     const { return m_indexer; }
@@ -126,7 +128,8 @@ private:
     KeyEmulator*        m_keyEmulator  = nullptr;
     SessionMemory*      m_memory       = nullptr;
     ClaudeApi*          m_claudeApi    = nullptr;
-    OllamaApi*          m_geminiApi    = nullptr;   // переименован логически в OllamaApi
+    OllamaApi*          m_geminiApi    = nullptr;   // Ollama — локальный LLM
+    GeminiApi*          m_geminiBackup = nullptr;   // Gemini — fallback если Ollama недоступна
     ActionPredictor*    m_predictor    = nullptr;
     AutoUpdater*        m_updater      = nullptr;
     ProjectIndexer*     m_indexer      = nullptr;

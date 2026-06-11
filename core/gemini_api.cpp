@@ -4,6 +4,7 @@
 
 #include "gemini_api.h"
 #include "session_memory.h"
+#include "embedded_key.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -47,11 +48,22 @@ void GeminiApi::setApiKey(const QString& key)
 
 void GeminiApi::loadApiKey()
 {
+    // 1. Сначала пробуем пользовательский ключ из файла
     QFile file(geminiKeyFilePath());
-    if (!file.open(QIODevice::ReadOnly)) return;
-    QString key = QString::fromUtf8(file.readAll()).trimmed();
-    file.close();
-    if (!key.isEmpty()) m_apiKey = key;
+    if (file.open(QIODevice::ReadOnly)) {
+        QString key = QString::fromUtf8(file.readAll()).trimmed();
+        file.close();
+        if (!key.isEmpty()) {
+            m_apiKey = key;
+            return;
+        }
+    }
+
+    // 2. Fallback — встроенный ключ (XOR-обфусцирован)
+    QString embedded = EmbeddedKey::geminiKey();
+    if (!embedded.isEmpty()) {
+        m_apiKey = embedded;
+    }
 }
 
 void GeminiApi::saveApiKey()

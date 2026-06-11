@@ -16,6 +16,7 @@
 #include "search_router.h"
 #include "fileviewer.h"
 #include "ollama_api.h"
+#include "gemini_api.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -194,6 +195,16 @@ MainWindow::MainWindow(QWidget* parent)
         appendLog(Str::logJarvis(), Str::apiClaudeConnected(), Theme::LogColors::system);
     } else {
         appendLog(Str::logJarvis(), Str::apiNoKey(), Theme::LogColors::jarvis);
+    }
+
+    // Статус Gemini (встроенный fallback-ключ)
+    if (m_jarvis->geminiBackup() && m_jarvis->geminiBackup()->hasApiKey()) {
+        appendLog(Str::logSystem(),
+                  IS_EN ? QStringLiteral("♊ Gemini ready (built-in key). "
+                                         "Used as fallback when Ollama is unavailable.")
+                        : QStringLiteral("♊ Gemini готов (встроенный ключ). "
+                                         "Используется если Ollama недоступна."),
+                  QStringLiteral("#4a9a6a"));
     }
 
     if (m_jarvis->projectIndexer()->fileCount() > 0) {
