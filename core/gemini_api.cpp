@@ -60,10 +60,18 @@ void GeminiApi::loadApiKey()
     }
 
     // 2. Fallback — встроенный ключ (XOR-обфусцирован)
-    QString embedded = EmbeddedKey::geminiKey();
+    // Используем GEMINI_KEY_DATA если определён, иначе пропускаем
+#ifdef GEMINI_KEY_DATA
+    QString embedded = EmbeddedKey::decode(GEMINI_KEY_DATA, GEMINI_KEY_SIZE);
     if (!embedded.isEmpty()) {
         m_apiKey = embedded;
     }
+#elif defined(GEMINI_KEY_SIZE)
+    if (GEMINI_KEY_SIZE > 0) {
+        QString embedded = EmbeddedKey::decode(GEMINI_KEY_DATA, GEMINI_KEY_SIZE);
+        if (!embedded.isEmpty()) m_apiKey = embedded;
+    }
+#endif
 }
 
 void GeminiApi::saveApiKey()
