@@ -32,16 +32,6 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           toolset: '14.3'
-      - name: Configure CMake
-          run: >
-            cmake -S . -B build
-            -G "Ninja"
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-            -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
-          shell: pwsh
-
-            - name: Build Release
-              run: cmake --build build --parallel
 
       # === Вшиваем API-ключ из GitHub Secrets ===
       - name: Inject API key
