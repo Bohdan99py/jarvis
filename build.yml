@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 env:
-  QT_VERSION: '6.8.0'
+  QT_VERSION: '6.8.3'
   BUILD_TYPE: Release
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
 
-      # ИСПРАВЛЕНО: Правильный экшен, который находит и активирует компилятор MSVC 2022 для CMake
+      # Активируем компилятор MSVC (cl.exe) для Ninja
       - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -96,23 +96,25 @@ jobs:
           Write-Host "API key injected ($($encrypted.Length) bytes encrypted)"
         shell: pwsh
 
-      # === Сборка ===
+      # === Сборка через Ninja ===
       - name: Configure CMake
         run: >
           cmake -S . -B build
-          -G "Visual Studio 17 2022" -A x64
+          -G "Ninja"
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+        shell: pwsh
 
       - name: Build Release
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+        run: cmake --build build --parallel
 
-      # === Подготовка пакета (Пути исправлены под твой CMakeLists.txt) ===
+      # === Подготовка пакета ===
       - name: Prepare release package
         run: |
           mkdir release_package
           mkdir release_package\plugins
           
-          # ИСПРАВЛЕНО: Твой CMake складывает jarvis.exe в папку build/bin/
+          # Копируем статически собранный исполняемый файл
           copy build\bin\jarvis.exe release_package\
           
           if (Test-Path plugins\plugins.json) {
@@ -123,7 +125,7 @@ jobs:
             copy build\bin\JarvisPlugin_*.dll release_package\plugins\
           }
           
-          # Развертывание зависимостей Qt вокруг jarvis.exe
+          # Линкуем окружение Qt вокруг jarvis.exe
           & "${{ env.Qt6_DIR }}\bin\windeployqt.exe" `
             --release `
             --no-translations `
@@ -139,7 +141,7 @@ jobs:
           path: release_package/
 
       # ============================================================
-      # Релиз — только при теге v*
+      # Релиз (только при пуше тегов v*)
       # ============================================================
 
       - name: Create ZIP archive
