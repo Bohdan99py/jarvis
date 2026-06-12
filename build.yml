@@ -13,25 +13,24 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Qt
+        id: qt
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: windows
           target: desktop
           arch: win64_msvc2022_64
+          cache: true
 
-      # Активируем компилятор MSVC (cl.exe) для Ninja
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          toolset: '14.3'
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
 
       # === Вшиваем API-ключ из GitHub Secrets ===
       - name: Inject API key
@@ -96,43 +95,86 @@ jobs:
           Write-Host "API key injected ($($encrypted.Length) bytes encrypted)"
         shell: pwsh
 
-      # === Сборка через Ninja ===
-      - name: Configure CMake
-        run: >
-          cmake -S . -B build
-          -G "Ninja"
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+      # === Версия из git-тега → CMakeLists.txt ===
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace 'project\(jarvis VERSION [0-9]+\.[0-9]+\.[0-9]+', "project(jarvis VERSION $version"
+          Set-Content CMakeLists.txt $content
+          Write-Host "CMake version set to $version"
         shell: pwsh
 
+      # === Определяем путь к Qt и проверяем что он есть ===
+      - name: Resolve Qt path
+        id: qtpath
+        shell: pwsh
+        run: |
+          # install-qt-action@v4 экспортирует QT_ROOT_DIR — это и есть нужный путь
+          $qt = $env:QT_ROOT_DIR
+          if (-not $qt -or -not (Test-Path $qt)) {
+              # Запасной вариант — Qt6_DIR (старое имя)
+              $qt = $env:Qt6_DIR
+          }
+          if (-not $qt -or -not (Test-Path $qt)) {
+              Write-Error "Qt path not found. QT_ROOT_DIR='$env:QT_ROOT_DIR', Qt6_DIR='$env:Qt6_DIR'"
+              exit 1
+          }
+          Write-Host "Qt path: $qt"
+          "qt_path=$qt" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # === Сборка ===
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          $qt = "${{ steps.qtpath.outputs.qt_path }}"
+          Write-Host "Using Qt prefix: $qt"
+          cmake -S . -B build `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="$qt"
+
       - name: Build Release
-        run: cmake --build build --parallel
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
 
       # === Подготовка пакета ===
       - name: Prepare release package
+        shell: pwsh
         run: |
-          mkdir release_package
-          mkdir release_package\plugins
+          New-Item -ItemType Directory -Force -Path release_package | Out-Null
+          New-Item -ItemType Directory -Force -Path release_package\plugins | Out-Null
           
-          # Копируем статически собранный исполняемый файл
-          copy build\bin\jarvis.exe release_package\
-          
-          if (Test-Path plugins\plugins.json) {
-            copy plugins\plugins.json release_package\plugins\
+          # На VS-генераторе бинарь оказывается в build/bin/Release/, на ninja — в build/bin/
+          $exePath = "build\bin\Release\jarvis.exe"
+          if (-not (Test-Path $exePath)) { $exePath = "build\bin\jarvis.exe" }
+          if (-not (Test-Path $exePath)) {
+            $found = Get-ChildItem -Path build -Recurse -Filter "jarvis.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $exePath = $found.FullName }
+          }
+          if (-not (Test-Path $exePath)) {
+            Write-Error "jarvis.exe not found in build directory!"
+            Get-ChildItem -Path build -Recurse | Select-Object -ExpandProperty FullName
+            exit 1
           }
           
-          if (Test-Path build\bin\JarvisPlugin_*.dll) {
-            copy build\bin\JarvisPlugin_*.dll release_package\plugins\
+          Write-Host "Using exe: $exePath"
+          Copy-Item $exePath release_package\
+          
+          if (Test-Path "plugins\plugins.json") {
+            Copy-Item plugins\plugins.json release_package\plugins\
           }
           
-          # Линкуем окружение Qt вокруг jarvis.exe
-          & "${{ env.Qt6_DIR }}\bin\windeployqt.exe" `
+          Get-ChildItem -Path build -Recurse -Filter "JarvisPlugin_*.dll" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName release_package\plugins\ }
+          
+          $qt = "${{ steps.qtpath.outputs.qt_path }}"
+          & "$qt\bin\windeployqt.exe" `
             --release `
             --no-translations `
             --no-opengl-sw `
             --no-system-d3d-compiler `
+            --no-compiler-runtime `
             release_package\jarvis.exe
-        shell: pwsh
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -141,7 +183,7 @@ jobs:
           path: release_package/
 
       # ============================================================
-      # Релиз (только при пуше тегов v*)
+      # Релиз — только при теге v*
       # ============================================================
 
       - name: Create ZIP archive
@@ -159,7 +201,7 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
           $content = Get-Content installer.iss -Raw
-          $content = $content -replace '#define MyAppVersion "2.0.0"', "#define MyAppVersion `"$version`""
+          $content = $content -replace '#define MyAppVersion "[0-9]+\.[0-9]+\.[0-9]+"', "#define MyAppVersion `"$version`""
           $content = $content -replace '#define MyAppBuildDir "build\\release_package"', '#define MyAppBuildDir "release_package"'
           Set-Content installer.iss $content
         shell: pwsh
