@@ -3,9 +3,12 @@
 #include <QMap>
 #include <QStringList>
 #include <QFileInfo>
+#include <QDir>
 #include <QProcess>
 #include <QSettings>
 #include <windows.h>
+#include <shellapi.h>   // ShellExecuteW — может не попасть из <windows.h>,
+                        // если включающий TU определил WIN32_LEAN_AND_MEAN
 
 // Запускает приложения по имени.
 // Порядок поиска:
@@ -37,6 +40,40 @@ public:
         if (reinterpret_cast<intptr_t>(hr) <= 32) {
             return {false, exe, QString("ShellExecute failed (code %1) for: %2")
                         .arg(reinterpret_cast<intptr_t>(hr)).arg(exe)};
+        }
+        return {true, exe, {}};
+    }
+
+    // Открыть IDE/редактор с указанной папкой проекта.
+    // ideKey — алиас приложения из таблицы (clion, rider, vscode, ...).
+    // projectPath — абсолютный путь к корню проекта.
+    //
+    // CLion / Rider / VS Code все поддерживают синтаксис
+    // "<exe> <путь_к_папке>" для открытия проекта/папки напрямую,
+    // поэтому передаём путь как lpParameters в ShellExecuteW —
+    // это даёт тот же бонус с SmartScreen, что и launch().
+    LaunchResult launchProject(const QString &projectPath, const QString &ideKey = QStringLiteral("clion")) const {
+        QString exe = resolve(ideKey.trimmed().toLower());
+        if (exe.isEmpty()) {
+            return {false, {}, QString("IDE not found: %1").arg(ideKey)};
+        }
+        if (projectPath.isEmpty() || !QFileInfo::exists(projectPath)) {
+            return {false, exe, QString("Project path not found: %1").arg(projectPath)};
+        }
+
+        const QString nativePath = QDir::toNativeSeparators(QFileInfo(projectPath).absoluteFilePath());
+        const std::wstring wexe    = exe.toStdWString();
+        const std::wstring wparams = L"\"" + nativePath.toStdWString() + L"\"";
+
+        HINSTANCE hr = ShellExecuteW(
+            nullptr, L"open",
+            wexe.c_str(),
+            wparams.c_str(),
+            nullptr, SW_SHOWNORMAL);
+
+        if (reinterpret_cast<intptr_t>(hr) <= 32) {
+            return {false, exe, QString("ShellExecute failed (code %1) for: %2 \"%3\"")
+                        .arg(reinterpret_cast<intptr_t>(hr)).arg(exe, nativePath)};
         }
         return {true, exe, {}};
     }

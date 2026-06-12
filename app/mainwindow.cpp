@@ -87,6 +87,10 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onSuggestion);
     connect(m_jarvis, &Jarvis::agentSelected,
             this, &MainWindow::onAgentSelected);
+    connect(m_jarvis, &Jarvis::ideOpened,
+            this, [this](const QString& message) {
+                appendLog(Str::logJarvis(), message, Theme::LogColors::system);
+            });
 
     connect(m_jarvis->attachments(), &AttachmentsManager::changed,
             this, &MainWindow::onAttachmentsChanged);
@@ -604,6 +608,41 @@ bool MainWindow::trySystemControl(const QString& userText)
 bool MainWindow::tryOpenApp(const QString& userText, const Intent& intent)
 {
     if (intent.action != Intent::Action::Open) return false;
+
+    // ── Спец-случай: «открой проект [в <ide>]» / «open project [in <ide>]» ──
+    // Brain для "открой проект в clion" кладёт "clion" в targetApp (как
+    // обычное приложение), но пользователь имеет в виду ПРОЕКТ JARVIS,
+    // открытый в IDE — а не просто запуск CLion вхолостую.
+    // intent.query сохраняет полную фразу без "открой "/"open " (например
+    // "проект", "проект в rider", "project in vscode") — её и проверяем.
+    {
+        const QString q = intent.query.trimmed();
+        static const QRegularExpression reProject(
+            QStringLiteral(R"(^(?:проект|project)(?:\s+(?:в|in)\s+(.+))?$)"),
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch m = reProject.match(q);
+        if (m.hasMatch()) {
+            QString ide = m.captured(1).trimmed();
+            if (ide.isEmpty()) ide = QStringLiteral("clion");
+
+            const QString resp = m_jarvis->openProjectInIDE(ide);
+            if (!resp.isEmpty()) {
+                appendLog(Str::logJarvis(), resp, Theme::LogColors::jarvis);
+                m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+                m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+            } else {
+                const QString err = IS_EN
+                    ? QStringLiteral("No project is open. Index one first, "
+                                     "e.g. \"index C:\\Projects\\jarvis\".")
+                    : QStringLiteral("Проект не открыт. Сначала проиндексируйте его: "
+                                     "индекс C:\\Projects\\jarvis");
+                appendLog(Str::logJarvis(), err, Theme::LogColors::error);
+                m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+                m_jarvis->memory()->addMessage(QStringLiteral("assistant"), err);
+            }
+            return true;
+        }
+    }
 
     // Целевое имя: сначала targetApp из Brain, потом query
     const QString target = intent.targetApp.isEmpty()

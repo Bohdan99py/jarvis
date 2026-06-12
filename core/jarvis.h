@@ -17,6 +17,7 @@
 #include <atomic>
 
 #include "command_registry.h"
+#include "applauncher.h"
 
 class KeyEmulator;
 class SessionMemory;
@@ -80,6 +81,19 @@ public:
     // Синхронизировать данные индексатора с SessionMemory (system prompt)
     void syncProjectInfoToMemory();
 
+    // === IDE-агент (вайбкодинг) ===
+    // Определяет, похож ли ввод на кодинг-запрос/запрос новой фичи.
+    // Используется и для RAG-режима в buildProjectContext, и для
+    // автоматического открытия IDE.
+    static bool isCodingIntent(const QString& input);
+
+    // Открыть текущий проект в IDE (по умолчанию CLion).
+    // ideName — алиас из AppLauncher (clion, rider, vscode...);
+    // пустая строка = CLion, и только один раз автоматически за сессию.
+    // Возвращает текст для лога/чата либо пустую строку, если
+    // открывать не нужно (нет проекта / уже открывали автоматически).
+    QString openProjectInIDE(const QString& ideName = QString());
+
 signals:
     void speakingChanged(bool speaking);
     void asyncResponseReady(const QString& response);
@@ -87,12 +101,12 @@ signals:
     void suggestionAvailable(const QString& description, const QString& action);
     void attachmentsConsumed();
     void agentSelected(const QString& agentName);
+    void ideOpened(const QString& message);   // JARVIS открыл проект в IDE
 
 private:
     void registerCommands();
 
     // === Контекст для Claude (RAG) ===
-    static bool isCodingIntent(const QString& input);
     static QStringList extractKeywords(const QString& input);
     QString buildProjectContext(const QString& userQuery) const;
 
@@ -112,6 +126,7 @@ private:
     QString cmdFindSymbol(const QString& input);
     QString cmdProjectMap(const QString& input);
     QString cmdGrep(const QString& input);
+    QString cmdOpenProjectIDE(const QString& input);
 
     // === Виртуальная клавиатура ===
     QString cmdTypeText(const QString& input);
@@ -135,8 +150,10 @@ private:
     ProjectIndexer*     m_indexer      = nullptr;
     CodeActions*        m_codeActions  = nullptr;
     AttachmentsManager* m_attachments  = nullptr;
+    AppLauncher         m_appLauncher;             // запуск приложений/IDE
 
-    bool              m_multiAgentMode = false;
+    bool              m_multiAgentMode    = false;
+    bool              m_ideOpenedThisSession = false; // CLion открыт авто-режимом в этой сессии
     std::atomic<bool> m_speaking{false};
     QMutex            m_ttsMutex;
 };

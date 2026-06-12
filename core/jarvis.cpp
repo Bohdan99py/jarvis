@@ -109,6 +109,43 @@ void Jarvis::syncProjectInfoToMemory()
 }
 
 // ============================================================
+// IDE-агент: открыть проект в CLion/Rider/VSCode
+// ============================================================
+
+QString Jarvis::openProjectInIDE(const QString& ideName)
+{
+    const QString root = m_indexer->projectRoot();
+    if (root.isEmpty()) {
+        return QString(); // нет открытого проекта — нечего открывать
+    }
+
+    const bool explicitRequest = !ideName.isEmpty();
+    const QString ide = explicitRequest ? ideName.trimmed().toLower()
+                                         : QStringLiteral("clion");
+
+    // Авто-режим (без явного имени IDE) срабатывает только один раз
+    // за сессию — дальше CLion остаётся открытым сам по себе и
+    // повторный ShellExecute просто поднял бы то же окно.
+    if (!explicitRequest && m_ideOpenedThisSession) {
+        return QString();
+    }
+
+    const auto result = m_appLauncher.launchProject(root, ide);
+    if (!explicitRequest) {
+        m_ideOpenedThisSession = true;
+    }
+
+    if (result.success) {
+        const QString appName = QFileInfo(result.resolvedPath).completeBaseName();
+        return QStringLiteral("📂 Открываю проект \"") + QDir(root).dirName()
+             + QStringLiteral("\" в ") + appName + QStringLiteral("...");
+    }
+
+    return QStringLiteral("⚠ Не удалось открыть ") + ide
+         + QStringLiteral(": ") + result.errorMessage;
+}
+
+// ============================================================
 // Регистрация команд
 // ============================================================
 
@@ -142,6 +179,17 @@ void Jarvis::registerCommands()
         {QStringLiteral("индекс "), QStringLiteral("index ")},
         [this](const QString& s) { return cmdIndexProject(s); },
         QStringLiteral("индекс <путь> — индексировать C++ проект"),
+        /*prefixMatch=*/true
+    );
+
+    // --- IDE-агент: открыть проект в CLion/Rider/VSCode (явный префикс) ---
+    // Срабатывает для фраз без глагола "открой/open" (например "проект в clion").
+    // Для "открой проект [в <ide>]" / "open project [in <ide>]" — см.
+    // MainWindow::tryOpenApp, который перехватывает их раньше через Brain.
+    m_registry.registerCommand(
+        {QStringLiteral("проект в "), QStringLiteral("project in ")},
+        [this](const QString& s) { return cmdOpenProjectIDE(s); },
+        QStringLiteral("проект в <clion|rider|vscode> — открыть проект в IDE"),
         /*prefixMatch=*/true
     );
 
@@ -288,6 +336,33 @@ WORD Jarvis::parseVirtualKey(const QString& name)
 bool Jarvis::isCodingIntent(const QString& input)
 {
     const QString lower = input.toLower();
+
+    // Фразы-запросы новой функциональности ("хочу X", "I want to X").
+    // Это самые частые формулировки голосового вайбкодинга — пользователь
+    // описывает ЖЕЛАНИЕ, а не отдаёт команду в повелительном наклонении.
+    static const QStringList featureRequests = {
+        QStringLiteral("хочу сделать"),    QStringLiteral("хочу добавить"),
+        QStringLiteral("хочу реализовать"),QStringLiteral("хочу написать"),
+        QStringLiteral("хочу создать"),    QStringLiteral("хочу, чтобы"),
+        QStringLiteral("хочу чтобы"),      QStringLiteral("нужно добавить"),
+        QStringLiteral("нужна функция"),   QStringLiteral("нужен функционал"),
+        QStringLiteral("давай добавим"),   QStringLiteral("давай реализуем"),
+        QStringLiteral("давай сделаем"),   QStringLiteral("давай напишем"),
+        QStringLiteral("можешь добавить"), QStringLiteral("можешь реализовать"),
+        QStringLiteral("можешь сделать"),  QStringLiteral("можешь написать"),
+        QStringLiteral("i want to add"),   QStringLiteral("i want to make"),
+        QStringLiteral("i want to implement"), QStringLiteral("i want to build"),
+        QStringLiteral("i want to create"),QStringLiteral("i'd like to add"),
+        QStringLiteral("i'd like to implement"), QStringLiteral("i'd like to create"),
+        QStringLiteral("let's add"),       QStringLiteral("let's implement"),
+        QStringLiteral("let's build"),     QStringLiteral("let's create"),
+        QStringLiteral("can you add"),     QStringLiteral("can you implement"),
+        QStringLiteral("can you create"),  QStringLiteral("can you build"),
+        QStringLiteral("i need a function"), QStringLiteral("i need to add"),
+    };
+    for (const auto& p : featureRequests) {
+        if (lower.contains(p)) return true;
+    }
 
     static const QStringList verbs = {
         QStringLiteral("сделай"),     QStringLiteral("создай"),
@@ -538,10 +613,26 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
     }
 
     if (pickedFiles.isEmpty() && symbolHits.isEmpty() && grepHits.isEmpty()) {
-        context += QStringLiteral(
-            "\n(Автопоиск не нашёл прямых совпадений. "
-            "Если пользователь прикрепил файлы «скрепкой» — опирайся на них. "
-            "Если и прикреплений нет — попроси пользователя указать конкретный файл.)\n");
+        if (coding) {
+            // Похоже на запрос НОВОЙ функциональности — ничего похожего
+            // в проекте ещё нет. Не заставляем Claude переспрашивать файл:
+            // карта проекта уже есть в системном промпте, пусть сам
+            // спроектирует решение и создаст/изменит нужные файлы.
+            context += QStringLiteral(
+                "\n(Автопоиск не нашёл существующих файлов по теме запроса — "
+                "вероятно, это НОВАЯ функциональность. Карта проекта есть "
+                "в системном промпте. Спроектируй реализацию сам: укажи в какие "
+                "существующие файлы добавить код через [DIFF:...] и какие новые "
+                "файлы/папки создать через [FILE:...]/[MKDIR:...]. Не спрашивай "
+                "пользователя «какой файл?» — предложи готовое решение. "
+                "Следуй принципам проекта: минимум новых файлов, единый "
+                "корневой CMakeLists.txt, полные файлы вместо фрагментов.)\n");
+        } else {
+            context += QStringLiteral(
+                "\n(Автопоиск не нашёл прямых совпадений. "
+                "Если пользователь прикрепил файлы «скрепкой» — опирайся на них. "
+                "Если и прикреплений нет — попроси пользователя указать конкретный файл.)\n");
+        }
     }
 
     context += QStringLiteral("--- Конец контекста из проекта ---\n");
@@ -633,6 +724,16 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     //    Здесь просто отправляем в API.
     if (!m_indexer->projectRoot().isEmpty()) {
         m_codeActions->setProjectRoot(m_indexer->projectRoot());
+    }
+
+    // 2b. Вайбкодинг: похоже на запрос новой фичи/изменения кода и
+    //     проект открыт — открываем его в CLion (один раз за сессию),
+    //     чтобы пользователь видел, как JARVIS пишет файлы вживую.
+    if (!m_indexer->projectRoot().isEmpty() && isCodingIntent(s)) {
+        const QString ideMsg = openProjectInIDE();
+        if (!ideMsg.isEmpty()) {
+            emit ideOpened(ideMsg);
+        }
     }
 
     // Обогащение: автопоиск из индекса + прикрепления пользователя
@@ -931,6 +1032,31 @@ QString Jarvis::cmdIndexProject(const QString& input)
          + QStringLiteral("\nФайлов: ") + QString::number(m_indexer->fileCount())
          + QStringLiteral(", Символов: ") + QString::number(m_indexer->symbolCount())
          + QStringLiteral("\n\nСлежение за изменениями включено.");
+}
+
+// ============================================================
+// IDE-агент: явная команда "проект в <ide>"
+// ============================================================
+
+QString Jarvis::cmdOpenProjectIDE(const QString& input)
+{
+    if (m_indexer->projectRoot().isEmpty()) {
+        return QStringLiteral("Проект не открыт. Используйте: индекс <путь>");
+    }
+
+    // Аргумент после "проект в " / "project in " — имя IDE.
+    // Без аргумента — CLion по умолчанию.
+    QString ide = extractArg(input, {QStringLiteral("проект в "),
+                                      QStringLiteral("project in ")});
+    ide = ide.trimmed();
+    if (ide.isEmpty()) ide = QStringLiteral("clion");
+
+    // Передаём имя явно — это сбрасывает лимит "один раз за сессию"
+    // для авто-режима, т.е. команда всегда срабатывает.
+    const QString msg = openProjectInIDE(ide);
+    return msg.isEmpty()
+         ? QStringLiteral("Не удалось определить IDE: ") + ide
+         : msg;
 }
 
 QString Jarvis::cmdFindSymbol(const QString& input)
