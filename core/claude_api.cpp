@@ -316,6 +316,11 @@ void ClaudeApi::handleReply(QNetworkReply* reply, ResponseCallback callback)
     QJsonObject root = doc.object();
     QJsonArray content = root[QStringLiteral("content")].toArray();
 
+    // Запоминаем stop_reason ДО вызова callback — Jarvis проверяет
+    // wasTruncated() сразу после получения ответа в этом же callback,
+    // чтобы решить, нужно ли автопродолжение генерации файла.
+    m_lastStopReason = root[QStringLiteral("stop_reason")].toString();
+
     QString responseText;
     for (const auto& block : content) {
         QJsonObject blockObj = block.toObject();

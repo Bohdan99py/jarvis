@@ -13,6 +13,7 @@
 #include "project_indexer.h"
 #include "code_actions.h"
 #include "attachments_manager.h"
+#include "brain.h"
 
 #include <sapi.h>
 #include <shellapi.h>
@@ -53,6 +54,7 @@ Jarvis::Jarvis(QObject* parent)
     m_indexer      = new ProjectIndexer(this);
     m_codeActions  = new CodeActions(this);
     m_attachments  = new AttachmentsManager(this);
+    m_profile      = new UserProfile(this);
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -257,6 +259,13 @@ void Jarvis::registerCommands()
         {QStringLiteral("статистика"), QStringLiteral("stats")},
         [this](const QString& s) { return cmdShowStats(s); },
         QStringLiteral("статистика — частота использования команд"),
+        /*prefixMatch=*/false
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("профиль"), QStringLiteral("profile")},
+        [this](const QString& s) { return cmdShowProfile(s); },
+        QStringLiteral("профиль — что JARVIS выучил о твоих паттернах работы"),
         /*prefixMatch=*/false
     );
 
@@ -478,8 +487,12 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
     const bool coding = isCodingIntent(userQuery);
 
     constexpr int MAX_FILES          = 3;
-    constexpr int MAX_FILE_CHARS     = 14000;
-    constexpr int MAX_TOTAL_CHARS    = 32000;
+    // 8192-токенный лимит вывода (см. ClaudeApi::MAX_TOKENS) даёт Claude
+    // возможность работать с гораздо большими фрагментами кода — поднимаем
+    // и окно чтения файлов соответственно (ещё в пределах ~3% от 1M
+    // контекста модели, цена входных токенов минимальна: $3/1M).
+    constexpr int MAX_FILE_CHARS     = 40000;
+    constexpr int MAX_TOTAL_CHARS    = 100000;
     constexpr int MAX_SYMBOL_MATCHES = 8;
     constexpr int MAX_GREP_HITS      = 10;
 
@@ -548,7 +561,14 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
         context += QStringLiteral(
             "# Режим: КОДИНГ. Используй приложенные файлы как авторитетный источник. "
             "Отвечай сразу блоками [FILE:...] или [DIFF:...]. "
-            "Если нужен ещё какой-то файл — назови его и жди следующего сообщения.\n");
+            "Для ИЗМЕНЕНИЯ существующего файла (особенно большого) предпочитай "
+            "[DIFF:...][FIND]...[REPLACE]...[/DIFF] — это экономит токены и не требует "
+            "переписывать весь файл. [FILE:...] используй для НОВЫХ файлов или полной "
+            "перезаписи. Если новый файл получается очень большим и не уместится в один "
+            "ответ — пиши его как обычно одним [FILE:...] блоком до конца контекста: "
+            "JARVIS автоматически попросит тебя дописать остаток, если ответ обрежется "
+            "по лимиту токенов, и склеит файл сам. Если нужен ещё какой-то файл — "
+            "назови его и жди следующего сообщения.\n");
     } else {
         context += QStringLiteral(
             "# Режим: ЧТЕНИЕ. Отвечай на вопрос пользователя, опираясь на эти фрагменты.\n");
@@ -697,6 +717,23 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     m_memory->addMessage(QStringLiteral("user"), s);
 
+    // 0. Профиль предпочтений: фиксируем контекст + команду для обучения
+    //    паттернов "сценарий/время суток → какие команды я обычно пишу".
+    //    Сводка кладётся в SessionMemory и попадает в системный промпт Claude.
+    {
+        const ContextSnapshot ctx = Brain::captureSnapshot(
+            m_memory->recentCommands(8),
+            m_memory->lastResponse(),
+            m_indexer->fileCount() > 0,
+            m_indexer->projectRoot(),
+            m_indexer->recentFiles(10),
+            m_memory->vibeMode(),
+            m_multiAgentMode
+        );
+        m_profile->recordObservation(ctx, s);
+        m_memory->setUserProfileSummary(m_profile->buildProfileSummary());
+    }
+
     // 1. Системные команды из реестра (только явные prefix-команды:
     //    apikey, запомни, напечатай, нажми и т.д.)
     //    Brain в MainWindow уже отфильтровал всё неоднозначное.
@@ -786,16 +823,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                             m_claudeApi->sendMessage(enrichedMessage,
                                 [this, s, hadAttachments](bool ok3, const QString& resp3) {
                                 if (ok3) {
-                                    QString fileReport = m_codeActions->processResponse(resp3);
-                                    QString display    = m_codeActions->cleanResponseForDisplay(resp3);
-                                    m_memory->addMessage(QStringLiteral("assistant"), display);
-                                    m_memory->updateContext(s, display);
-                                    m_predictor->recordSequence(s);
-                                    QString full = display;
-                                    if (!fileReport.isEmpty())
-                                        full += QStringLiteral("\n\n") + fileReport;
-                                    emit asyncResponseReady(full);
-                                    if (hadAttachments) emit attachmentsConsumed();
+                                    handleClaudeCodeResponse(s, resp3, hadAttachments);
                                 } else {
                                     emit asyncResponseError(resp3);
                                 }
@@ -808,16 +836,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                     m_claudeApi->sendMessage(enrichedMessage,
                         [this, s, hadAttachments](bool ok, const QString& resp) {
                         if (ok) {
-                            QString fileReport = m_codeActions->processResponse(resp);
-                            QString display    = m_codeActions->cleanResponseForDisplay(resp);
-                            m_memory->addMessage(QStringLiteral("assistant"), display);
-                            m_memory->updateContext(s, display);
-                            m_predictor->recordSequence(s);
-                            QString full = display;
-                            if (!fileReport.isEmpty())
-                                full += QStringLiteral("\n\n") + fileReport;
-                            emit asyncResponseReady(full);
-                            if (hadAttachments) emit attachmentsConsumed();
+                            handleClaudeCodeResponse(s, resp, hadAttachments);
                         } else {
                             emit asyncResponseError(resp);
                         }
@@ -832,23 +851,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     m_claudeApi->sendMessage(enrichedMessage,
                              [this, s, hadAttachments](bool success, const QString& response) {
         if (success) {
-            QString fileReport      = m_codeActions->processResponse(response);
-            QString displayResponse = m_codeActions->cleanResponseForDisplay(response);
-
-            m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
-            m_memory->updateContext(s, displayResponse);
-            handleClaudeResponse(response);
-            m_predictor->recordSequence(s);
-
-            QString fullResponse = displayResponse;
-            if (!fileReport.isEmpty()) {
-                fullResponse += QStringLiteral("\n\n") + fileReport;
-            }
-            emit asyncResponseReady(fullResponse);
-
-            if (hadAttachments) {
-                emit attachmentsConsumed();
-            }
+            handleClaudeCodeResponse(s, response, hadAttachments);
         } else {
             emit asyncResponseError(response);
         }
@@ -871,6 +874,155 @@ void Jarvis::handleClaudeResponse(const QString& response)
         QRegularExpressionMatch match = it.next();
         QString cmd = match.captured(1).trimmed();
         m_registry.tryExecute(cmd);
+    }
+}
+
+// ============================================================
+// Автопродолжение больших файлов
+// ============================================================
+//
+// Если [FILE:path] обрезан по лимиту токенов (stop_reason=="max_tokens"
+// и блок не закрыт [/FILE]) — JARVIS сам, без участия пользователя,
+// запрашивает у Claude продолжение "с того места где остановился",
+// передавая в промпте только хвост уже написанного (чтобы не раздувать
+// историю диалога целым файлом). Куски накапливаются в m_pendingFile,
+// каждая итерация даёт короткий статус в чат (виден и проговаривается
+// TTS), пока не встретится [/FILE] или не будет достигнут
+// MAX_FILE_CONTINUATIONS — тогда файл записывается одним [FILE:]-блоком
+// через обычный CodeActions::processResponse.
+
+void Jarvis::handleClaudeCodeResponse(const QString& userInput,
+                                       const QString& response,
+                                       bool hadAttachments)
+{
+    QString openPath, openContent;
+    const bool openFile  = m_codeActions->detectOpenFileBlock(response, openPath, openContent);
+    const bool truncated = m_claudeApi->wasTruncated();
+
+    // --- Ответ обрезан посередине генерации файла — продолжаем сами ---
+    if (openFile && truncated && m_pendingFile.continuations < MAX_FILE_CONTINUATIONS) {
+        if (!m_pendingFile.active) {
+            m_pendingFile = PendingFileGeneration{};
+            m_pendingFile.active   = true;
+            m_pendingFile.filePath = openPath;
+        }
+        m_pendingFile.content += openContent;
+        m_pendingFile.continuations++;
+
+        // Если перед обрезанным блоком есть ЗАВЕРШЁННЫЕ действия
+        // ([FILE:]/[DIFF:]/[MKDIR:]/[DELETE:]) — выполняем их сразу,
+        // чтобы не потерять при финальной склейке (которая содержит
+        // только накопленный m_pendingFile).
+        const QString completedPart = m_codeActions->stripOpenFileBlock(response);
+        QString visible;
+        if (!completedPart.isEmpty()) {
+            const QString completedReport  = m_codeActions->processResponse(completedPart);
+            const QString completedDisplay = m_codeActions->cleanResponseForDisplay(completedPart);
+            if (!completedDisplay.isEmpty()) visible += completedDisplay;
+            if (!completedReport.isEmpty()) {
+                if (!visible.isEmpty()) visible += QStringLiteral("\n\n");
+                visible += completedReport;
+            }
+        }
+
+        const QString status = QStringLiteral("⏳ Файл «") + m_pendingFile.filePath
+                              + QStringLiteral("» большой — генерирую дальше (часть ")
+                              + QString::number(m_pendingFile.continuations + 1)
+                              + QStringLiteral(")...");
+        emit asyncResponseReady(visible.isEmpty()
+                                     ? status
+                                     : visible + QStringLiteral("\n\n") + status);
+
+        // Хвост уже сгенерированного — даём Claude точку опоры, чтобы он
+        // продолжил без повторов, не передавая весь файл в истории.
+        QString tail = m_pendingFile.content;
+        constexpr int TAIL_CHARS = 2000;
+        if (tail.size() > TAIL_CHARS) tail = tail.right(TAIL_CHARS);
+
+        const QString continuePrompt = QStringLiteral(
+            "[АВТОПРОДОЛЖЕНИЕ ГЕНЕРАЦИИ ФАЙЛА]\nФайл: ") + m_pendingFile.filePath
+            + QStringLiteral("\nТвой предыдущий ответ был обрезан по лимиту токенов. "
+              "Вот хвост уже написанного содержимого файла (НЕ повторяй его):\n"
+              "-----\n") + tail + QStringLiteral("\n-----\n"
+              "Выведи ТОЛЬКО продолжение содержимого файла с этого места — "
+              "без markdown-обёртки ``` и без заголовка [FILE:...]. Когда файл "
+              "будет полностью завершён, закончи строкой [/FILE] на новой строке.");
+
+        m_claudeApi->sendMessage(continuePrompt,
+            [this, userInput, hadAttachments](bool ok, const QString& resp) {
+                if (ok) {
+                    handleClaudeCodeResponse(userInput, resp, hadAttachments);
+                } else {
+                    // Автопродолжение не удалось — сохраняем накопленное как есть
+                    const QString partial = m_pendingFile.content;
+                    const QString path    = m_pendingFile.filePath;
+                    m_pendingFile = PendingFileGeneration{};
+                    const QString rescue = QStringLiteral("[FILE:") + path + QStringLiteral("]\n")
+                                          + partial + QStringLiteral("\n[/FILE]\n"
+                                            "⚠ Автопродолжение прервалось (") + resp
+                                          + QStringLiteral("). Файл сохранён как есть, "
+                                            "возможно неполный — допишите недостающее отдельным сообщением.");
+                    handleClaudeCodeResponse(userInput, rescue, hadAttachments);
+                }
+            });
+        return;
+    }
+
+    // --- Финализация: обычный ответ, завершённый файл, или лимит итераций ---
+    QString finalResponse;
+
+    if (openFile) {
+        // Открытый блок, но либо ответ НЕ обрезан (Claude забыл [/FILE], но
+        // закончил сам), либо достигнут лимит автопродолжений — финализируем.
+        if (m_pendingFile.active) {
+            m_pendingFile.content += openContent;
+        } else {
+            m_pendingFile.filePath = openPath;
+            m_pendingFile.content  = openContent;
+        }
+        finalResponse = QStringLiteral("[FILE:") + m_pendingFile.filePath + QStringLiteral("]\n")
+                      + m_pendingFile.content + QStringLiteral("\n[/FILE]");
+        if (truncated) {
+            finalResponse += QStringLiteral("\n\n⚠ Достигнут лимит автопродолжений (")
+                           + QString::number(MAX_FILE_CONTINUATIONS)
+                           + QStringLiteral(") — файл сохранён как есть и может быть "
+                             "неполным. Попросите дописать недостающую часть отдельным сообщением.");
+        }
+        m_pendingFile = PendingFileGeneration{};
+    } else if (m_pendingFile.active) {
+        // Продолжение завершилось: ответ содержит [/FILE] либо закончился сам.
+        QString remainder = response;
+        const int endIdx = remainder.indexOf(QStringLiteral("[/FILE]"));
+        if (endIdx >= 0) {
+            m_pendingFile.content += remainder.left(endIdx);
+            remainder = remainder.mid(endIdx + QStringLiteral("[/FILE]").length());
+        } else {
+            m_pendingFile.content += remainder;
+            remainder.clear();
+        }
+        finalResponse = QStringLiteral("[FILE:") + m_pendingFile.filePath + QStringLiteral("]\n")
+                      + m_pendingFile.content + QStringLiteral("\n[/FILE]\n") + remainder;
+        m_pendingFile = PendingFileGeneration{};
+    } else {
+        finalResponse = response;
+    }
+
+    QString fileReport      = m_codeActions->processResponse(finalResponse);
+    QString displayResponse = m_codeActions->cleanResponseForDisplay(finalResponse);
+
+    m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
+    m_memory->updateContext(userInput, displayResponse);
+    handleClaudeResponse(finalResponse);
+    m_predictor->recordSequence(userInput);
+
+    QString fullResponse = displayResponse;
+    if (!fileReport.isEmpty()) {
+        fullResponse += QStringLiteral("\n\n") + fileReport;
+    }
+    emit asyncResponseReady(fullResponse);
+
+    if (hadAttachments) {
+        emit attachmentsConsumed();
     }
 }
 
@@ -982,6 +1134,19 @@ QString Jarvis::cmdShowStats(const QString&)
     }
 
     return text.trimmed();
+}
+
+// ============================================================
+// Профиль предпочтений (обучение паттернов/сценариев)
+// ============================================================
+
+QString Jarvis::cmdShowProfile(const QString&)
+{
+    return QStringLiteral("=== Профиль предпочтений ===\n")
+         + m_profile->buildProfileSummary(8)
+         + QStringLiteral("\n\nПрофиль обновляется автоматически по каждому сообщению "
+                          "и со временем подстраивается под твой реальный режим работы. "
+                          "Старые паттерны со временем забываются.");
 }
 
 // ============================================================

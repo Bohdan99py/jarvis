@@ -196,6 +196,49 @@ QString CodeActions::processResponse(const QString& response)
 }
 
 // ============================================================
+// Автопродолжение больших файлов
+// ============================================================
+
+bool CodeActions::detectOpenFileBlock(const QString& response,
+                                       QString& filePath,
+                                       QString& partialContent) const
+{
+    const int lastFileStart = response.lastIndexOf(QStringLiteral("[FILE:"));
+    if (lastFileStart < 0) return false;
+
+    // Если после последнего [FILE:...] где-то встречается [/FILE] —
+    // блок уже закрыт, это нормальный завершённый файл.
+    const int lastFileEnd = response.lastIndexOf(QStringLiteral("[/FILE]"));
+    if (lastFileEnd > lastFileStart) return false;
+
+    // Маркер [FILE:path] должен быть закрыт хотя бы скобкой ']' —
+    // иначе он сам обрезан посередине и извлекать нечего.
+    const int markerClose = response.indexOf(QChar(']'), lastFileStart);
+    if (markerClose < 0) return false;
+
+    const int pathStart = lastFileStart + 6; // длина "[FILE:"
+    filePath = response.mid(pathStart, markerClose - pathStart).trimmed();
+    if (filePath.isEmpty()) return false;
+
+    // Содержимое — всё после маркера; пропускаем один \n сразу после ']'
+    int contentStart = markerClose + 1;
+    if (contentStart < response.size() && response.at(contentStart) == QChar('\n')) {
+        ++contentStart;
+    }
+    partialContent = response.mid(contentStart);
+    return true;
+}
+
+QString CodeActions::stripOpenFileBlock(const QString& response) const
+{
+    QString path, partial;
+    if (!detectOpenFileBlock(response, path, partial)) return response;
+
+    const int lastFileStart = response.lastIndexOf(QStringLiteral("[FILE:"));
+    return response.left(lastFileStart).trimmed();
+}
+
+// ============================================================
 // Очистка ответа для отображения
 // ============================================================
 

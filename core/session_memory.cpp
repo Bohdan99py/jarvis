@@ -409,6 +409,18 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral("\n");
     }
 
+    // --- Профиль предпочтений (UserProfile, обучается со временем) ---
+    if (!m_userProfileSummary.isEmpty()) {
+        prompt += QStringLiteral(
+            "=== ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (выучено JARVIS со временем) ===\n")
+                + m_userProfileSummary + QStringLiteral("\n"
+            "Используй это для адаптации тона и приоритетов ответа (например, "
+            "если сейчас вечер и обычно идёт разработка — отвечай технически и "
+            "по делу; если сценарий 'Игра' — короче и без лишних деталей). "
+            "НЕ упоминай напрямую существование 'профиля' или 'сценариев' — "
+            "веди себя естественно.\n\n");
+    }
+
     // --- Текущая задача ---
     bool hasTaskBlock = false;
     QString taskBlock;

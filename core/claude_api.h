@@ -32,6 +32,12 @@ public:
     bool shouldUseApi(const QString& input) const;
     bool isRequesting() const { return m_requesting; }
 
+    // true, если последний ответ был обрезан по лимиту max_tokens
+    // (stop_reason == "max_tokens"). Используется для автопродолжения
+    // генерации больших файлов — см. Jarvis::handleClaudeCodeResponse.
+    bool wasTruncated() const { return m_lastStopReason == QStringLiteral("max_tokens"); }
+    QString lastStopReason() const { return m_lastStopReason; }
+
     void loadApiKey();
     void saveApiKey();
 
@@ -50,6 +56,11 @@ private:
     QString m_model = QStringLiteral("claude-sonnet-4-6");
     bool m_requesting = false;
     bool m_usingEmbeddedKey = false;
+    QString m_lastStopReason; // "end_turn" | "max_tokens" | "stop_sequence" | ...
 
-    static constexpr int MAX_TOKENS = 1024;
+    // 8192 — безопасный потолок для неstreaming-запроса (Sonnet 4.6 поддерживает
+    // до 64K, но без стриминга длинные генерации рискуют таймаутом на стороне
+    // API; 8192 токенов ≈ 1500-2500 строк кода за один ответ, ~3 мин на 45 ток/с).
+    // Для файлов больше этого — автопродолжение (см. Jarvis::handleClaudeCodeResponse).
+    static constexpr int MAX_TOKENS = 8192;
 };

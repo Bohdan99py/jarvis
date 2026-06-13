@@ -73,6 +73,11 @@ public:
     void setVibeMode(bool on)            { m_vibeMode = on; }
     bool vibeMode() const                { return m_vibeMode; }
 
+    // Сводка профиля предпочтений (UserProfile::buildProfileSummary) —
+    // обновляется перед каждым обращением к Claude, попадает в system prompt
+    void setUserProfileSummary(const QString& summary) { m_userProfileSummary = summary; }
+    QString userProfileSummary() const   { return m_userProfileSummary; }
+
     void setProjectInfo(const QString& root,
                         const QString& projectMap,
                         int fileCount,
@@ -96,6 +101,7 @@ private:
     QJsonArray  m_pastSessions;
 
     bool m_vibeMode = false;
+    QString m_userProfileSummary;
 
     QString m_projectRoot;
     QString m_projectMap;

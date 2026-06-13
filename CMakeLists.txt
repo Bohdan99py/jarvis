@@ -110,6 +110,8 @@ add_library(JarvisCore STATIC
         # Интеллект
         core/action_predictor.h
         core/action_predictor.cpp
+        core/user_profile.h
+        core/user_profile.cpp
         core/brain.h
         core/brain.cpp
         core/context_snapshot.h

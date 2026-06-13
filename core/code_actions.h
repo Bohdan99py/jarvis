@@ -54,6 +54,19 @@ public:
     QString processResponse(const QString& response);
     QString cleanResponseForDisplay(const QString& response) const;
 
+    // === Автопродолжение больших файлов ===
+    // Обнаруживает "открытый" (без закрывающего [/FILE]) блок [FILE:path]
+    // в КОНЦЕ ответа — признак того, что генерация файла была обрезана
+    // по лимиту токенов. filePath/partialContent заполняются содержимым
+    // блока для последующего накопления через автопродолжение.
+    bool detectOpenFileBlock(const QString& response,
+                              QString& filePath,
+                              QString& partialContent) const;
+
+    // Убирает незавершённый [FILE:...] блок из текста для показа
+    // пользователю (вместо сырого куска кода — короткий статус генерации).
+    QString stripOpenFileBlock(const QString& response) const;
+
 signals:
     void fileCreated(const QString& path);
     void fileModified(const QString& path);
