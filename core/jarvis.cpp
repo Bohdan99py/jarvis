@@ -77,6 +77,15 @@ Jarvis::Jarvis(QObject* parent)
     connect(m_indexer, &ProjectIndexer::fileReindexed, this,
             [this](const QString&) { syncProjectInfoToMemory(); });
 
+    // Поисковый журнал сессий: файлы, которые JARVIS создал/изменил/удалил —
+    // попадают в сводку текущей сессии (для команды "вспомни что было ...").
+    connect(m_codeActions, &CodeActions::fileCreated, this,
+            [this](const QString& path) { m_memory->recordFileTouched(path); });
+    connect(m_codeActions, &CodeActions::fileModified, this,
+            [this](const QString& path) { m_memory->recordFileTouched(path); });
+    connect(m_codeActions, &CodeActions::fileDeleted, this,
+            [this](const QString& path) { m_memory->recordFileTouched(path); });
+
     if (m_indexer->fileCount() > 0) {
         syncProjectInfoToMemory();
     }
@@ -773,12 +782,17 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         }
     }
 
-    // Обогащение: автопоиск из индекса + прикрепления пользователя
+    // Обогащение: автопоиск из индекса + прикрепления пользователя +
+    // журнал сессий (если запрос похож на "вспомни что было ...")
     const QString projectContext = buildProjectContext(s);
+    const QString historyContext = m_memory->buildHistoryContext(s);
 
     QString enrichedMessage = s;
     if (!projectContext.isEmpty()) {
         enrichedMessage += projectContext;
+    }
+    if (!historyContext.isEmpty()) {
+        enrichedMessage += historyContext;
     }
     if (!attachmentBlock.isEmpty()) {
         enrichedMessage += attachmentBlock;

@@ -70,6 +70,25 @@ public:
 
     QJsonArray pastSessionSummaries() const { return m_pastSessions; }
 
+    // === Полный поисковый журнал сессий ===
+    // Файл/папка, созданные или изменённые в текущей сессии (через
+    // CodeActions) — попадают в "filesTouched" сводки сессии.
+    void recordFileTouched(const QString& path);
+
+    // Сохраняет/обновляет сводку ТЕКУЩЕЙ сессии в m_pastSessions и
+    // пишет на диск. Вызывается после каждого сообщения (crash-safe —
+    // даже при аварийном завершении на диске остаётся актуальная
+    // сводка) и в деструкторе.
+    void flushSessionSummary();
+
+    // Если userQuery похож на запрос "вспомни что было ..." — парсит
+    // период (сегодня/вчера/на прошлой неделе/в прошлом месяце/за N дней)
+    // и/или тему, ищет совпадения по m_pastSessions (включая текущую,
+    // ещё не завершённую сессию) и возвращает текстовый блок-контекст
+    // для подстановки в сообщение Claude/Gemini. Если запрос не похож
+    // на запрос истории — возвращает пустую строку (без накладных расходов).
+    QString buildHistoryContext(const QString& userQuery) const;
+
     void setVibeMode(bool on)            { m_vibeMode = on; }
     bool vibeMode() const                { return m_vibeMode; }
 
@@ -93,6 +112,11 @@ signals:
 private:
     QString persistentFilePath() const;
 
+    // Собирает JSON-сводку текущей сессии (дата начала/конца, темы,
+    // тронутые файлы, краткая выжимка диалога) — используется в
+    // flushSessionSummary() и деструкторе.
+    QJsonObject buildSessionSummaryObject() const;
+
     QVector<ChatMessage> m_sessionMessages;
     TaskContext m_taskContext;
 
@@ -108,6 +132,16 @@ private:
     int     m_projectFileCount   = 0;
     int     m_projectSymbolCount = 0;
 
+    // === Поисковый журнал сессий ===
+    QDateTime   m_sessionStart;            // момент создания SessionMemory (начало сессии)
+    QStringList m_sessionTopics;           // ключевые слова из сообщений пользователя
+    QStringList m_sessionFilesTouched;     // файлы, созданные/изменённые за сессию
+    int         m_currentSessionIndex = -1; // индекс записи текущей сессии в m_pastSessions
+
     static constexpr int MAX_SESSION_MESSAGES = 100;
-    static constexpr int MAX_PAST_SESSIONS    = 30;
+    // 200 записей по ~0.5-1 КБ ≈ до 200 КБ — недели/месяцы истории для
+    // команды "вспомни что было на прошлой неделе / по теме X".
+    static constexpr int MAX_PAST_SESSIONS    = 200;
+    static constexpr int MAX_SESSION_TOPICS   = 20;
+    static constexpr int MAX_SESSION_FILES    = 20;
 };
