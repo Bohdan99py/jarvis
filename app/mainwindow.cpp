@@ -851,8 +851,16 @@ void MainWindow::onSend()
             m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
             m_jarvis->memory()->addMessage(QStringLiteral("assistant"), searchResult);
 
-            // Синхронный поиск (проект, история браузера, etc.) — показываем FileViewer сразу
-            if (!searchResult.contains(QStringLiteral("..."))) {
+            // Синхронный поиск (проект, история браузера, etc.) — показываем
+            // FileViewer сразу. Асинхронный — ТОЛЬКО Filesystem (см.
+            // SearchRouter::search: это единственный домен, где search()
+            // сам вызывает searchAsync() и возвращает плейсхолдер
+            // "Ищу на компьютере: ...", а итоговый результат придёт через
+            // searchFinished). Раньше здесь проверялось
+            // searchResult.contains("..."), но синхронный результат из
+            // ProjectFiles может и сам содержать "..." (например, цитата
+            // кода вида "...";) — тогда UI навсегда застревал в "Thinking...".
+            if (intent.domain != Intent::Domain::Filesystem) {
                 const QStringList filePaths = router->lastFoundFilePaths();
                 if (!filePaths.isEmpty()) {
                     FileViewer::showFiles(filePaths, this);

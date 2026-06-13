@@ -138,8 +138,15 @@ private:
     QString         extractTargetFile(const QString& lower) const;
     QString         extractTargetApp(const QString& lower) const;
     bool            containsAny(const QString& text, const QStringList& words) const;
+    bool            startsWithAny(const QString& text, const QStringList& words) const;
 
     // --- Пороги уверенности ---
     static constexpr float kClarifyThreshold = 0.55f;  // ниже — спрашиваем
     static constexpr float kHighConfidence   = 0.80f;  // выше — действуем без вопросов
+
+    // Фразы длиннее этого (в словах) не проверяются на "глагол где-то в
+    // середине" для Search/Open — иначе случайное упоминание "найди"/
+    // "открой" внутри описания задачи ("Исправь баг ... слово "найди" ...")
+    // переключает намерение на Search вместо Modify/Ask.
+    static constexpr int kShortPhraseWords = 6;
 };

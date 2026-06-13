@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QProcess>
 #include <QDir>
+#include <QRegularExpression>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -215,13 +216,16 @@ Intent::Action Brain::detectAction(const QString& lower) const
         QStringLiteral("describe"),
     };
 
-    if (containsAny(lower, searchVerbs))  return Intent::Action::Search;
-    if (containsAny(lower, openVerbs))    return Intent::Action::Open;
-    if (containsAny(lower, modifyVerbs))  return Intent::Action::Modify;
-    if (containsAny(lower, createVerbs))  return Intent::Action::Create;
-    if (containsAny(lower, explainVerbs)) return Intent::Action::Explain;
+    // --- Шаг 1: глагол В НАЧАЛЕ фразы — самый надёжный сигнал ---
+    // "Исправь баг ... слово "найди" ..." начинается с "исправь" →
+    // Modify, даже если где-то дальше в тексте встречается "найди".
+    if (startsWithAny(lower, searchVerbs))  return Intent::Action::Search;
+    if (startsWithAny(lower, openVerbs))    return Intent::Action::Open;
+    if (startsWithAny(lower, modifyVerbs))  return Intent::Action::Modify;
+    if (startsWithAny(lower, createVerbs))  return Intent::Action::Create;
+    if (startsWithAny(lower, explainVerbs)) return Intent::Action::Explain;
 
-    // Если есть вопросительное слово или знак — скорее всего Ask
+    // --- Шаг 2: вопросительное слово/знак в начале → Ask ---
     if (lower.contains(QStringLiteral("?"))
         || lower.startsWith(QStringLiteral("как "))
         || lower.startsWith(QStringLiteral("что "))
@@ -229,6 +233,21 @@ Intent::Action Brain::detectAction(const QString& lower) const
         || lower.startsWith(QStringLiteral("сколько")))
     {
         return Intent::Action::Ask;
+    }
+
+    // --- Шаг 3: глагол ГДЕ-ТО В СЕРЕДИНЕ — только для КОРОТКИХ фраз ---
+    // Search/Open — единственные действия, которые MainWindow обрабатывает
+    // отдельно от Claude (см. SearchRouter / tryOpenApp), поэтому только
+    // для них есть смысл в "слабом" contains()-фолбэке. Для длинных
+    // предложений (описание задачи, несколько слов через запятую/точку)
+    // фолбэк ОТКЛЮЧЁН — иначе случайное слово "найди"/"открой" внутри
+    // текста переключает всё намерение на Search/Open вместо Modify/Ask,
+    // и сообщение уходит в SearchRouter вместо Claude.
+    const int wordCount = lower.split(QRegularExpression(QStringLiteral("\\s+")),
+                                       Qt::SkipEmptyParts).size();
+    if (wordCount <= kShortPhraseWords) {
+        if (containsAny(lower, searchVerbs)) return Intent::Action::Search;
+        if (containsAny(lower, openVerbs))   return Intent::Action::Open;
     }
 
     return Intent::Action::Ask;  // дефолт — уходит в Claude
@@ -660,6 +679,14 @@ bool Brain::containsAny(const QString& text, const QStringList& words) const
 {
     for (const auto& w : words) {
         if (text.contains(w)) return true;
+    }
+    return false;
+}
+
+bool Brain::startsWithAny(const QString& text, const QStringList& words) const
+{
+    for (const auto& w : words) {
+        if (text.startsWith(w)) return true;
     }
     return false;
 }
