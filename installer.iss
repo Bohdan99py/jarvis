@@ -63,7 +63,7 @@ Name: "autostart"; \
 Name: "whispermodel"; \
   Description: "Установить модель Whisper для голосового ввода (~1.5 ГБ, рекомендуется) / Install Whisper voice model (~1.5 GB, recommended)"; \
   GroupDescription: "Голосовой ввод / Voice Input"; \
-  Flags: unchecked skipifdoesntexist
+  Flags: unchecked
 
 [Files]
 ; Главный исполняемый файл
