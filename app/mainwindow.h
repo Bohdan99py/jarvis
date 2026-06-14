@@ -1,6 +1,11 @@
 #pragma once
 // -------------------------------------------------------
 // mainwindow.h — Главное окно J.A.R.V.I.S.
+// ИЗМЕНЕНИЯ:
+//   - Убран m_vibeCodingMode и всё связанное с вайбкодингом
+//   - Добавлен LearnedCommands (самообучение)
+//   - Добавлен ScreenAgent (зрение + клики)
+//   - Добавлен Gemini API key в меню Settings
 // -------------------------------------------------------
 
 #include <QMainWindow>
@@ -23,13 +28,12 @@ class QHBoxLayout;
 class QDragEnterEvent;
 class QDropEvent;
 
-// ── Новые модули ──────────────────────────────────────────
 #include "brain.h"
 #include "applauncher.h"
 #include "systemcontroller.h"
 #include "languagedetector.h"
-// fileviewer.h подключается только в .cpp (тяжёлый Qt-виджет,
-// не нужен в заголовке — избегаем лишних зависимостей)
+#include "learned_commands.h"
+#include "screen_agent.h"
 
 class MainWindow : public QMainWindow
 {
@@ -41,7 +45,6 @@ public:
 protected:
     void keyPressEvent(QKeyEvent* e) override;
     void closeEvent(QCloseEvent* e) override;
-
     void dragEnterEvent(QDragEnterEvent* e) override;
     void dropEvent(QDropEvent* e) override;
 
@@ -65,6 +68,9 @@ private slots:
 
     void onClarificationChoice(int choice);
 
+    // Самообучение: подтверждение выученной команды
+    void onCommandLearned(const LearnedCommand& cmd);
+
 private:
     void buildUI();
     void buildMenuBar();
@@ -80,10 +86,11 @@ private:
 
     void applyLanguage(bool english);
 
-    // ── Обработка команд (новые) ───────────────────────────
-    // Возвращает true если команда обработана и не нужно идти в Claude
     bool tryOpenApp(const QString& userText, const Intent& intent);
     bool trySystemControl(const QString& userText);
+
+    // Визуальные команды через ScreenAgent
+    void handleVisualCommand(const QString& userText);
 
     // ── Основные виджеты ──────────────────────────────────
     Jarvis*                 m_jarvis     = nullptr;
@@ -122,11 +129,12 @@ private:
     QLabel*                 m_attachSummary   = nullptr;
     QPushButton*            m_attachBtn       = nullptr;
 
-    bool                    m_vibeCodingMode  = false;
-
     QSystemTrayIcon*        m_trayIcon        = nullptr;
 
-    // ── Новые члены ───────────────────────────────────────
-    AppLauncher             m_appLauncher;      // умный запуск приложений
-    LanguageDetector        m_langDetector;     // авто-определение языка
+    // ── Новые модули ──────────────────────────────────────
+    AppLauncher             m_appLauncher;
+    LanguageDetector        m_langDetector;
+    LearnedCommands*        m_learnedCmds  = nullptr;  // самообучение
+    ScreenAgent*            m_screenAgent  = nullptr;  // зрение + клики
+    QString                 m_lastUserInput;               // для самообучения
 };

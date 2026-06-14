@@ -123,7 +123,10 @@ add_library(JarvisCore STATIC
         core/content_search.cpp
         core/ocr_extractor.h
         core/ocr_extractor.cpp
-
+        core/learned_commands.h
+        core/learned_commands.cpp
+        core/screen_agent.h
+        core/screen_agent.cpp
         # Прикрепления файлов
         core/attachments_manager.h
         core/attachments_manager.cpp
@@ -147,6 +150,8 @@ add_library(JarvisCore STATIC
         core/updater.cpp
         core/auto_updater.h
         core/auto_updater.cpp
+        core/bug_reporter.h
+        core/bug_reporter.cpp
 )
 
 target_compile_definitions(JarvisCore PRIVATE

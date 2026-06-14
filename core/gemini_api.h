@@ -23,6 +23,7 @@ public:
     // Установить API-ключ (бесплатный ключ с aistudio.google.com)
     void setApiKey(const QString& key);
     bool hasApiKey() const { return !m_apiKey.isEmpty(); }
+    QString apiKey() const { return m_apiKey; }  // для ScreenAgent и меню
 
     // Модель (по умолчанию gemini-2.0-flash — самая быстрая и бесплатная)
     void setModel(const QString& model) { m_model = model; }

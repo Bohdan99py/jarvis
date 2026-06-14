@@ -1,0 +1,26 @@
+J.A.R.V.I.S. — Personal AI Assistant v3.x
+===========================================
+
+Quick Start (30 seconds):
+  1. Launch JARVIS from Desktop or Start Menu
+  2. Say "hello" or type any question
+  3. That's it — no setup required for basic commands
+
+Free commands (no internet):
+  • open Chrome / Steam / Notepad / Calculator / Discord...
+  • lock screen  •  what time  •  2+2
+  • "what can you do" — full command list inside the app
+
+For AI answers (code, questions, analysis):
+  Settings → Claude API key...  (console.anthropic.com)
+  OR
+  Settings → Gemini API key...  (aistudio.google.com — FREE)
+  OR install Ollama (ollama.com) for fully offline AI
+
+Troubleshooting:
+  No response?  → Check your API key in Settings
+  App not found? → Try the full name: "open Google Chrome"
+  Antivirus?    → Add JARVIS folder to exclusions
+
+Help & bug reports: Help → User Guide  /  Help → Report a Bug
+===========================================

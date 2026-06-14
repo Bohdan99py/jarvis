@@ -17,6 +17,10 @@
 #include "fileviewer.h"
 #include "ollama_api.h"
 #include "gemini_api.h"
+#include "learned_commands.h"
+#include "screen_agent.h"
+#include "bug_reporter.h"
+#include <QDesktopServices>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -81,6 +85,13 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(m_jarvis, &Jarvis::asyncResponseReady,
             this, &MainWindow::onAsyncResponse);
+    // Самообучение: после каждого ответа AI — пробуем запомнить команду
+    connect(m_jarvis, &Jarvis::asyncResponseReady,
+            this, [this](const QString& response) {
+        if (m_learnedCmds && !m_lastUserInput.isEmpty()) {
+            m_learnedCmds->learnFromApiResponse(m_lastUserInput, response, QString());
+        }
+    });
     connect(m_jarvis, &Jarvis::asyncResponseError,
             this, &MainWindow::onAsyncError);
     connect(m_jarvis, &Jarvis::suggestionAvailable,
@@ -224,6 +235,18 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_input->setFocus();
 
+    // ── Самообучение ──────────────────────────────────────
+    m_learnedCmds = new LearnedCommands(this);
+    connect(m_learnedCmds, &LearnedCommands::commandLearned,
+            this, &MainWindow::onCommandLearned);
+
+    // ── Зрение + управление окнами ───────────────────────
+    m_screenAgent = new ScreenAgent(this);
+    connect(m_screenAgent, &ScreenAgent::actionCompleted,
+            this, [this](const QString& desc) {
+        appendLog(Str::logJarvis(), desc, Theme::LogColors::system);
+    });
+
     m_pulseTimer = new QTimer(this);
     connect(m_pulseTimer, &QTimer::timeout, this, [this]() {
         m_pulse = !m_pulse;
@@ -248,7 +271,7 @@ void MainWindow::applyLanguage(bool english)
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
     cfg.setValue(QStringLiteral("ui/english"), english);
 
-    m_input->setPlaceholderText(m_vibeCodingMode ? Str::vibePlaceholder() : Str::inputPlaceholder());
+    m_input->setPlaceholderText(Str::inputPlaceholder());
     m_status->setText(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"));
 
     appendLog(Str::logSystem(),
@@ -334,6 +357,29 @@ void MainWindow::buildMenuBar()
         }
     });
 
+    // ── Gemini API key ──────────────────────────────────
+    auto* actGeminiKey = settingsMenu->addAction(
+        IS_EN ? QStringLiteral("Gemini API key...") : QStringLiteral("Ключ Gemini API..."));
+    connect(actGeminiKey, &QAction::triggered, this, [this]() {
+        bool ok;
+        const QString key = QInputDialog::getText(
+            this,
+            IS_EN ? QStringLiteral("Gemini API Key") : QStringLiteral("Ключ Gemini API"),
+            IS_EN ? QStringLiteral("Enter your Google Gemini API key\n(free at aistudio.google.com):")
+                  : QStringLiteral("Введите ключ Google Gemini API\n(бесплатно на aistudio.google.com):"),
+            QLineEdit::Password,
+            m_jarvis->geminiBackup() ? m_jarvis->geminiBackup()->apiKey() : QString(),
+            &ok);
+        if (ok && !key.trimmed().isEmpty()) {
+            if (m_jarvis->geminiBackup())
+                m_jarvis->geminiBackup()->setApiKey(key.trimmed());
+            appendLog(Str::logSystem(),
+                      IS_EN ? QStringLiteral("Gemini API key saved.")
+                            : QStringLiteral("Ключ Gemini API сохранён."),
+                      Theme::LogColors::system);
+        }
+    });
+
     auto* actOllamaModel = settingsMenu->addAction(
         IS_EN ? QStringLiteral("Ollama model...") : QStringLiteral("Модель Ollama..."));
     connect(actOllamaModel, &QAction::triggered, this, [this]() {
@@ -403,18 +449,6 @@ void MainWindow::buildMenuBar()
     });
 
     settingsMenu->addSeparator();
-
-    auto* actVibe = settingsMenu->addAction(Str::menuVibeCoding());
-    actVibe->setCheckable(true);
-    actVibe->setChecked(m_vibeCodingMode);
-    connect(actVibe, &QAction::toggled, this, [this](bool checked) {
-        m_vibeCodingMode = checked;
-        m_jarvis->memory()->setVibeMode(checked);
-        m_input->setPlaceholderText(checked ? Str::vibePlaceholder() : Str::inputPlaceholder());
-        appendLog(Str::logJarvis(),
-                  checked ? Str::vibeModeOn() : Str::vibeModeOff(),
-                  Theme::LogColors::system);
-    });
 
     auto* actKeepAttach = settingsMenu->addAction(Str::menuKeepAttach());
     actKeepAttach->setCheckable(true);
@@ -535,6 +569,201 @@ void MainWindow::buildMenuBar()
         QMessageBox::about(this, QStringLiteral("J.A.R.V.I.S."),
             Str::aboutText().arg(QCoreApplication::applicationVersion()));
     });
+
+    helpMenu->addSeparator();
+
+    // ── Сообщить о баге ─────────────────────────────────
+    auto* actBugReport = helpMenu->addAction(
+        IS_EN ? QStringLiteral("🐛 Report a Bug...") : QStringLiteral("🐛 Сообщить о баге..."));
+    connect(actBugReport, &QAction::triggered, this, [this]() {
+        BugReporter::showDialog(this);
+    });
+
+    // ── GitHub Issues ────────────────────────────────────
+    auto* actGithubIssues = helpMenu->addAction(
+        IS_EN ? QStringLiteral("GitHub Issues") : QStringLiteral("GitHub Issues"));
+    connect(actGithubIssues, &QAction::triggered, this, []() {
+        QDesktopServices::openUrl(
+            QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/issues")));
+    });
+
+// =============================================================================
+// ВСТАВИТЬ в buildMenuBar() в mainwindow.cpp
+// В меню "Помощь" — после actAbout
+// =============================================================================
+
+    // --- Что нового ---
+    auto* actWhatsNew = helpMenu->addAction(
+        IS_EN ? QStringLiteral("What's New") : QStringLiteral("Что нового"));
+    connect(actWhatsNew, &QAction::triggered, this, [this]() {
+        const QString news = IS_EN ? QStringLiteral(
+R"(<b>J.A.R.V.I.S. — Latest Changes</b><br><br>
+
+<b>🧠 Autonomous Brain (no internet needed)</b><br>
+&bull; Greetings, time/date, math — answered instantly without API<br>
+&bull; 35+ apps: open/close Steam, Chrome, CLion, Rider, Discord, Telegram, Blender, OBS...<br>
+&bull; System: lock screen, shutdown, restart<br>
+&bull; "What can you do" / "help" — local answer<br><br>
+
+<b>📚 Self-Learning (LearnedCommands)</b><br>
+&bull; After each AI response, JARVIS extracts executable steps<br>
+&bull; Next time the same request comes — runs locally, no API<br>
+&bull; Saved in %AppData%/Jarvis/learned_commands.json<br>
+&bull; Memory shown: ✓ (from memory, N uses)<br><br>
+
+<b>👁 Screen Vision (ScreenAgent)</b><br>
+&bull; "What do you see" — screenshot → Claude Vision → description<br>
+&bull; "Click on [text]" — OCR search on screen + mouse click<br>
+&bull; "Open YouTube" — browser control<br>
+&bull; Visual commands via Claude Vision + action execution<br><br>
+
+<b>♊ Gemini API Key in UI</b><br>
+&bull; Settings → Gemini API key... (no manual file editing)<br>
+&bull; Free key from aistudio.google.com<br><br>
+
+<b>🗑 Removed</b><br>
+&bull; Vibe Coding mode — now always active (Brain handles routing)<br><br>
+
+<b>🐛 Fixed</b><br>
+&bull; brain.h: HWND/WORD without windows.h guard — fixed<br>
+&bull; screen_agent: parseVirtualKey made static, emit in const fixed<br>
+&bull; Brain::captureSnapshot — multiAgentMode default param added)"
+        ) : QStringLiteral(
+R"(<b>J.A.R.V.I.S. — Последние изменения</b><br><br>
+
+<b>🧠 Автономный мозг (без интернета)</b><br>
+&bull; Приветствия, время/дата, математика — ответ мгновенно без API<br>
+&bull; 35+ приложений: открыть/закрыть Steam, Chrome, CLion, Rider, Discord, Telegram, Blender, OBS...<br>
+&bull; Система: заблокировать, выключить, перезагрузить<br>
+&bull; "Что ты умеешь" / "помощь" — локальный ответ<br><br>
+
+<b>📚 Самообучение (LearnedCommands)</b><br>
+&bull; После каждого ответа AI — извлекает исполняемые шаги<br>
+&bull; Следующий раз тот же запрос — выполняет сам, без API<br>
+&bull; Сохраняется в %AppData%/Jarvis/learned_commands.json<br>
+&bull; Показывается: ✓ (из памяти, использований: N)<br><br>
+
+<b>👁 Зрение (ScreenAgent)</b><br>
+&bull; "Что видишь" — скриншот → Claude Vision → описание<br>
+&bull; "Кликни на [текст]" — OCR поиск на экране + клик мышью<br>
+&bull; "Открой YouTube" — управление браузером<br>
+&bull; Визуальные команды через Claude Vision + исполнение<br><br>
+
+<b>♊ Ключ Gemini API в интерфейсе</b><br>
+&bull; Настройки → Ключ Gemini API... (без ручного редактирования файлов)<br>
+&bull; Бесплатный ключ на aistudio.google.com<br><br>
+
+<b>🗑 Удалено</b><br>
+&bull; Режим Вайбкодинга — теперь всегда активен (Brain сам решает)<br><br>
+
+<b>🐛 Исправлено</b><br>
+&bull; screen_agent.h: HWND/WORD без guard — исправлено<br>
+&bull; parseVirtualKey сделан static, emit в const-методе — исправлено<br>
+&bull; Brain::captureSnapshot — добавлен дефолтный параметр)"
+        );
+
+        QMessageBox* box = new QMessageBox(this);
+        box->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S.")
+                                  : QStringLiteral("Что нового в J.A.R.V.I.S."));
+        box->setTextFormat(Qt::RichText);
+        box->setText(news);
+        box->setIcon(QMessageBox::Information);
+        box->setStandardButtons(QMessageBox::Ok);
+        box->setStyleSheet(
+            QStringLiteral("QMessageBox { background-color: #0a1018; color: #c8e0f0; }"
+                           "QMessageBox QLabel { color: #c8e0f0; min-width: 500px; }"
+                           "QPushButton { background-color: #0f2438; color: #00d4ff; "
+                           "border: 1px solid #1a5070; padding: 6px 20px; border-radius: 4px; }"
+                           "QPushButton:hover { background-color: #1a3a5c; }"));
+        box->exec();
+        box->deleteLater();
+    });
+
+    // --- Инструкция ---
+    auto* actHelp = helpMenu->addAction(
+        IS_EN ? QStringLiteral("User Guide") : QStringLiteral("Инструкция пользователя"));
+    connect(actHelp, &QAction::triggered, this, [this]() {
+        const QString guide = IS_EN ? QStringLiteral(
+R"(<b>J.A.R.V.I.S. — User Guide</b><br><br>
+
+<b>📋 COMMANDS (no internet needed)</b><br>
+<b>Apps:</b> open Steam · open Chrome · open Notepad · open Calculator · open Explorer<br>
+open CLion · open Rider · open Discord · open Telegram · open OBS · close Steam<br><br>
+<b>System:</b> lock screen · shutdown · restart · volume 70 · brightness up<br><br>
+<b>Info:</b> what time · what date · 2+2 · what can you do · help<br><br>
+<b>Search:</b> find file readme · find document resume · find where it says "text"<br><br>
+
+<b>👁 VISUAL COMMANDS (requires Claude API)</b><br>
+what do you see · describe screen · click on [text] · find on screen [text]<br><br>
+
+<b>🔍 SEARCH</b><br>
+find [query] in project · find [query] on PC · find [query] in browser history<br>
+find [query] in chat · find [query] online<br><br>
+
+<b>💻 CODE (requires Claude API + project indexed)</b><br>
+add function X · fix bug in file.cpp · refactor class Y · create file Z<br><br>
+
+<b>⚙ SETTINGS</b><br>
+Settings → Claude API key... (console.anthropic.com)<br>
+Settings → Gemini API key... (aistudio.google.com — free)<br>
+Settings → Ollama model... (ollama.com — local, offline)<br>
+Project → Index folder... → choose your project root<br><br>
+
+<b>📎 ATTACHMENTS</b><br>
+Click 📎 or drag files into the window · Ctrl+O to open file picker<br><br>
+
+<b>⌨ KEYBOARD SHORTCUTS</b><br>
+Enter — send · Esc — close clarification · Ctrl+O — attach file)"
+        ) : QStringLiteral(
+R"(<b>J.A.R.V.I.S. — Инструкция пользователя</b><br><br>
+
+<b>📋 КОМАНДЫ (без интернета)</b><br>
+<b>Приложения:</b> открой Steam · открой Chrome · открой блокнот · открой калькулятор<br>
+открой CLion · открой Rider · открой Discord · открой Telegram · закрой Steam<br><br>
+<b>Система:</b> заблокируй · выключи · перезагрузи · громкость 70 · яркость выше<br><br>
+<b>Информация:</b> который час · какая дата · 2+2 · что ты умеешь · помощь<br><br>
+<b>Поиск:</b> найди файл readme · найди документ резюме · найди где написано "текст"<br><br>
+
+<b>👁 ВИЗУАЛЬНЫЕ КОМАНДЫ (требует Claude API)</b><br>
+что видишь · опиши экран · кликни на [текст] · найди на экране [текст]<br><br>
+
+<b>🔍 ПОИСК</b><br>
+найди [запрос] в проекте · найди [запрос] на компьютере · найди [запрос] в истории браузера<br>
+найди [запрос] в нашем разговоре · найди [запрос] в интернете<br><br>
+
+<b>💻 КОД (требует Claude API + проект проиндексирован)</b><br>
+добавь функцию X · исправь баг в файл.cpp · перепиши класс Y · создай файл Z<br><br>
+
+<b>⚙ НАСТРОЙКИ</b><br>
+Настройки → Ключ Claude API... (console.anthropic.com)<br>
+Настройки → Ключ Gemini API... (aistudio.google.com — бесплатно)<br>
+Настройки → Модель Ollama... (ollama.com — локально, без интернета)<br>
+Проект → Индексировать папку... → выбрать корень проекта<br><br>
+
+<b>📎 ПРИКРЕПЛЕНИЯ</b><br>
+Кнопка 📎 или перетащить файлы в окно · Ctrl+O открыть выбор файлов<br><br>
+
+<b>⌨ ГОРЯЧИЕ КЛАВИШИ</b><br>
+Enter — отправить · Esc — закрыть уточнение · Ctrl+O — прикрепить файл)"
+        );
+
+        QMessageBox* box = new QMessageBox(this);
+        box->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. User Guide")
+                                  : QStringLiteral("Инструкция J.A.R.V.I.S."));
+        box->setTextFormat(Qt::RichText);
+        box->setText(guide);
+        box->setIcon(QMessageBox::Information);
+        box->setStandardButtons(QMessageBox::Ok);
+        box->setStyleSheet(
+            QStringLiteral("QMessageBox { background-color: #0a1018; color: #c8e0f0; }"
+                           "QMessageBox QLabel { color: #c8e0f0; min-width: 520px; }"
+                           "QPushButton { background-color: #0f2438; color: #00d4ff; "
+                           "border: 1px solid #1a5070; padding: 6px 20px; border-radius: 4px; }"
+                           "QPushButton:hover { background-color: #1a3a5c; }"));
+        box->exec();
+        box->deleteLater();
+    });
+
 }
 
 // ============================================================
@@ -718,6 +947,46 @@ void MainWindow::onSend()
     // в методе buildClaudeSystemPrompt() через m_langDetector.systemInstruction().
     m_langDetector.update(text);
 
+    // ── 0. Выученные команды (самообучение) ────────────
+    // Если Джарвис уже знает как это сделать — делает сам, БЕЗ API
+    if (m_learnedCmds) {
+        const LearnedCommand* learned = m_learnedCmds->findMatch(text);
+        if (learned) {
+            const QString result = m_learnedCmds->execute(*learned);
+            const QString msg = IS_EN
+                ? QStringLiteral("✓ (from memory, %1 uses)\n%2").arg(learned->useCount).arg(result)
+                : QStringLiteral("✓ (из памяти, использований: %1)\n%2").arg(learned->useCount).arg(result);
+            appendLog(Str::logJarvis(), msg, Theme::LogColors::system);
+            m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
+            m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result);
+            m_input->setFocus();
+            return;
+        }
+    }
+
+    // ── 1. Визуальные команды (Screen Agent) ─────────────
+    // "нажми на", "кликни", "что видишь", "опиши экран"
+    {
+        const QString lo = text.toLower();
+        static const QStringList kVisualTriggers = {
+            QStringLiteral("нажми на"),          QStringLiteral("кликни на"),
+            QStringLiteral("кликни по"),         QStringLiteral("нажми кнопку"),
+            QStringLiteral("что видишь"),         QStringLiteral("опиши экран"),
+            QStringLiteral("посмотри на экран"),  QStringLiteral("что на экране"),
+            QStringLiteral("click on"),           QStringLiteral("find on screen"),
+            QStringLiteral("what do you see"),    QStringLiteral("describe screen"),
+            QStringLiteral("look at screen"),     QStringLiteral("найди на экране"),
+        };
+        bool isVisual = false;
+        for (const QString& t : kVisualTriggers)
+            if (lo.contains(t)) { isVisual = true; break; }
+        if (isVisual) {
+            handleVisualCommand(text);
+            m_input->setFocus();
+            return;
+        }
+    }
+
     // ── 2. Системные команды (звук, яркость, блокировка и т.д.)
     // Проверяем ДО Brain, потому что "громкость 50" — не вопрос к AI
     if (trySystemControl(text)) {
@@ -748,7 +1017,7 @@ void MainWindow::onSend()
         m_jarvis->projectIndexer()->fileCount() > 0,
         m_jarvis->projectIndexer()->projectRoot(),
         m_jarvis->projectIndexer()->recentFiles(10),
-        m_vibeCodingMode,
+        false,  // vibeCodingMode убран — Brain сам определяет режим
         m_jarvis->multiAgentMode()
     );
 
@@ -877,6 +1146,7 @@ void MainWindow::onSend()
     }
 
     // ── 6. Всё остальное → Jarvis/Claude ─────────────────
+    m_lastUserInput = text;  // сохраняем для самообучения
     QString response = m_jarvis->processCommand(
         text, attachmentBlock, m_langDetector.systemInstruction());
 
@@ -1576,4 +1846,115 @@ void MainWindow::appendLog(const QString& who, const QString& text, const QStrin
 
     m_log->append(html);
     m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
+}
+// ============================================================
+// onCommandLearned — уведомление о выученной команде
+// ============================================================
+
+void MainWindow::onCommandLearned(const LearnedCommand& cmd)
+{
+    const QString msg = IS_EN
+        ? QStringLiteral("✅ Learned: \"%1\" (%2 steps). Will run locally next time.")
+              .arg(cmd.description).arg(cmd.steps.size())
+        : QStringLiteral("✅ Запомнил: \"%1\" (%2 шага). Следующий раз выполню сам.")
+              .arg(cmd.description).arg(cmd.steps.size());
+    appendLog(Str::logJarvis(), msg, QStringLiteral("#4a9a6a"));
+}
+
+// ============================================================
+// handleVisualCommand — зрение + управление экраном
+// ============================================================
+
+void MainWindow::handleVisualCommand(const QString& userText)
+{
+    if (!m_screenAgent) return;
+
+    const QString lo = userText.toLower();
+
+    // "что видишь" / "опиши экран" — описание без действий
+    if (lo.contains(QStringLiteral("что видишь")) ||
+        lo.contains(QStringLiteral("what do you see")) ||
+        lo.contains(QStringLiteral("опиши экран")) ||
+        lo.contains(QStringLiteral("что на экране")) ||
+        lo.contains(QStringLiteral("describe screen")))
+    {
+        appendLog(QStringLiteral("🧠 Brain"),
+                  QStringLiteral("action=Visual domain=Screen"),
+                  QStringLiteral("#4a6080"));
+        appendLog(Str::logJarvis(),
+                  IS_EN ? QStringLiteral("📸 Capturing screen, analyzing...")
+                        : QStringLiteral("📸 Делаю скриншот, анализирую..."),
+                  Theme::LogColors::system);
+
+        const QString apiKey = m_jarvis->claudeApi()->hasApiKey()
+            ? m_jarvis->claudeApi()->apiKey() : QString();
+
+        if (apiKey.isEmpty()) {
+            appendLog(Str::logJarvis(),
+                      IS_EN ? QStringLiteral("Vision requires Claude API key.")
+                            : QStringLiteral("Зрение требует ключ Claude API."),
+                      Theme::LogColors::error);
+            return;
+        }
+
+        setThinkingState(true);
+        m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
+            setThinkingState(false);
+            appendLog(Str::logJarvis(), desc, Theme::LogColors::jarvis);
+            m_jarvis->memory()->addMessage(QStringLiteral("user"),
+                                           QStringLiteral("[screen description request]"));
+            m_jarvis->memory()->addMessage(QStringLiteral("assistant"), desc);
+        });
+        return;
+    }
+
+    // "найди на экране X" / "кликни на X" — поиск текста + клик
+    static const QRegularExpression reFindClick(
+        QStringLiteral(R"((?:найди на экране|нажми на|кликни на|кликни по|нажми кнопку|find on screen|click on)\s+(.+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto m = reFindClick.match(lo);
+    if (m.hasMatch()) {
+        const QString searchText = m.captured(1).trimmed();
+        appendLog(QStringLiteral("🧠 Brain"),
+                  QStringLiteral("action=Visual domain=Screen query=\"") + searchText + QStringLiteral("\""),
+                  QStringLiteral("#4a6080"));
+        appendLog(Str::logJarvis(),
+                  (IS_EN ? QStringLiteral("🔍 Looking for: ") : QStringLiteral("🔍 Ищу: ")) + searchText,
+                  Theme::LogColors::system);
+
+        const bool found = m_screenAgent->clickText(searchText);
+        const QString resp = found
+            ? (IS_EN ? QStringLiteral("✓ Found and clicked: ") : QStringLiteral("✓ Нашёл и кликнул: ")) + searchText
+            : (IS_EN ? QStringLiteral("✗ Not found on screen: ") : QStringLiteral("✗ Не найдено на экране: ")) + searchText;
+        appendLog(Str::logJarvis(), resp, found ? Theme::LogColors::jarvis : Theme::LogColors::error);
+        m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+        m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+        return;
+    }
+
+    // Общая визуальная команда — скриншот + Claude Vision → инструкции → выполнение
+    const QString apiKey = m_jarvis->claudeApi()->hasApiKey()
+        ? m_jarvis->claudeApi()->apiKey() : QString();
+
+    if (apiKey.isEmpty()) {
+        appendLog(Str::logJarvis(),
+                  IS_EN ? QStringLiteral("Visual commands require Claude API key.")
+                        : QStringLiteral("Визуальные команды требуют ключ Claude API."),
+                  Theme::LogColors::error);
+        return;
+    }
+
+    appendLog(QStringLiteral("🧠 Brain"), QStringLiteral("action=Visual domain=Screen"), QStringLiteral("#4a6080"));
+    appendLog(Str::logJarvis(),
+              IS_EN ? QStringLiteral("📸 Analyzing screen and executing...")
+                    : QStringLiteral("📸 Анализирую экран и выполняю..."),
+              Theme::LogColors::system);
+    setThinkingState(true);
+
+    m_screenAgent->executeVisualCommand(userText, apiKey, [this, userText](const QString& result) {
+        setThinkingState(false);
+        appendLog(Str::logJarvis(), result, Theme::LogColors::jarvis);
+        m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+        m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result);
+    });
 }

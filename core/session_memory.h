@@ -89,8 +89,9 @@ public:
     // на запрос истории — возвращает пустую строку (без накладных расходов).
     QString buildHistoryContext(const QString& userQuery) const;
 
-    void setVibeMode(bool on)            { m_vibeMode = on; }
-    bool vibeMode() const                { return m_vibeMode; }
+    // vibeMode оставлен как stub для совместимости — Brain сам решает режим
+    void setVibeMode(bool) {}  // deprecated, ничего не делает
+    bool vibeMode() const { return false; }
 
     // Сводка профиля предпочтений (UserProfile::buildProfileSummary) —
     // обновляется перед каждым обращением к Claude, попадает в system prompt
@@ -124,7 +125,6 @@ private:
     QJsonObject m_commandStats;
     QJsonArray  m_pastSessions;
 
-    bool m_vibeMode = false;
     QString m_userProfileSummary;
 
     QString m_projectRoot;

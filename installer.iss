@@ -1,8 +1,10 @@
+; =====================================================================
 ; Inno Setup script for J.A.R.V.I.S.
 ; Версия и MyAppBuildDir подставляются GitHub Actions при сборке.
+; =====================================================================
 
 #define MyAppName "JARVIS"
-#define MyAppVersion "2.4.8"
+#define MyAppVersion "2.5.0"
 #define MyAppPublisher "Bohdan99py"
 #define MyAppURL "https://github.com/Bohdan99py/jarvis"
 #define MyAppExeName "jarvis.exe"
@@ -30,40 +32,88 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
+; Лицензионные соглашения — сначала RU, потом EN (выбор по языку)
+LicenseFile=EULA_JARVIS.txt
+
+; Приветственный экран — инструкция кратко
+InfoBeforeFile=JARVIS_INSTALL_NOTES.txt
+
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+; Ярлык на рабочем столе
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
+  GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+; Автозапуск при старте Windows
+Name: "autostart"; \
+  Description: "Запускать J.A.R.V.I.S. при старте Windows / Launch J.A.R.V.I.S. on Windows startup"; \
+  GroupDescription: "Параметры запуска / Startup options"; \
+  Flags: unchecked
 
 [Files]
-; Главный исполняемый файл (теперь содержит ядро статически)
+; Главный исполняемый файл
 Source: "{#MyAppBuildDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
-; Все Qt-DLL и плагины Qt из release_package (windeployqt их туда положил)
-Source: "{#MyAppBuildDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Qt DLL и плагины
+Source: "{#MyAppBuildDir}\*.dll"; DestDir: "{app}"; \
+  Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\platforms\*"; DestDir: "{app}\platforms"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\styles\*"; DestDir: "{app}\styles"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\imageformats\*"; DestDir: "{app}\imageformats"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\iconengines\*"; DestDir: "{app}\iconengines"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\networkinformation\*"; DestDir: "{app}\networkinformation"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\tls\*"; DestDir: "{app}\tls"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#MyAppBuildDir}\generic\*"; DestDir: "{app}\generic"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; Папки от windeployqt: platforms, styles, imageformats, networkinformation, tls и т.п.
-Source: "{#MyAppBuildDir}\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "{#MyAppBuildDir}\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "{#MyAppBuildDir}\imageformats\*"; DestDir: "{app}\imageformats"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "{#MyAppBuildDir}\iconengines\*"; DestDir: "{app}\iconengines"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "{#MyAppBuildDir}\networkinformation\*"; DestDir: "{app}\networkinformation"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "{#MyAppBuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "{#MyAppBuildDir}\generic\*"; DestDir: "{app}\generic"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; Poppler (PDF/OCR) — если есть в сборке
+Source: "{#MyAppBuildDir}\Tesseract-OCR\*"; DestDir: "{app}\Tesseract-OCR"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; Плагины JARVIS (если есть)
-Source: "{#MyAppBuildDir}\plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; Плагины JARVIS
+Source: "{#MyAppBuildDir}\plugins\*"; DestDir: "{app}\plugins"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+
+; Документы — EULA на обоих языках, README
+Source: "EULA_JARVIS.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "JARVIS_EULA_EN.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
+[Registry]
+; Автозапуск: Tasks: autostart — пишем ключ в реестр только если пользователь выбрал
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+  ValueType: string; ValueName: "JARVIS"; \
+  ValueData: """{app}\{#MyAppExeName}"""; \
+  Flags: uninsdeletevalue; Tasks: autostart
+
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Запустить после установки (опционально)
+Filename: "{app}\{#MyAppExeName}"; \
+  Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; \
+  Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; При удалении — убиваем процесс если запущен
+Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; \
+  Flags: runhidden skipifdoesntexist
 
 [UninstallDelete]
-; Удаляем всё что остаётся (логи, кэш JARVIS)
+; Чистим всё что осталось (логи, кэш)
 Type: filesandordirs; Name: "{app}"
+; AppData JARVIS — спрашивать не будем, удаляем (настройки, learned_commands.json)
+Type: filesandordirs; Name: "{userappdata}\JARVIS"
+Type: filesandordirs; Name: "{userappdata}\Bohdan99py\JARVIS"

@@ -23,6 +23,7 @@ public:
 
     void setApiKey(const QString& key);
     bool hasApiKey() const { return !m_apiKey.isEmpty(); }
+    QString apiKey() const { return m_apiKey; }  // для ScreenAgent Vision
 
     void setModel(const QString& model) { m_model = model; }
 
