@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 env:
-  QT_VERSION: '6.8.3'
+  QT_VERSION: '6.11.1'
   BUILD_TYPE: Release
 
 jobs:
@@ -16,211 +16,230 @@ jobs:
     runs-on: windows-2022
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install Qt
-      id: qt
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: ${{ env.QT_VERSION }}
-        host: windows
-        target: desktop
-        arch: win64_msvc2022_64
-        cache: true
+      - name: Install Qt
+        id: qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: 'qtmultimedia qtwebengine qtwebsockets qtnetworkauth qtimageformats'
+          cache: true
 
-    - name: Setup MSVC
-      uses: microsoft/setup-msbuild@v2
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
 
-    # === Вшиваем API-ключ из GitHub Secrets ===
-    - name: Inject API key
-      if: env.ANTHROPIC_API_KEY != ''
-      env:
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      run: |
-        $key = $env:ANTHROPIC_API_KEY
-        $xorKey = @(0x4A, 0x41, 0x52, 0x56, 0x49, 0x53, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x13, 0x37, 0x42, 0x69)
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($key)
-        $encrypted = @()
-        for ($i = 0; $i -lt $bytes.Length; $i++) {
-            $encrypted += ($bytes[$i] -bxor $xorKey[$i % $xorKey.Length])
-        }
+      # === Вшиваем API-ключ из GitHub Secrets ===
+      - name: Inject API key
+        if: env.ANTHROPIC_API_KEY != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          $key = $env:ANTHROPIC_API_KEY
+          $xorKey = @(0x4A, 0x41, 0x52, 0x56, 0x49, 0x53, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x13, 0x37, 0x42, 0x69)
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($key)
+          $encrypted = @()
+          for ($i = 0; $i -lt $bytes.Length; $i++) {
+              $encrypted += ($bytes[$i] -bxor $xorKey[$i % $xorKey.Length])
+          }
+          
+          $lines = @()
+          for ($i = 0; $i -lt $encrypted.Length; $i += 12) {
+              $end = [Math]::Min($i + 11, $encrypted.Length - 1)
+              $chunk = $encrypted[$i..$end]
+              $hexChunk = ($chunk | ForEach-Object { '0x{0:X2}' -f $_ }) -join ', '
+              $lines += "    $hexChunk,"
+          }
+          $arrayBody = $lines -join "`n"
+          
+          $header = @"
+          #pragma once
+          #include <QString>
+          #include <QByteArray>
+          
+          namespace EmbeddedKey {
+          
+          static constexpr uint8_t XOR_KEY[] = {
+              0x4A, 0x41, 0x52, 0x56, 0x49, 0x53, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x13, 0x37, 0x42, 0x69
+          };
+          static constexpr int XOR_KEY_LEN = sizeof(XOR_KEY);
+          
+          static constexpr uint8_t ENCRYPTED_KEY_DATA[] = {
+          $arrayBody
+          };
+          static constexpr int ENCRYPTED_KEY_SIZE = $($encrypted.Length);
+          
+          inline QByteArray xorDecrypt(const uint8_t* data, int size) {
+              QByteArray result(size, '\0');
+              for (int i = 0; i < size; ++i) {
+                  result[i] = static_cast<char>(data[i] ^ XOR_KEY[i % XOR_KEY_LEN]);
+              }
+              return result;
+          }
+          
+          inline QString decryptApiKey() {
+              if (ENCRYPTED_KEY_SIZE == 0) return QString();
+              QByteArray decrypted = xorDecrypt(ENCRYPTED_KEY_DATA, ENCRYPTED_KEY_SIZE);
+              return QString::fromUtf8(decrypted);
+          }
+          
+          inline bool hasEmbeddedKey() { return ENCRYPTED_KEY_SIZE > 0; }
+          
+          }
+          "@
+          
+          Set-Content -Path "core/embedded_key.h" -Value $header -Encoding UTF8
+          Write-Host "API key injected ($($encrypted.Length) bytes encrypted)"
+        shell: pwsh
 
-        $lines = @()
-        for ($i = 0; $i -lt $encrypted.Length; $i += 12) {
-            $end = [Math]::Min($i + 11, $encrypted.Length - 1)
-            $chunk = $encrypted[$i..$end]
-            $hexChunk = ($chunk | ForEach-Object { '0x{0:X2}' -f $_ }) -join ', '
-            $lines += "    $hexChunk,"
-        }
-        $arrayBody = $lines -join "`n"
+      # === Версия из git-тега → CMakeLists.txt ===
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace 'project\(jarvis VERSION [0-9]+\.[0-9]+\.[0-9]+', "project(jarvis VERSION $version"
+          Set-Content CMakeLists.txt $content
+          Write-Host "CMake version set to $version"
+        shell: pwsh
 
-        $header = @"
-        #pragma once
-        #include <QString>
-        #include <QByteArray>
+      # === Определяем путь к Qt и проверяем что он есть ===
+      - name: Resolve Qt path
+        id: qtpath
+        shell: pwsh
+        run: |
+          # install-qt-action@v4 экспортирует QT_ROOT_DIR — это и есть нужный путь
+          $qt = $env:QT_ROOT_DIR
+          if (-not $qt -or -not (Test-Path $qt)) {
+              # Запасной вариант — Qt6_DIR (старое имя)
+              $qt = $env:Qt6_DIR
+          }
+          if (-not $qt -or -not (Test-Path $qt)) {
+              Write-Error "Qt path not found. QT_ROOT_DIR='$env:QT_ROOT_DIR', Qt6_DIR='$env:Qt6_DIR'"
+              exit 1
+          }
+          Write-Host "Qt path: $qt"
+          "qt_path=$qt" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-        namespace EmbeddedKey {
+      # === Whisper.cpp для голосового ввода ===
+      - name: Clone whisper.cpp
+        run: |
+          git clone --depth=1 https://github.com/ggerganov/whisper.cpp redist/whisper
+        shell: cmd
 
-        static constexpr uint8_t XOR_KEY[] = {
-            0x4A, 0x41, 0x52, 0x56, 0x49, 0x53, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x13, 0x37, 0x42, 0x69
-        };
-        static constexpr int XOR_KEY_LEN = sizeof(XOR_KEY);
+      # === Сборка ===
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          $qt = "${{ steps.qtpath.outputs.qt_path }}"
+          Write-Host "Using Qt prefix: $qt"
+          cmake -S . -B build `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="$qt"
 
-        static constexpr uint8_t ENCRYPTED_KEY_DATA[] = {
-        $arrayBody
-        };
-        static constexpr int ENCRYPTED_KEY_SIZE = $($encrypted.Length);
+      - name: Build Release
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
 
-        inline QByteArray xorDecrypt(const uint8_t* data, int size) {
-            QByteArray result(size, '\0');
-            for (int i = 0; i < size; ++i) {
-                result[i] = static_cast<char>(data[i] ^ XOR_KEY[i % XOR_KEY_LEN]);
-            }
-            return result;
-        }
-
-        inline QString decryptApiKey() {
-            if (ENCRYPTED_KEY_SIZE == 0) return QString();
-            QByteArray decrypted = xorDecrypt(ENCRYPTED_KEY_DATA, ENCRYPTED_KEY_SIZE);
-            return QString::fromUtf8(decrypted);
-        }
-
-        inline bool hasEmbeddedKey() { return ENCRYPTED_KEY_SIZE > 0; }
-
-        }
-        "@
-
-        Set-Content -Path "core/embedded_key.h" -Value $header -Encoding UTF8
-        Write-Host "API key injected ($($encrypted.Length) bytes encrypted)"
-      shell: pwsh
-
-    # === Версия из git-тега → CMakeLists.txt ===
-    - name: Sync version from tag
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        $version = "${{ github.ref_name }}".TrimStart("v")
-        $content = Get-Content CMakeLists.txt -Raw
-        $content = $content -replace 'project\(jarvis VERSION [0-9]+\.[0-9]+\.[0-9]+', "project(jarvis VERSION $version"
-        Set-Content CMakeLists.txt $content
-        Write-Host "CMake version set to $version"
-      shell: pwsh
-
-    # === Определяем путь к Qt и проверяем что он есть ===
-    - name: Resolve Qt path
-      id: qtpath
-      shell: pwsh
-      run: |
-        # install-qt-action@v4 экспортирует QT_ROOT_DIR — это и есть нужный путь
-        $qt = $env:QT_ROOT_DIR
-        if (-not $qt -or -not (Test-Path $qt)) {
-            # Запасной вариант — Qt6_DIR (старое имя)
-            $qt = $env:Qt6_DIR
-        }
-        if (-not $qt -or -not (Test-Path $qt)) {
-            Write-Error "Qt path not found. QT_ROOT_DIR='$env:QT_ROOT_DIR', Qt6_DIR='$env:Qt6_DIR'"
+      # === Подготовка пакета ===
+      - name: Prepare release package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release_package | Out-Null
+          New-Item -ItemType Directory -Force -Path release_package\plugins | Out-Null
+          
+          # На VS-генераторе бинарь оказывается в build/bin/Release/, на ninja — в build/bin/
+          $exePath = "build\bin\Release\jarvis.exe"
+          if (-not (Test-Path $exePath)) { $exePath = "build\bin\jarvis.exe" }
+          if (-not (Test-Path $exePath)) {
+            $found = Get-ChildItem -Path build -Recurse -Filter "jarvis.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $exePath = $found.FullName }
+          }
+          if (-not (Test-Path $exePath)) {
+            Write-Error "jarvis.exe not found in build directory!"
+            Get-ChildItem -Path build -Recurse | Select-Object -ExpandProperty FullName
             exit 1
-        }
-        Write-Host "Qt path: $qt"
-        "qt_path=$qt" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          
+          Write-Host "Using exe: $exePath"
+          Copy-Item $exePath release_package\
+          
+          if (Test-Path "plugins\plugins.json") {
+            Copy-Item plugins\plugins.json release_package\plugins\
+          }
+          
+          Get-ChildItem -Path build -Recurse -Filter "JarvisPlugin_*.dll" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName release_package\plugins\ }
+          
+          $qt = "${{ steps.qtpath.outputs.qt_path }}"
+          & "$qt\bin\windeployqt.exe" `
+            --release `
+            --no-translations `
+            --no-opengl-sw `
+            --no-system-d3d-compiler `
+            --no-compiler-runtime `
+            release_package\jarvis.exe
 
-    # === Сборка ===
-    - name: Configure CMake
-      shell: pwsh
-      run: |
-        $qt = "${{ steps.qtpath.outputs.qt_path }}"
-        Write-Host "Using Qt prefix: $qt"
-        cmake -S . -B build `
-          -G "Visual Studio 17 2022" -A x64 `
-          -DCMAKE_PREFIX_PATH="$qt"
+          # Копируем Qt Multimedia плагины вручную если windeployqt не взял
+          $mmSrc = "$qt\plugins\multimedia"
+          if (Test-Path $mmSrc) {
+            Copy-Item -Recurse -Force $mmSrc release_package\multimedia
+            Write-Host "Qt Multimedia plugins copied"
+          }
+          $audioSrc = "$qt\plugins\audio"
+          if (Test-Path $audioSrc) {
+            Copy-Item -Recurse -Force $audioSrc release_package\audio
+            Write-Host "Qt Audio plugins copied"
+          }
 
-    - name: Build Release
-      run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-windows-x64
+          path: release_package/
 
-    # === Подготовка пакета ===
-    - name: Prepare release package
-      shell: pwsh
-      run: |
-        New-Item -ItemType Directory -Force -Path release_package | Out-Null
-        New-Item -ItemType Directory -Force -Path release_package\plugins | Out-Null
+      # ============================================================
+      # Релиз — только при теге v*
+      # ============================================================
 
-        # На VS-генераторе бинарь оказывается в build/bin/Release/, на ninja — в build/bin/
-        $exePath = "build\bin\Release\jarvis.exe"
-        if (-not (Test-Path $exePath)) { $exePath = "build\bin\jarvis.exe" }
-        if (-not (Test-Path $exePath)) {
-          $found = Get-ChildItem -Path build -Recurse -Filter "jarvis.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($found) { $exePath = $found.FullName }
-        }
-        if (-not (Test-Path $exePath)) {
-          Write-Error "jarvis.exe not found in build directory!"
-          Get-ChildItem -Path build -Recurse | Select-Object -ExpandProperty FullName
-          exit 1
-        }
+      - name: Create ZIP archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: 7z a JARVIS-${{ github.ref_name }}-win64.zip ./release_package/*
+        shell: cmd
 
-        Write-Host "Using exe: $exePath"
-        Copy-Item $exePath release_package\
+      - name: Install Inno Setup
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: choco install innosetup -y --no-progress
+        shell: cmd
 
-        if (Test-Path "plugins\plugins.json") {
-          Copy-Item plugins\plugins.json release_package\plugins\
-        }
+      - name: Update installer version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $content = Get-Content installer.iss -Raw
+          $content = $content -replace '#define MyAppVersion "[0-9]+\.[0-9]+\.[0-9]+"', "#define MyAppVersion `"$version`""
+          $content = $content -replace '#define MyAppBuildDir "build\\release_package"', '#define MyAppBuildDir "release_package"'
+          Set-Content installer.iss $content
+        shell: pwsh
 
-        Get-ChildItem -Path build -Recurse -Filter "JarvisPlugin_*.dll" -ErrorAction SilentlyContinue |
-          ForEach-Object { Copy-Item $_.FullName release_package\plugins\ }
+      - name: Build installer
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+        shell: cmd
+        continue-on-error: true
 
-        $qt = "${{ steps.qtpath.outputs.qt_path }}"
-        & "$qt\bin\windeployqt.exe" `
-          --release `
-          --no-translations `
-          --no-opengl-sw `
-          --no-system-d3d-compiler `
-          --no-compiler-runtime `
-          release_package\jarvis.exe
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: jarvis-windows-x64
-        path: release_package/
-
-    # ============================================================
-    # Релиз — только при теге v*
-    # ============================================================
-
-    - name: Create ZIP archive
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: 7z a JARVIS-${{ github.ref_name }}-win64.zip ./release_package/*
-      shell: cmd
-
-    - name: Install Inno Setup
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: choco install innosetup -y --no-progress
-      shell: cmd
-
-    - name: Update installer version
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: |
-        $version = "${{ github.ref_name }}".TrimStart("v")
-        $content = Get-Content installer.iss -Raw
-        $content = $content -replace '#define MyAppVersion "[0-9]+\.[0-9]+\.[0-9]+"', "#define MyAppVersion `"$version`""
-        $content = $content -replace '#define MyAppBuildDir "build\\release_package"', '#define MyAppBuildDir "release_package"'
-        Set-Content installer.iss $content
-      shell: pwsh
-
-    - name: Build installer
-      if: startsWith(github.ref, 'refs/tags/v')
-      run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
-      shell: cmd
-      continue-on-error: true
-
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
-      with:
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-        files: |
-          JARVIS-${{ github.ref_name }}-win64.zip
-          build/installer/JARVIS-Setup-*.exe
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            JARVIS-${{ github.ref_name }}-win64.zip
+            build/installer/JARVIS-Setup-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
