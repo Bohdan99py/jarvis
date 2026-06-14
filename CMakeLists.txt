@@ -29,8 +29,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Поиск Qt 6
 # ============================================================
 
-set(QT_FALLBACK_PATH "C:/Qt/6.11.0/msvc2022_64")
-
+# Приоритет: env переменная → конкретная версия → автодетект
 if(NOT DEFINED CMAKE_PREFIX_PATH OR CMAKE_PREFIX_PATH STREQUAL "")
     if(DEFINED ENV{Qt6_DIR} AND EXISTS "$ENV{Qt6_DIR}")
         list(APPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
@@ -39,20 +38,24 @@ if(NOT DEFINED CMAKE_PREFIX_PATH OR CMAKE_PREFIX_PATH STREQUAL "")
         list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_DIR}")
         message(STATUS "Qt: using QT_DIR env -> $ENV{QT_DIR}")
     else()
-        file(GLOB _qt_candidates
-                LIST_DIRECTORIES TRUE
-                "C:/Qt/6.*/msvc2022_64"
-                "C:/Qt/6.*/msvc2019_64"
+        # Перебираем конкретные версии от новой к старой
+        # При добавлении новой Qt — просто допиши строку в начало списка
+        foreach(_qt_try
+                "C:/Qt/6.11.1/msvc2022_64"
+                "C:/Qt/6.11.0/msvc2022_64"
+                "C:/Qt/6.10.0/msvc2022_64"
+                "C:/Qt/6.9.3/msvc2022_64"
+                "C:/Qt/6.9.0/msvc2022_64"
+                "C:/Qt/6.8.3/msvc2022_64"
         )
-        if(_qt_candidates)
-            list(SORT _qt_candidates ORDER DESCENDING)
-            list(GET _qt_candidates 0 _qt_best)
-            list(APPEND CMAKE_PREFIX_PATH "${_qt_best}")
-            message(STATUS "Qt: auto-detected -> ${_qt_best}")
-        elseif(EXISTS "${QT_FALLBACK_PATH}")
-            list(APPEND CMAKE_PREFIX_PATH "${QT_FALLBACK_PATH}")
-            message(STATUS "Qt: using fallback -> ${QT_FALLBACK_PATH}")
-        else()
+            if(EXISTS "${_qt_try}/lib/cmake/Qt6/Qt6Config.cmake")
+                list(APPEND CMAKE_PREFIX_PATH "${_qt_try}")
+                message(STATUS "Qt: found -> ${_qt_try}")
+                break()
+            endif()
+        endforeach()
+
+        if(NOT CMAKE_PREFIX_PATH)
             message(FATAL_ERROR
                     "Qt 6 not found. Pass -DCMAKE_PREFIX_PATH=C:/Qt/6.x.x/msvc2022_64 "
                     "or set environment variable Qt6_DIR.")
@@ -60,8 +63,39 @@ if(NOT DEFINED CMAKE_PREFIX_PATH OR CMAKE_PREFIX_PATH STREQUAL "")
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent Multimedia)
 message(STATUS "Qt version: ${Qt6_VERSION}")
+
+# ============================================================
+# whisper.cpp — локальная статическая сборка
+# Скачай: https://github.com/ggerganov/whisper.cpp
+# Распакуй в: redist/whisper/
+# Модель (ggml-medium.bin):
+#   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
+#   Положи в: redist/whisper/ggml-medium.bin
+# ============================================================
+
+set(_whisper_root "${CMAKE_SOURCE_DIR}/redist/whisper")
+
+if(EXISTS "${_whisper_root}/src/whisper.cpp")
+    # Отключаем всё лишнее из whisper.cpp сборки
+    set(WHISPER_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
+    set(GGML_CUDA               OFF CACHE BOOL "" FORCE)
+    set(GGML_METAL              OFF CACHE BOOL "" FORCE)
+    set(GGML_VULKAN             OFF CACHE BOOL "" FORCE)
+    set(GGML_OPENCL             OFF CACHE BOOL "" FORCE)
+    set(GGML_BLAS               OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS       OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory(${_whisper_root} whisper_build EXCLUDE_FROM_ALL)
+
+    set(WHISPER_AVAILABLE TRUE)
+    message(STATUS "whisper.cpp found via add_subdirectory: ${_whisper_root}")
+else()
+    set(WHISPER_AVAILABLE FALSE)
+    message(WARNING "whisper.cpp NOT found in redist/whisper/. Voice input will be disabled.")
+endif()
 
 # --- Версия и GitHub ---
 add_compile_definitions(
@@ -152,6 +186,18 @@ add_library(JarvisCore STATIC
         core/auto_updater.cpp
         core/bug_reporter.h
         core/bug_reporter.cpp
+
+        # База данных SQLite — история чатов, команды, память, индекс файлов
+        core/database_manager.h
+        core/database_manager.cpp
+
+        # Фоновое обучение — индексация проекта + анализ паттернов чата
+        core/background_learner.h
+        core/background_learner.cpp
+
+        # Голосовой ввод — Whisper.cpp, VAD, шёпот, wake word
+        core/voice_input.h
+        core/voice_input.cpp
 )
 
 target_compile_definitions(JarvisCore PRIVATE
@@ -175,6 +221,7 @@ target_link_libraries(JarvisCore PUBLIC
         Qt6::Network
         Qt6::Sql
         Qt6::Concurrent
+        Qt6::Multimedia
 )
 
 target_link_libraries(JarvisCore PRIVATE
@@ -185,6 +232,18 @@ target_link_libraries(JarvisCore PRIVATE
         advapi32
         psapi
 )
+
+# Whisper.cpp — линкуем если нашли
+if(WHISPER_AVAILABLE)
+    target_link_libraries(JarvisCore PUBLIC whisper)
+    target_include_directories(JarvisCore PRIVATE
+            "${_whisper_root}/include"
+            "${_whisper_root}/ggml/include"
+    )
+    target_compile_definitions(JarvisCore PRIVATE JARVIS_WHISPER_AVAILABLE)
+else()
+    target_compile_definitions(JarvisCore PRIVATE JARVIS_WHISPER_STUB)
+endif()
 
 if(MSVC)
     target_compile_options(JarvisCore PRIVATE

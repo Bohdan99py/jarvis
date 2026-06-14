@@ -1,10 +1,16 @@
-J.A.R.V.I.S. — Personal AI Assistant v3.x
+J.A.R.V.I.S. — Personal AI Assistant v3.0
 ===========================================
 
 Quick Start (30 seconds):
   1. Launch JARVIS from Desktop or Start Menu
   2. Say "hello" or type any question
   3. That's it — no setup required for basic commands
+
+Voice Input (NEW in v3.0):
+  Click the 🎤 button, say "Jarvis", then speak your command.
+  Works offline, free, supports whisper-level speech.
+  Requires: redist/whisper/ggml-medium.bin (~1.5 GB, one-time download)
+  Download: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 
 Free commands (no internet):
   • open Chrome / Steam / Notepad / Calculator / Discord...
@@ -17,10 +23,15 @@ For AI answers (code, questions, analysis):
   Settings → Gemini API key...  (aistudio.google.com — FREE)
   OR install Ollama (ollama.com) for fully offline AI
 
+What's stored on your PC:
+  %AppData%\Jarvis\jarvis.db     — chat history, memory, commands (SQLite)
+  %AppData%\Jarvis\config.json   — API keys (encrypted)
+
 Troubleshooting:
   No response?  → Check your API key in Settings
   App not found? → Try the full name: "open Google Chrome"
   Antivirus?    → Add JARVIS folder to exclusions
+  Voice not working? → Check that ggml-medium.bin is in redist/whisper/
 
 Help & bug reports: Help → User Guide  /  Help → Report a Bug
 ===========================================

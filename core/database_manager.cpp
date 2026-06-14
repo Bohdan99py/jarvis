@@ -1,0 +1,830 @@
+// ============================================================
+// database_manager.cpp — J.A.R.V.I.S. SQLite storage
+// ============================================================
+#include "database_manager.h"
+
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QSqlRecord>
+#include <QStandardPaths>
+#include <QDir>
+#include <QDebug>
+#include <QUuid>
+#include <QThread>
+#include <QFileInfo>
+
+// ============================================================
+//  Синглтон
+// ============================================================
+
+DatabaseManager& DatabaseManager::instance()
+{
+    static DatabaseManager inst;
+    return inst;
+}
+
+DatabaseManager::DatabaseManager(QObject* parent) : QObject(parent) {}
+DatabaseManager::~DatabaseManager() { close(); }
+
+// ============================================================
+//  Thread-safe соединение — каждый поток получает своё
+// ============================================================
+
+QSqlDatabase DatabaseManager::connection()
+{
+    const QString connName = QStringLiteral("jarvis_db_%1")
+        .arg(reinterpret_cast<quintptr>(QThread::currentThread()));
+
+    if (QSqlDatabase::contains(connName)) {
+        auto db = QSqlDatabase::database(connName);
+        if (db.isOpen()) return db;
+    }
+
+    auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
+    db.setDatabaseName(m_dbPath);
+    if (!db.open()) logError("connection(thread)", db.lastError());
+
+    QSqlQuery q(db);
+    q.exec("PRAGMA journal_mode=WAL");
+    q.exec("PRAGMA foreign_keys=ON");
+    q.exec("PRAGMA synchronous=NORMAL");
+    q.exec("PRAGMA cache_size=-8000");
+    return db;
+}
+
+// ============================================================
+//  Открытие БД
+// ============================================================
+
+bool DatabaseManager::open(const QString& dbPath)
+{
+    QMutexLocker lock(&m_mutex);
+    if (m_db.isOpen()) return true;
+
+    if (dbPath.isEmpty()) {
+        QString appData = QStandardPaths::writableLocation(
+            QStandardPaths::AppDataLocation);
+        QDir().mkpath(appData);
+        m_dbPath = appData + QStringLiteral("/jarvis.db");
+    } else {
+        m_dbPath = dbPath;
+    }
+
+    m_db = QSqlDatabase::addDatabase(
+        QStringLiteral("QSQLITE"), QStringLiteral("jarvis_main"));
+    m_db.setDatabaseName(m_dbPath);
+
+    if (!m_db.open()) { logError("open", m_db.lastError()); return false; }
+
+    QSqlQuery q(m_db);
+    q.exec("PRAGMA journal_mode=WAL");
+    q.exec("PRAGMA foreign_keys=ON");
+    q.exec("PRAGMA synchronous=NORMAL");
+    q.exec("PRAGMA cache_size=-8000");
+
+    if (!createTables())  return false;
+    if (!runMigrations()) return false;
+
+    getOrCreateDefaultUser();
+    qDebug() << "[DB] Opened:" << m_dbPath;
+    return true;
+}
+
+void DatabaseManager::close()
+{
+    if (m_db.isOpen()) m_db.close();
+    QSqlDatabase::removeDatabase(QStringLiteral("jarvis_main"));
+}
+
+bool    DatabaseManager::isOpen()    const { return m_db.isOpen(); }
+QString DatabaseManager::lastError() const { return m_lastError; }
+
+// ============================================================
+//  DDL — создание таблиц
+// ============================================================
+
+bool DatabaseManager::createTables()
+{
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS schema_version (
+        version INTEGER NOT NULL DEFAULT 0))")) return false;
+    {
+        QSqlQuery q(m_db);
+        q.exec("SELECT COUNT(*) FROM schema_version");
+        if (q.next() && q.value(0).toInt() == 0)
+            execQuery("INSERT INTO schema_version (version) VALUES (0)");
+    }
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS users (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    NOT NULL DEFAULT 'Bohdan',
+        scenario    TEXT    NOT NULL DEFAULT 'game_dev',
+        language    TEXT    NOT NULL DEFAULT 'auto',
+        preferences TEXT             DEFAULT '{}',
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+        last_seen   TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS chat_history (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 1
+                    REFERENCES users(id) ON DELETE CASCADE,
+        role        TEXT    NOT NULL CHECK(role IN ('user','assistant','system')),
+        content     TEXT    NOT NULL,
+        model       TEXT    NOT NULL DEFAULT 'claude',
+        session_id  TEXT    NOT NULL,
+        tokens_used INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_history(session_id)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_chat_user    ON chat_history(user_id, created_at DESC)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_chat_model   ON chat_history(user_id, model, created_at)");
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS commands (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 1
+                    REFERENCES users(id) ON DELETE CASCADE,
+        trigger     TEXT    NOT NULL,
+        action      TEXT    NOT NULL,
+        type        TEXT    NOT NULL DEFAULT 'system'
+                    CHECK(type IN ('system','macro','app','ai')),
+        scenario    TEXT    NOT NULL DEFAULT '',
+        is_enabled  INTEGER NOT NULL DEFAULT 1,
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, trigger)
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_cmd_user    ON commands(user_id, is_enabled)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_cmd_trigger ON commands(user_id, trigger)");
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS memory_kv (
+        user_id    INTEGER NOT NULL DEFAULT 1
+                   REFERENCES users(id) ON DELETE CASCADE,
+        key        TEXT    NOT NULL,
+        value      TEXT    NOT NULL DEFAULT '',
+        updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (user_id, key)
+    ))")) return false;
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS indexed_files (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path        TEXT    NOT NULL UNIQUE,
+        file_name        TEXT    NOT NULL,
+        extension        TEXT    NOT NULL DEFAULT '',
+        content_hash     TEXT    NOT NULL DEFAULT '',
+        symbols          TEXT    NOT NULL DEFAULT '[]',
+        summary          TEXT    NOT NULL DEFAULT '',
+        size_bytes       INTEGER NOT NULL DEFAULT 0,
+        indexed_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+        file_modified_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_file_ext  ON indexed_files(extension)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_file_hash ON indexed_files(content_hash)");
+
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS behavior_patterns (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL DEFAULT 1
+                   REFERENCES users(id) ON DELETE CASCADE,
+        trigger    TEXT    NOT NULL,
+        response   TEXT    NOT NULL,
+        context    TEXT    NOT NULL DEFAULT '{}',
+        frequency  INTEGER NOT NULL DEFAULT 1,
+        confidence REAL    NOT NULL DEFAULT 0.0,
+        last_seen  TEXT    NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, trigger, response)
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_pattern_user ON behavior_patterns(user_id, frequency DESC)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_pattern_trig ON behavior_patterns(user_id, trigger)");
+
+    return true;
+}
+
+bool DatabaseManager::runMigrations()
+{
+    QSqlQuery q(m_db);
+    q.exec("SELECT version FROM schema_version");
+    int ver = 0;
+    if (q.next()) ver = q.value(0).toInt();
+    if (ver < 1) { execQuery("UPDATE schema_version SET version=1"); ver = 1; }
+    if (ver < 2) { execQuery("UPDATE schema_version SET version=2"); }
+    return true;
+}
+
+bool DatabaseManager::execQuery(const QString& sql)
+{
+    QSqlQuery q(m_db);
+    if (!q.exec(sql)) { logError(sql.left(60), q.lastError()); return false; }
+    return true;
+}
+
+void DatabaseManager::logError(const QString& ctx, const QSqlError& err)
+{
+    m_lastError = QStringLiteral("[DB] %1 | %2").arg(ctx, err.text());
+    qWarning() << m_lastError;
+    emit databaseError(m_lastError);
+}
+
+// ============================================================
+//  users
+// ============================================================
+
+qint64 DatabaseManager::addUser(const DbUserProfile& p)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO users (name, scenario, language, preferences) VALUES (:n,:s,:l,:p)");
+    q.bindValue(":n", p.name);
+    q.bindValue(":s", p.scenario);
+    q.bindValue(":l", p.language);
+    q.bindValue(":p", p.preferences);
+    if (!q.exec()) { logError("addUser", q.lastError()); return -1; }
+    return q.lastInsertId().toLongLong();
+}
+
+bool DatabaseManager::updateUser(const DbUserProfile& p)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("UPDATE users SET name=:n,scenario=:s,language=:l,"
+              "preferences=:p,last_seen=datetime('now') WHERE id=:id");
+    q.bindValue(":n",  p.name);
+    q.bindValue(":s",  p.scenario);
+    q.bindValue(":l",  p.language);
+    q.bindValue(":p",  p.preferences);
+    q.bindValue(":id", p.id);
+    if (!q.exec()) { logError("updateUser", q.lastError()); return false; }
+    return true;
+}
+
+static DbUserProfile userFromQuery(QSqlQuery& q)
+{
+    DbUserProfile p;
+    p.id          = q.value("id").toLongLong();
+    p.name        = q.value("name").toString();
+    p.scenario    = q.value("scenario").toString();
+    p.language    = q.value("language").toString();
+    p.preferences = q.value("preferences").toString();
+    p.createdAt   = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+    p.lastSeen    = QDateTime::fromString(q.value("last_seen").toString(),  Qt::ISODate);
+    return p;
+}
+
+std::optional<DbUserProfile> DatabaseManager::getUser(qint64 id)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM users WHERE id=:id");
+    q.bindValue(":id", id);
+    if (q.exec() && q.next()) return userFromQuery(q);
+    return std::nullopt;
+}
+
+QList<DbUserProfile> DatabaseManager::getAllUsers()
+{
+    QList<DbUserProfile> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    if (q.exec("SELECT * FROM users ORDER BY id"))
+        while (q.next()) res.append(userFromQuery(q));
+    return res;
+}
+
+qint64 DatabaseManager::getOrCreateDefaultUser()
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.exec("SELECT id FROM users WHERE id=1");
+    if (q.next()) return 1;
+
+    DbUserProfile def;
+    def.name        = QStringLiteral("Bohdan");
+    def.scenario    = QStringLiteral("game_dev");
+    def.language    = QStringLiteral("auto");
+    def.preferences = QStringLiteral("{}");
+    return addUser(def);
+}
+
+// ============================================================
+//  chat_history
+// ============================================================
+
+qint64 DatabaseManager::addMessage(const DbChatMessage& msg)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO chat_history (user_id,role,content,model,session_id,tokens_used)"
+              " VALUES (:uid,:role,:content,:model,:sid,:tok)");
+    q.bindValue(":uid",     msg.userId);
+    q.bindValue(":role",    msg.role);
+    q.bindValue(":content", msg.content);
+    q.bindValue(":model",   msg.model);
+    q.bindValue(":sid",     msg.sessionId.isEmpty()
+                            ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                            : msg.sessionId);
+    q.bindValue(":tok",     msg.tokensUsed);
+    if (!q.exec()) { logError("addMessage", q.lastError()); return -1; }
+    qint64 newId = q.lastInsertId().toLongLong();
+    emit messageSaved(newId);
+    return newId;
+}
+
+static DbChatMessage chatFromQuery(QSqlQuery& q)
+{
+    DbChatMessage m;
+    m.id         = q.value("id").toLongLong();
+    m.userId     = q.value("user_id").toLongLong();
+    m.role       = q.value("role").toString();
+    m.content    = q.value("content").toString();
+    m.model      = q.value("model").toString();
+    m.sessionId  = q.value("session_id").toString();
+    m.tokensUsed = q.value("tokens_used").toInt();
+    m.createdAt  = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+    return m;
+}
+
+QList<DbChatMessage> DatabaseManager::getSession(const QString& sessionId)
+{
+    QList<DbChatMessage> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM chat_history WHERE session_id=:sid ORDER BY id ASC");
+    q.bindValue(":sid", sessionId);
+    if (q.exec()) while (q.next()) res.append(chatFromQuery(q));
+    return res;
+}
+
+QList<DbChatMessage> DatabaseManager::getRecentMessages(qint64 userId, int limit)
+{
+    QList<DbChatMessage> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM chat_history WHERE user_id=:uid ORDER BY id DESC LIMIT :lim");
+    q.bindValue(":uid", userId);
+    q.bindValue(":lim", limit);
+    if (q.exec()) while (q.next()) res.prepend(chatFromQuery(q));
+    return res;
+}
+
+QList<DbChatMessage> DatabaseManager::searchMessages(qint64 userId, const QString& queryText)
+{
+    QList<DbChatMessage> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM chat_history WHERE user_id=:uid AND content LIKE :q"
+              " ORDER BY id DESC LIMIT 100");
+    q.bindValue(":uid", userId);
+    q.bindValue(":q",   QStringLiteral("%%1%").arg(queryText));
+    if (q.exec()) while (q.next()) res.append(chatFromQuery(q));
+    return res;
+}
+
+bool DatabaseManager::deleteSession(const QString& sessionId)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM chat_history WHERE session_id=:sid");
+    q.bindValue(":sid", sessionId);
+    if (!q.exec()) { logError("deleteSession", q.lastError()); return false; }
+    return true;
+}
+
+bool DatabaseManager::clearHistory(qint64 userId)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM chat_history WHERE user_id=:uid");
+    q.bindValue(":uid", userId);
+    if (!q.exec()) { logError("clearHistory", q.lastError()); return false; }
+    return true;
+}
+
+int DatabaseManager::monthlyTokens(qint64 userId, const QString& model)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT COALESCE(SUM(tokens_used),0) FROM chat_history"
+              " WHERE user_id=:uid AND model=:m"
+              " AND strftime('%Y-%m',created_at)=strftime('%Y-%m','now')");
+    q.bindValue(":uid", userId);
+    q.bindValue(":m",   model);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+    return 0;
+}
+
+QList<QMap<QString,QString>> DatabaseManager::getSessions(qint64 userId, int limit)
+{
+    QList<QMap<QString,QString>> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(SELECT session_id,
+                        MIN(created_at) AS started_at,
+                        MAX(created_at) AS last_at,
+                        COUNT(*)        AS msg_count,
+                        SUM(tokens_used) AS tokens
+                 FROM chat_history WHERE user_id=:uid
+                 GROUP BY session_id
+                 ORDER BY last_at DESC LIMIT :lim)");
+    q.bindValue(":uid", userId);
+    q.bindValue(":lim", limit);
+    if (q.exec()) {
+        while (q.next()) {
+            QMap<QString,QString> row;
+            row["session_id"] = q.value("session_id").toString();
+            row["started_at"] = q.value("started_at").toString();
+            row["last_at"]    = q.value("last_at").toString();
+            row["msg_count"]  = q.value("msg_count").toString();
+            row["tokens"]     = q.value("tokens").toString();
+            res.append(row);
+        }
+    }
+    return res;
+}
+
+// ============================================================
+//  commands
+// ============================================================
+
+qint64 DatabaseManager::addCommand(const DbUserCommand& cmd)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT OR REPLACE INTO commands (user_id,trigger,action,type,scenario,is_enabled)"
+              " VALUES (:uid,:tr,:act,:tp,:sc,:en)");
+    q.bindValue(":uid", cmd.userId);
+    q.bindValue(":tr",  cmd.trigger);
+    q.bindValue(":act", cmd.action);
+    q.bindValue(":tp",  cmd.type);
+    q.bindValue(":sc",  cmd.scenario);
+    q.bindValue(":en",  cmd.isEnabled ? 1 : 0);
+    if (!q.exec()) { logError("addCommand", q.lastError()); return -1; }
+    return q.lastInsertId().toLongLong();
+}
+
+bool DatabaseManager::updateCommand(const DbUserCommand& cmd)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("UPDATE commands SET trigger=:tr,action=:act,type=:tp,"
+              "scenario=:sc,is_enabled=:en WHERE id=:id");
+    q.bindValue(":tr",  cmd.trigger);
+    q.bindValue(":act", cmd.action);
+    q.bindValue(":tp",  cmd.type);
+    q.bindValue(":sc",  cmd.scenario);
+    q.bindValue(":en",  cmd.isEnabled ? 1 : 0);
+    q.bindValue(":id",  cmd.id);
+    if (!q.exec()) { logError("updateCommand", q.lastError()); return false; }
+    return true;
+}
+
+bool DatabaseManager::deleteCommand(qint64 id)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM commands WHERE id=:id");
+    q.bindValue(":id", id);
+    if (!q.exec()) { logError("deleteCommand", q.lastError()); return false; }
+    return true;
+}
+
+static DbUserCommand cmdFromQuery(QSqlQuery& q)
+{
+    DbUserCommand c;
+    c.id         = q.value("id").toLongLong();
+    c.userId     = q.value("user_id").toLongLong();
+    c.trigger    = q.value("trigger").toString();
+    c.action     = q.value("action").toString();
+    c.type       = q.value("type").toString();
+    c.scenario   = q.value("scenario").toString();
+    c.isEnabled  = q.value("is_enabled").toInt() != 0;
+    c.usageCount = q.value("usage_count").toInt();
+    c.createdAt  = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+    return c;
+}
+
+QList<DbUserCommand> DatabaseManager::getCommands(qint64 userId,
+                                                    const QString& scenario,
+                                                    const QString& type)
+{
+    QList<DbUserCommand> res;
+    QString sql = "SELECT * FROM commands WHERE user_id=:uid AND is_enabled=1";
+    if (!scenario.isEmpty()) sql += " AND (scenario=:sc OR scenario='')";
+    if (!type.isEmpty())     sql += " AND type=:tp";
+    sql += " ORDER BY usage_count DESC, trigger ASC";
+
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(sql);
+    q.bindValue(":uid", userId);
+    if (!scenario.isEmpty()) q.bindValue(":sc", scenario);
+    if (!type.isEmpty())     q.bindValue(":tp", type);
+    if (q.exec()) while (q.next()) res.append(cmdFromQuery(q));
+    return res;
+}
+
+std::optional<DbUserCommand> DatabaseManager::findCommand(qint64 userId, const QString& trigger)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM commands WHERE user_id=:uid AND trigger=:tr AND is_enabled=1");
+    q.bindValue(":uid", userId);
+    q.bindValue(":tr",  trigger);
+    if (q.exec() && q.next()) return cmdFromQuery(q);
+    return std::nullopt;
+}
+
+bool DatabaseManager::incrementUsage(qint64 commandId)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("UPDATE commands SET usage_count=usage_count+1 WHERE id=:id");
+    q.bindValue(":id", commandId);
+    if (!q.exec()) { logError("incrementUsage", q.lastError()); return false; }
+    return true;
+}
+
+// ============================================================
+//  memory_kv
+// ============================================================
+
+bool DatabaseManager::memSet(qint64 userId, const QString& key, const QString& value)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO memory_kv (user_id,key,value,updated_at)"
+              " VALUES (:uid,:k,:v,datetime('now'))"
+              " ON CONFLICT(user_id,key) DO UPDATE"
+              " SET value=excluded.value,updated_at=excluded.updated_at");
+    q.bindValue(":uid", userId);
+    q.bindValue(":k",   key);
+    q.bindValue(":v",   value);
+    if (!q.exec()) { logError("memSet", q.lastError()); return false; }
+    return true;
+}
+
+QString DatabaseManager::memGet(qint64 userId, const QString& key, const QString& def)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT value FROM memory_kv WHERE user_id=:uid AND key=:k");
+    q.bindValue(":uid", userId);
+    q.bindValue(":k",   key);
+    if (q.exec() && q.next()) return q.value(0).toString();
+    return def;
+}
+
+bool DatabaseManager::memDelete(qint64 userId, const QString& key)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM memory_kv WHERE user_id=:uid AND key=:k");
+    q.bindValue(":uid", userId);
+    q.bindValue(":k",   key);
+    if (!q.exec()) { logError("memDelete", q.lastError()); return false; }
+    return true;
+}
+
+QMap<QString,QString> DatabaseManager::memGetAll(qint64 userId)
+{
+    QMap<QString,QString> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT key,value FROM memory_kv WHERE user_id=:uid ORDER BY key");
+    q.bindValue(":uid", userId);
+    if (q.exec()) while (q.next()) res.insert(q.value(0).toString(), q.value(1).toString());
+    return res;
+}
+
+// ============================================================
+//  settings
+// ============================================================
+
+bool DatabaseManager::setConfig(const QString& key, const QVariant& value)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO settings (key,value,updated_at)"
+              " VALUES (:k,:v,datetime('now'))"
+              " ON CONFLICT(key) DO UPDATE"
+              " SET value=excluded.value,updated_at=excluded.updated_at");
+    q.bindValue(":k", key);
+    q.bindValue(":v", value.toString());
+    if (!q.exec()) { logError("setConfig", q.lastError()); return false; }
+    return true;
+}
+
+QVariant DatabaseManager::getConfig(const QString& key, const QVariant& def)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT value FROM settings WHERE key=:k");
+    q.bindValue(":k", key);
+    if (q.exec() && q.next()) return q.value(0);
+    return def;
+}
+
+bool DatabaseManager::deleteConfig(const QString& key)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM settings WHERE key=:k");
+    q.bindValue(":k", key);
+    if (!q.exec()) { logError("deleteConfig", q.lastError()); return false; }
+    return true;
+}
+
+// ============================================================
+//  indexed_files
+// ============================================================
+
+qint64 DatabaseManager::upsertFile(const DbIndexedFile& f)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(INSERT INTO indexed_files
+                 (file_path,file_name,extension,content_hash,symbols,summary,
+                  size_bytes,indexed_at,file_modified_at)
+                 VALUES (:path,:name,:ext,:hash,:sym,:sum,:sz,datetime('now'),:fmod)
+                 ON CONFLICT(file_path) DO UPDATE SET
+                     file_name=excluded.file_name,
+                     extension=excluded.extension,
+                     content_hash=excluded.content_hash,
+                     symbols=excluded.symbols,
+                     summary=excluded.summary,
+                     size_bytes=excluded.size_bytes,
+                     indexed_at=excluded.indexed_at,
+                     file_modified_at=excluded.file_modified_at)");
+    q.bindValue(":path", f.filePath);
+    q.bindValue(":name", f.fileName);
+    q.bindValue(":ext",  f.extension);
+    q.bindValue(":hash", f.contentHash);
+    q.bindValue(":sym",  f.symbols);
+    q.bindValue(":sum",  f.summary);
+    q.bindValue(":sz",   f.sizeBytes);
+    q.bindValue(":fmod", f.fileModifiedAt.toString(Qt::ISODate));
+    if (!q.exec()) { logError("upsertFile", q.lastError()); return -1; }
+    emit fileIndexed(f.filePath);
+    return q.lastInsertId().toLongLong();
+}
+
+bool DatabaseManager::deleteFileIndex(const QString& filePath)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM indexed_files WHERE file_path=:path");
+    q.bindValue(":path", filePath);
+    if (!q.exec()) { logError("deleteFileIndex", q.lastError()); return false; }
+    return true;
+}
+
+static DbIndexedFile fileFromQuery(QSqlQuery& q)
+{
+    DbIndexedFile f;
+    f.id             = q.value("id").toLongLong();
+    f.filePath       = q.value("file_path").toString();
+    f.fileName       = q.value("file_name").toString();
+    f.extension      = q.value("extension").toString();
+    f.contentHash    = q.value("content_hash").toString();
+    f.symbols        = q.value("symbols").toString();
+    f.summary        = q.value("summary").toString();
+    f.sizeBytes      = q.value("size_bytes").toLongLong();
+    f.indexedAt      = QDateTime::fromString(q.value("indexed_at").toString(), Qt::ISODate);
+    f.fileModifiedAt = QDateTime::fromString(q.value("file_modified_at").toString(), Qt::ISODate);
+    return f;
+}
+
+std::optional<DbIndexedFile> DatabaseManager::getFileIndex(const QString& filePath)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM indexed_files WHERE file_path=:path");
+    q.bindValue(":path", filePath);
+    if (q.exec() && q.next()) return fileFromQuery(q);
+    return std::nullopt;
+}
+
+QList<DbIndexedFile> DatabaseManager::getIndexedFiles(const QString& ext)
+{
+    QList<DbIndexedFile> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    if (ext.isEmpty()) {
+        q.exec("SELECT * FROM indexed_files ORDER BY file_path");
+    } else {
+        q.prepare("SELECT * FROM indexed_files WHERE extension=:ext ORDER BY file_path");
+        q.bindValue(":ext", ext);
+        q.exec();
+    }
+    while (q.next()) res.append(fileFromQuery(q));
+    return res;
+}
+
+QList<QString> DatabaseManager::getStaleFiles(const QStringList& allPaths)
+{
+    QList<QString> stale;
+    auto db = connection();
+    for (const QString& path : allPaths) {
+        QFileInfo fi(path);
+        if (!fi.exists()) continue;
+        QSqlQuery q(db);
+        q.prepare("SELECT file_modified_at FROM indexed_files WHERE file_path=:p");
+        q.bindValue(":p", path);
+        if (!q.exec() || !q.next()) { stale.append(path); continue; }
+        QDateTime dbMod = QDateTime::fromString(q.value(0).toString(), Qt::ISODate);
+        if (fi.lastModified() > dbMod) stale.append(path);
+    }
+    return stale;
+}
+
+bool DatabaseManager::clearFileIndex()
+{
+    return execQuery("DELETE FROM indexed_files");
+}
+
+int DatabaseManager::indexedFileCount()
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.exec("SELECT COUNT(*) FROM indexed_files");
+    if (q.next()) return q.value(0).toInt();
+    return 0;
+}
+
+// ============================================================
+//  behavior_patterns
+// ============================================================
+
+bool DatabaseManager::upsertPattern(const DbBehaviorPattern& p)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO behavior_patterns"
+              " (user_id,trigger,response,context,frequency,confidence,last_seen)"
+              " VALUES (:uid,:tr,:resp,:ctx,1,:conf,datetime('now'))"
+              " ON CONFLICT(user_id,trigger,response) DO UPDATE SET"
+              " frequency=frequency+1,"
+              " confidence=excluded.confidence,"
+              " context=excluded.context,"
+              " last_seen=excluded.last_seen");
+    q.bindValue(":uid",  p.userId);
+    q.bindValue(":tr",   p.trigger);
+    q.bindValue(":resp", p.response);
+    q.bindValue(":ctx",  p.context);
+    q.bindValue(":conf", static_cast<double>(p.confidence));
+    if (!q.exec()) { logError("upsertPattern", q.lastError()); return false; }
+    return true;
+}
+
+static DbBehaviorPattern patternFromQuery(QSqlQuery& q)
+{
+    DbBehaviorPattern p;
+    p.id         = q.value("id").toLongLong();
+    p.userId     = q.value("user_id").toLongLong();
+    p.trigger    = q.value("trigger").toString();
+    p.response   = q.value("response").toString();
+    p.context    = q.value("context").toString();
+    p.frequency  = q.value("frequency").toInt();
+    p.confidence = q.value("confidence").toFloat();
+    p.lastSeen   = QDateTime::fromString(q.value("last_seen").toString(), Qt::ISODate);
+    return p;
+}
+
+QList<DbBehaviorPattern> DatabaseManager::getTopPatterns(qint64 userId, int limit)
+{
+    QList<DbBehaviorPattern> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM behavior_patterns WHERE user_id=:uid"
+              " ORDER BY frequency DESC, confidence DESC LIMIT :lim");
+    q.bindValue(":uid", userId);
+    q.bindValue(":lim", limit);
+    if (q.exec()) while (q.next()) res.append(patternFromQuery(q));
+    return res;
+}
+
+QList<DbBehaviorPattern> DatabaseManager::findPatterns(qint64 userId, const QString& triggerHint)
+{
+    QList<DbBehaviorPattern> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM behavior_patterns WHERE user_id=:uid AND trigger LIKE :hint"
+              " ORDER BY frequency DESC LIMIT 20");
+    q.bindValue(":uid",  userId);
+    q.bindValue(":hint", QStringLiteral("%%1%").arg(triggerHint));
+    if (q.exec()) while (q.next()) res.append(patternFromQuery(q));
+    return res;
+}
+
+bool DatabaseManager::clearPatterns(qint64 userId)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM behavior_patterns WHERE user_id=:uid");
+    q.bindValue(":uid", userId);
+    if (!q.exec()) { logError("clearPatterns", q.lastError()); return false; }
+    return true;
+}

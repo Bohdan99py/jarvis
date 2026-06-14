@@ -1,0 +1,63 @@
+# ============================================================
+# .github/workflows/update_readme.yml
+# Автоматически обновляет "Что нового" в README.md
+# при каждом пуше в main ИЛИ при создании нового тега/релиза
+# ============================================================
+
+name: Update README Changelog
+
+on:
+  push:
+    branches: [ main ]
+    # Также при тегах — чтобы новый релиз сразу отобразился
+    tags:
+      - 'v*'
+  # Можно запустить вручную из UI GitHub Actions
+  workflow_dispatch:
+
+# Только одна job за раз чтобы не было race condition на README
+concurrency:
+  group: readme-update
+  cancel-in-progress: true
+
+jobs:
+  update-readme:
+    name: Update README Changelog
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # нужно для git push
+
+    steps:
+      # ── 1. Checkout с полной историей (нужен для git log) ──
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # полная история включая теги
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Python для скрипта ──────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── 3. Запускаем скрипт обновления ────────────────────
+      - name: Run changelog updater
+        run: python scripts/update_changelog.py
+
+      # ── 4. Проверяем что README изменился ─────────────────
+      - name: Check for changes
+        id: changes
+        run: |
+          git diff --quiet README.md && echo "changed=false" >> $GITHUB_OUTPUT || echo "changed=true" >> $GITHUB_OUTPUT
+
+      # ── 5. Коммитим и пушим обновлённый README ────────────
+      - name: Commit and push README
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: auto-update changelog [skip ci]"
+          git push

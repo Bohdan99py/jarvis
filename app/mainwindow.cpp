@@ -20,6 +20,7 @@
 #include "learned_commands.h"
 #include "screen_agent.h"
 #include "bug_reporter.h"
+#include "voice_input.h"
 #include <QDesktopServices>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -1776,8 +1777,21 @@ void MainWindow::buildUI()
     sendBtn->setFixedWidth(50);
     sendBtn->setToolTip(IS_EN ? QStringLiteral("Send (Enter)") : QStringLiteral("Отправить (Enter)"));
 
+    // Кнопка микрофона
+    m_micBtn = new QPushButton(QStringLiteral("🎤"), this);
+    m_micBtn->setObjectName(QStringLiteral("micBtn"));
+    m_micBtn->setFixedWidth(44);
+    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Whisper)") : QStringLiteral("Голосовой ввод (Whisper)"));
+    m_micBtn->setStyleSheet(
+        QStringLiteral("QPushButton#micBtn { background-color: #0d1f2d; color: #4a7a9b; "
+                       "border: 1px solid #1a3050; border-radius: 4px; font-size: 16px; } "
+                       "QPushButton#micBtn:hover { background-color: #0f2438; color: #00d4ff; } "
+                       "QPushButton#micBtn[active=true] { background-color: #1a0d0d; color: #ff4444; "
+                       "border-color: #ff2222; }"));
+
     inputBar->addWidget(m_attachBtn);
     inputBar->addWidget(m_input, 1);
+    inputBar->addWidget(m_micBtn);
     inputBar->addWidget(sendBtn);
     vbox->addLayout(inputBar);
 
@@ -1817,6 +1831,67 @@ void MainWindow::buildUI()
     connect(sendBtn, &QPushButton::clicked, this, &MainWindow::onSend);
     connect(m_input, &QLineEdit::returnPressed, this, &MainWindow::onSend);
     connect(kbBtn, &QPushButton::clicked, this, &MainWindow::toggleKeyboard);
+    connect(m_micBtn, &QPushButton::clicked, this, &MainWindow::onMicButtonClicked);
+
+    // ── Инициализация голосового ввода ────────────────────
+    m_voiceInput = new VoiceInput(this);
+
+    connect(m_voiceInput, &VoiceInput::ready,
+            this, &MainWindow::onVoiceReady);
+    connect(m_voiceInput, &VoiceInput::textRecognized,
+            this, &MainWindow::onVoiceText);
+    connect(m_voiceInput, &VoiceInput::wakeWordDetected,
+            this, &MainWindow::onWakeWord);
+    connect(m_voiceInput, &VoiceInput::whisperModeDetected,
+            this, &MainWindow::onWhisperMode);
+    connect(m_voiceInput, &VoiceInput::speechDetected, this, [this]() {
+        // Мигаем красным пока говорит пользователь
+        m_micBtn->setStyleSheet(
+            QStringLiteral("QPushButton#micBtn { background-color: #2a0d0d; color: #ff2222; "
+                           "border: 1px solid #ff2222; border-radius: 4px; font-size: 16px; }"));
+    });
+    connect(m_voiceInput, &VoiceInput::initError, this, [this](const QString& err) {
+        // initError теперь только для критических ошибок
+        // скачивание идёт автоматически через downloadModelIfNeeded
+        m_micBtn->setToolTip(err);
+        appendLog(Str::logSystem(), QStringLiteral("🎤 ") + err, Theme::LogColors::error);
+    });
+    connect(m_voiceInput, &VoiceInput::modelDownloadProgress, this, [this](int pct) {
+        m_micBtn->setEnabled(false);
+        m_micBtn->setText(QStringLiteral("⬇"));
+        m_micBtn->setToolTip(QStringLiteral("Downloading Whisper model... %1%").arg(pct));
+        m_status->setText(
+            IS_EN ? QStringLiteral("⬇ Downloading Whisper model %1%...").arg(pct)
+                  : QStringLiteral("⬇ Скачиваю модель Whisper %1%...").arg(pct));
+        if (pct == 0) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("⬇ Whisper model not found. Downloading (~1.5 GB)...")
+                      : QStringLiteral("⬇ Модель Whisper не найдена. Скачиваю (~1.5 ГБ)..."),
+                Theme::LogColors::system);
+        }
+    });
+    connect(m_voiceInput, &VoiceInput::modelDownloadFinished, this, [this](bool ok, const QString& err) {
+        if (ok) {
+            m_micBtn->setEnabled(true);
+            m_micBtn->setText(QStringLiteral("🎤"));
+            m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("✅ Whisper model downloaded. Voice input ready!")
+                      : QStringLiteral("✅ Модель Whisper скачана. Голосовой ввод готов!"),
+                Theme::LogColors::system);
+        } else {
+            m_micBtn->setEnabled(false);
+            m_micBtn->setText(QStringLiteral("🎤"));
+            m_micBtn->setToolTip(err);
+            appendLog(Str::logError(), err, Theme::LogColors::error);
+        }
+    });
+    connect(m_voiceInput, &VoiceInput::errorOccurred, this, [this](const QString& err) {
+        appendLog(Str::logError(), err, Theme::LogColors::error);
+    });
+
+    // Инициализируем Whisper (загружает модель в фоне)
+    m_voiceInput->initialize();
 
     connect(m_keyboard, &VirtualKeyboardWidget::charPressed, this, [this](const QString& ch) {
         m_input->insert(ch);
@@ -1957,4 +2032,95 @@ void MainWindow::handleVisualCommand(const QString& userText)
         m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
         m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result);
     });
+}
+
+// ============================================================
+// Голосовой ввод — слоты
+// ============================================================
+
+void MainWindow::onMicButtonClicked()
+{
+    if (!m_voiceInput) return;
+
+    if (!m_voiceActive) {
+        // Запускаем прослушивание
+        m_voiceInput->startListening();
+        m_voiceActive = true;
+        m_micBtn->setText(QStringLiteral("🔴"));
+        m_micBtn->setProperty("active", true);
+        m_micBtn->setToolTip(IS_EN ? QStringLiteral("Listening... (click to stop)")
+                                   : QStringLiteral("Слушаю... (нажми чтобы остановить)"));
+        m_micBtn->style()->unpolish(m_micBtn);
+        m_micBtn->style()->polish(m_micBtn);
+        m_status->setText(IS_EN ? QStringLiteral("🎤 Listening...")
+                                : QStringLiteral("🎤 Слушаю..."));
+        appendLog(Str::logJarvis(),
+                  IS_EN ? QStringLiteral("🎤 Voice input started. Say 'Jarvis' to activate.")
+                        : QStringLiteral("🎤 Голосовой ввод запущен. Скажите «Джарвис» для активации."),
+                  Theme::LogColors::system);
+    } else {
+        // Останавливаем
+        m_voiceInput->stopListening();
+        m_voiceActive = false;
+        m_micBtn->setText(QStringLiteral("🎤"));
+        m_micBtn->setProperty("active", false);
+        m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Whisper)")
+                                   : QStringLiteral("Голосовой ввод (Whisper)"));
+        m_micBtn->style()->unpolish(m_micBtn);
+        m_micBtn->style()->polish(m_micBtn);
+        m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+    }
+}
+
+void MainWindow::onVoiceReady()
+{
+    m_micBtn->setEnabled(true);
+    appendLog(Str::logSystem(),
+              IS_EN ? QStringLiteral("🎤 Whisper model loaded. Voice input ready.")
+                    : QStringLiteral("🎤 Модель Whisper загружена. Голосовой ввод готов."),
+              Theme::LogColors::system);
+}
+
+void MainWindow::onVoiceText(const QString& text, const QString& lang)
+{
+    // Сбрасываем цвет кнопки — запись закончена, идёт распознавание
+    m_micBtn->setStyleSheet(QString());
+    m_micBtn->style()->unpolish(m_micBtn);
+    m_micBtn->style()->polish(m_micBtn);
+
+    if (text.isEmpty()) return;
+
+    // Показываем распознанный текст в поле ввода и отправляем
+    const QString prefix = (lang == QStringLiteral("ru"))
+        ? QStringLiteral("🎤 ")
+        : QStringLiteral("🎤 ");
+
+    appendLog(QStringLiteral("🎤 Voice"),
+              QStringLiteral("[%1] %2").arg(lang.toUpper(), text),
+              QStringLiteral("#4a9a6a"));
+
+    m_input->setText(text);
+    // Автоматически отправляем голосовую команду
+    onSend();
+}
+
+void MainWindow::onWakeWord(const QString& word)
+{
+    appendLog(Str::logJarvis(),
+              QStringLiteral("👂 ") + (IS_EN ? QStringLiteral("Wake word: ") : QStringLiteral("Активация: ")) + word,
+              Theme::LogColors::system);
+    m_status->setText(IS_EN ? QStringLiteral("🎤 Speak now...")
+                            : QStringLiteral("🎤 Говорите..."));
+}
+
+void MainWindow::onWhisperMode(bool isWhisper)
+{
+    if (isWhisper) {
+        m_micBtn->setToolTip(IS_EN ? QStringLiteral("🤫 Whisper detected")
+                                   : QStringLiteral("🤫 Обнаружен шёпот"));
+        appendLog(Str::logSystem(),
+                  IS_EN ? QStringLiteral("🤫 Whisper detected — low volume mode active")
+                        : QStringLiteral("🤫 Обнаружен шёпот — режим тихого голоса"),
+                  Theme::LogColors::system);
+    }
 }

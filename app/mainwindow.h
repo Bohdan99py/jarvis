@@ -34,6 +34,7 @@ class QDropEvent;
 #include "languagedetector.h"
 #include "learned_commands.h"
 #include "screen_agent.h"
+#include "voice_input.h"
 
 class MainWindow : public QMainWindow
 {
@@ -70,6 +71,13 @@ private slots:
 
     // Самообучение: подтверждение выученной команды
     void onCommandLearned(const LearnedCommand& cmd);
+
+    // Голосовой ввод
+    void onMicButtonClicked();
+    void onVoiceReady();
+    void onVoiceText(const QString& text, const QString& lang);
+    void onWakeWord(const QString& word);
+    void onWhisperMode(bool isWhisper);
 
 private:
     void buildUI();
@@ -137,4 +145,9 @@ private:
     LearnedCommands*        m_learnedCmds  = nullptr;  // самообучение
     ScreenAgent*            m_screenAgent  = nullptr;  // зрение + клики
     QString                 m_lastUserInput;               // для самообучения
+
+    // Голосовой ввод
+    VoiceInput*             m_voiceInput   = nullptr;
+    QPushButton*            m_micBtn       = nullptr;
+    bool                    m_voiceActive  = false;
 };
