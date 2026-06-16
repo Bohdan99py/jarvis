@@ -1,17 +1,12 @@
 #pragma once
 // ============================================================
-// voice_input.h — J.A.R.V.I.S. голосовой ввод
+// voice_input.h — J.A.R.V.I.S. голосовой ввод (Vosk)
 //
-// Whisper.cpp нативная интеграция:
-//   - Модель medium (~1.5GB VRAM / CPU) — лучшее качество шёпота
-//   - VAD (Voice Activity Detection) на основе RMS энергии
-//   - Автоопределение языка RU/EN без переключения
-//   - Порог шёпота: -45 dB (стандартный голос ~-20 dB)
-//   - Wake word детектор (Джарвис / Jarvis)
-//
-// Зависимость: whisper.cpp (добавить в redist/whisper/)
-//   https://github.com/ggerganov/whisper.cpp
-//   Модель: redist/whisper/ggml-medium.bin
+// Vosk — офлайн ASR, работает без интернета и GPU.
+// При первом запуске автоматически скачивает всё необходимое:
+//   1. libvosk.dll  — runtime библиотека
+//   2. model-en/    — английская модель (~40MB, быстрый старт)
+//   3. model-ru/    — русская модель (~1.8GB, в фоне)
 // ============================================================
 
 #include <QObject>
@@ -22,51 +17,60 @@
 #include <QMediaDevices>
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <atomic>
-#include <vector>
-
-// Forward-declare whisper context только если whisper доступен
-#ifndef JARVIS_WHISPER_STUB
-struct whisper_context;
-#endif
-
-// ============================================================
-//  Настройки распознавания
-// ============================================================
 
 struct WhisperConfig {
-    // Путь к модели (ggml-medium.bin для лучшего распознавания шёпота)
-    QString modelPath     = QStringLiteral("redist/whisper/ggml-medium.bin");
-
-    // VAD — порог энергии звука (RMS)
-    // -50 dB ≈ тихий шёпот, -35 dB ≈ нормальный шёпот, -20 dB ≈ голос
-    float   silenceDbThreshold = -45.0f;   // всё тише этого = тишина
-    float   whisperDbThreshold = -38.0f;   // зона шёпота (доп. усиление)
-
-    // Длительность тишины после которой считаем речь законченной (мс)
+    QString modelPathRu  = QString();
+    QString modelPathEn  = QString();
+    float   silenceDbThreshold  = -45.0f;
     int     silenceAfterSpeechMs = 800;
-
-    // Максимальная длина записи (мс) — защита от бесконечной записи
     int     maxRecordingMs       = 15000;
-
-    // Минимальная длина фразы для отправки на распознавание (мс)
     int     minSpeechMs          = 200;
+    QString language    = QStringLiteral("auto");
+    QStringList wakeWords = { "джарвис", "jarvis", "джарви" };
+    int threads = 4;
+};
+using VoiceConfig = WhisperConfig;
 
-    // Язык: "auto" = определяется автоматически, "ru", "en"
-    QString language             = QStringLiteral("auto");
-
-    // Wake words (любое из списка активирует JARVIS)
-    QStringList wakeWords        = { "джарвис", "jarvis", "джарви" };
-
-    // Использовать GPU если доступен
-    bool    useGpu               = false;   // false = безопаснее для совместимости
-
-    // Количество потоков CPU для Whisper
-    int     threads              = 4;
+struct VoskSetupStatus {
+    bool dllReady     = false;
+    bool modelRuReady = false;
+    bool modelEnReady = false;
+    bool anyModelReady() const { return modelRuReady || modelEnReady; }
+    bool fullyReady()    const { return dllReady && anyModelReady(); }
 };
 
 // ============================================================
-//  VoiceRecorder — захват аудио (живёт в потоке UI)
+//  VoskDownloader — скачивание и распаковка
+// ============================================================
+
+class VoskDownloader : public QObject
+{
+    Q_OBJECT
+public:
+    explicit VoskDownloader(QObject* parent = nullptr);
+    void setupVosk(const QString& installDir);
+    static VoskSetupStatus checkStatus(const QString& installDir);
+
+signals:
+    void downloadStarted(const QString& component);
+    void downloadProgress(const QString& component, int percent, qint64 bytesTotal);
+    void extracting(const QString& component);
+    void componentReady(const QString& component);
+    void setupFinished(bool success, const QString& error);
+    void logMessage(const QString& message);
+
+private:
+    void downloadAndExtract(const QString& name, const QString& url,
+                            const QString& extractTo, const QString& stripPrefix);
+    bool extractZipPowerShell(const QString& zipPath, const QString& targetDir,
+                              const QString& stripPrefix);
+    QString m_installDir;
+};
+
+// ============================================================
+//  VoiceRecorder
 // ============================================================
 
 class VoiceRecorder : public QObject
@@ -75,17 +79,13 @@ class VoiceRecorder : public QObject
 public:
     explicit VoiceRecorder(QObject* parent = nullptr);
     ~VoiceRecorder() override;
-
-    bool    start(const WhisperConfig& config);
-    void    stop();
-    bool    isRecording() const { return m_recording.load(); }
+    bool start(const WhisperConfig& config);
+    void stop();
+    bool isRecording() const { return m_recording.load(); }
 
 signals:
-    // Новая порция аудио-данных (PCM float32, 16kHz, mono)
     void audioChunkReady(QByteArray pcmData);
-    // Пользователь начал говорить
     void speechStarted();
-    // Пользователь замолчал — готово к распознаванию
     void speechEnded(QByteArray fullPcmData);
     void error(const QString& message);
 
@@ -94,56 +94,50 @@ private slots:
     void onSilenceTimeout();
 
 private:
-    float   computeRmsDb(const QByteArray& data) const;
-    QByteArray convertToFloat32_16kHz(const QByteArray& int16_44khz) const;
-
-    QAudioSource*    m_audioSource    = nullptr;
-    QIODevice*       m_audioDevice    = nullptr;
-    QTimer*          m_silenceTimer   = nullptr;
-
-    QByteArray       m_currentBuffer;   // накопленный PCM текущей фразы
-    bool             m_speaking        = false;
-    std::atomic<bool> m_recording      {false};
-
-    WhisperConfig    m_config;
-    QAudioFormat     m_format;
+    float      computeRmsDb(const QByteArray& data) const;
+    QByteArray downsample44to16(const QByteArray& src) const;
+    QAudioSource*     m_audioSource  = nullptr;
+    QIODevice*        m_audioDevice  = nullptr;
+    QTimer*           m_silenceTimer = nullptr;
+    QByteArray        m_currentBuffer;
+    bool              m_speaking     = false;
+    std::atomic<bool> m_recording    {false};
+    WhisperConfig     m_config;
+    QAudioFormat      m_format;
 };
 
 // ============================================================
-//  WhisperWorker — распознавание (отдельный поток)
+//  VoskWorker
 // ============================================================
 
-class WhisperWorker : public QObject
+class VoskWorker : public QObject
 {
     Q_OBJECT
 public:
-    explicit WhisperWorker(QObject* parent = nullptr);
-    ~WhisperWorker() override;
+    explicit VoskWorker(QObject* parent = nullptr);
+    ~VoskWorker() override;
 
 public slots:
-    void loadModel(const QString& modelPath, int threads, bool useGpu);
-    void transcribe(QByteArray pcmData, QString language);
+    void loadModels(const QString& modelPathRu, const QString& modelPathEn, int threads);
+    void recognize(QByteArray pcmData, QString preferredLang);
 
 signals:
-    void modelLoaded(bool success, const QString& error);
-    // Результат распознавания
-    void transcribed(const QString& text, const QString& detectedLanguage,
-                     float confidence, bool isWhisper);
+    void modelsLoaded(bool success, const QString& error);
+    void recognized(const QString& text, const QString& detectedLanguage, bool isWhisper);
     void error(const QString& message);
 
 private:
-    bool isWakeWord(const QString& text, const QStringList& wakeWords) const;
-
-#ifndef JARVIS_WHISPER_STUB
-    whisper_context* m_ctx     = nullptr;
-#else
-    void*            m_ctx     = nullptr;
-#endif
-    bool             m_loaded  = false;
+    QString tryRecognize(void* recognizer, const QByteArray& pcmData) const;
+    bool    isWhisperLevel(const QByteArray& pcmData) const;
+    void* m_modelRu = nullptr;
+    void* m_modelEn = nullptr;
+    void* m_recoRu  = nullptr;
+    void* m_recoEn  = nullptr;
+    bool  m_loaded  = false;
 };
 
 // ============================================================
-//  VoiceInput — главный контроллер (живёт в UI потоке)
+//  VoiceInput — главный контроллер
 // ============================================================
 
 class VoiceInput : public QObject
@@ -153,77 +147,55 @@ public:
     explicit VoiceInput(QObject* parent = nullptr);
     ~VoiceInput() override;
 
-    // Инициализация — вызвать один раз при старте
     void initialize(const WhisperConfig& config = WhisperConfig{});
-
-    // Запуск / остановка прослушивания
     void startListening();
     void stopListening();
     bool isListening() const;
-
-    // Установить конфигурацию (можно менять на лету)
     void setConfig(const WhisperConfig& config);
     const WhisperConfig& config() const { return m_config; }
 
-    // Проверить наличие модели
-    static bool isModelAvailable(const QString& modelPath
-                                 = QStringLiteral("redist/whisper/ggml-medium.bin"));
-    static QString defaultModelPath();
-
-    // Автоматически скачать модель если её нет
-    void downloadModelIfNeeded();
+    static VoskSetupStatus checkSetupStatus();
+    static QString voskInstallDir();
 
 signals:
-    // Модель загружена и готова
     void ready();
-    // Ошибка инициализации
     void initError(const QString& message);
-
-    // JARVIS начал слушать (сработал wake word или нажата кнопка)
     void listeningStarted();
-    // Пользователь начал говорить
     void speechDetected();
-
-    // Финальный результат — текст для обработки Brain'ом
     void textRecognized(const QString& text, const QString& language);
-
-    // Wake word обнаружен
     void wakeWordDetected(const QString& word);
-
-    // Режим шёпота (для UI — показать иконку 🤫)
     void whisperModeDetected(bool isWhisper);
-
-    // Автоскачивание модели
-    void modelDownloadProgress(int percent);
-    void modelDownloadFinished(bool success, const QString& error);
-
     void errorOccurred(const QString& message);
 
-    // внутренние сигналы для передачи в потоки
-    void requestLoadModel(const QString& path, int threads, bool gpu);
-    void requestTranscribe(QByteArray pcmData, QString language);
+    // Прогресс установки Vosk
+    void setupRequired();
+    void setupProgress(const QString& component, int percent, qint64 bytesTotal);
+    void setupComponentReady(const QString& component);
+    void setupFinished(bool success, const QString& error);
+    void setupLogMessage(const QString& message);
+
+    void requestLoadModels(const QString& pathRu, const QString& pathEn, int threads);
+    void requestRecognize(QByteArray pcmData, QString lang);
 
 private slots:
-    void onModelLoaded(bool success, const QString& error);
+    void onModelsLoaded(bool success, const QString& error);
     void onSpeechEnded(QByteArray pcmData);
-    void onTranscribed(const QString& text, const QString& lang,
-                       float confidence, bool isWhisper);
+    void onRecognized(const QString& text, const QString& lang, bool isWhisper);
     void onRecorderError(const QString& message);
+    void onSetupFinished(bool success, const QString& error);
 
 private:
-    WhisperConfig  m_config;
+    void startSetup();
+    void loadModelsFromDisk();
+    static QString resolveModelPath(const QString& subdir);
 
-    QThread*       m_whisperThread = nullptr;
-    WhisperWorker* m_worker        = nullptr;
-
-    VoiceRecorder* m_recorder      = nullptr;
-
-    bool           m_initialized   = false;
-    bool           m_listening     = false;
-    bool           m_wakeWordMode  = true;
-    bool           m_downloading   = false;
-
-    // Резолвит абсолютный путь к модели
-    // Ищет рядом с exe, потом в AppData, потом в redist/whisper/
-    static QString resolveModelPath(const QString& hint = QString());
+    WhisperConfig   m_config;
+    QThread*        m_thread         = nullptr;
+    VoskWorker*     m_worker         = nullptr;
+    VoiceRecorder*  m_recorder       = nullptr;
+    QThread*        m_setupThread    = nullptr;
+    VoskDownloader* m_downloader     = nullptr;
+    bool m_initialized  = false;
+    bool m_listening    = false;
+    bool m_wakeWordMode = true;
 };

@@ -35,6 +35,7 @@ class QDropEvent;
 #include "learned_commands.h"
 #include "screen_agent.h"
 #include "voice_input.h"
+#include "passive_listener.h"
 
 class MainWindow : public QMainWindow
 {
@@ -78,6 +79,10 @@ private slots:
     void onVoiceText(const QString& text, const QString& lang);
     void onWakeWord(const QString& word);
     void onWhisperMode(bool isWhisper);
+
+    // Fine-tuning: лайк и экспорт
+    void onLikeLastResponse();
+    void onExportTrainingData();
 
 private:
     void buildUI();
@@ -150,4 +155,15 @@ private:
     VoiceInput*             m_voiceInput   = nullptr;
     QPushButton*            m_micBtn       = nullptr;
     bool                    m_voiceActive  = false;
+
+    // Fine-tuning: лайк последнего ответа
+    QPushButton*            m_likeBtn      = nullptr;
+    QString                 m_lastAiResponse;   // последний ответ AI для сохранения
+    QString                 m_lastAiModel;      // модель которая ответила
+    QString                 m_lastSessionId;    // сессия
+    int                     m_trainingCount = 0; // счётчик лайков в этой сессии
+
+    // Пассивная запись голоса → датасет
+    PassiveListener*        m_passiveListener = nullptr;
+    QAction*                m_passiveAction   = nullptr;  // пункт меню вкл/выкл
 };

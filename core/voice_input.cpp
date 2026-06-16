@@ -1,18 +1,16 @@
 // ============================================================
-// voice_input.cpp — J.A.R.V.I.S. голосовой ввод (Whisper.cpp)
+// voice_input.cpp — J.A.R.V.I.S. голосовой ввод (Vosk)
+// Автоматическая установка: DLL + модели при первом запуске
 // ============================================================
 #include "voice_input.h"
 
-// whisper.cpp — заголовок в include/ (новая структура) или корне (старая)
-// CMakeLists добавляет правильный include path автоматически
-#ifndef JARVIS_WHISPER_STUB
-#include "whisper.h"
+#ifdef JARVIS_VOSK_AVAILABLE
+#include "vosk_api.h"
 #endif
 
 #include <QAudioSource>
 #include <QMediaDevices>
 #include <QAudioDevice>
-#include <QDebug>
 #include <QFile>
 #include <QDir>
 #include <QCoreApplication>
@@ -20,8 +18,239 @@
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTemporaryFile>
+#include <QDebug>
 #include <cmath>
-#include <cstring>
+
+// ============================================================
+//  URLs для скачивания
+// ============================================================
+
+// Vosk SDK для Windows x64 — содержит libvosk.dll + libvosk.lib + vosk_api.h
+static const QString VOSK_DLL_URL =
+    QStringLiteral("https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip");
+
+// Модели
+static const QString VOSK_MODEL_EN_URL =
+    QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip");
+static const QString VOSK_MODEL_RU_URL =
+    QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip");
+
+// Имена папок внутри ZIP (для strip prefix при распаковке)
+static const QString VOSK_MODEL_EN_PREFIX = QStringLiteral("vosk-model-small-en-us-0.15");
+static const QString VOSK_MODEL_RU_PREFIX = QStringLiteral("vosk-model-ru-0.42");
+static const QString VOSK_DLL_PREFIX      = QStringLiteral("vosk-win64-0.3.45");
+
+// ============================================================
+//  VoskSetupStatus — проверка установки
+// ============================================================
+
+VoskSetupStatus VoskDownloader::checkStatus(const QString& installDir)
+{
+    VoskSetupStatus s;
+    s.dllReady     = QFile::exists(installDir + QStringLiteral("/libvosk.dll"));
+    s.modelRuReady = QDir(installDir + QStringLiteral("/model-ru")).exists()
+                  && QFile::exists(installDir + QStringLiteral("/model-ru/am/final.mdl"));
+    s.modelEnReady = QDir(installDir + QStringLiteral("/model-en")).exists()
+                  && QFile::exists(installDir + QStringLiteral("/model-en/am/final.mdl"));
+    return s;
+}
+
+// ============================================================
+//  VoskDownloader
+// ============================================================
+
+VoskDownloader::VoskDownloader(QObject* parent) : QObject(parent) {}
+
+void VoskDownloader::setupVosk(const QString& installDir)
+{
+    m_installDir = installDir;
+    QDir().mkpath(installDir);
+
+    auto status = checkStatus(installDir);
+
+    emit logMessage(QStringLiteral("🔍 Checking Vosk installation in: %1").arg(installDir));
+
+    // Скачиваем DLL если нет
+    if (!status.dllReady) {
+        emit logMessage(QStringLiteral("📥 Downloading Vosk runtime (libvosk.dll)..."));
+        downloadAndExtract(
+            QStringLiteral("dll"),
+            VOSK_DLL_URL,
+            installDir,
+            VOSK_DLL_PREFIX
+        );
+        // Перепроверяем
+        status = checkStatus(installDir);
+        if (!status.dllReady) {
+            emit setupFinished(false,
+                QStringLiteral("Failed to install libvosk.dll.\n"
+                               "Manual install: https://github.com/alphacep/vosk-api/releases"));
+            return;
+        }
+    } else {
+        emit logMessage(QStringLiteral("✅ libvosk.dll — already installed"));
+        emit componentReady(QStringLiteral("dll"));
+    }
+
+    // Скачиваем EN модель первой (маленькая, быстрый старт)
+    if (!status.modelEnReady) {
+        emit logMessage(QStringLiteral("📥 Downloading English model (~40 MB)..."));
+        downloadAndExtract(
+            QStringLiteral("model-en"),
+            VOSK_MODEL_EN_URL,
+            installDir + QStringLiteral("/model-en"),
+            VOSK_MODEL_EN_PREFIX
+        );
+    } else {
+        emit logMessage(QStringLiteral("✅ English model — already installed"));
+        emit componentReady(QStringLiteral("model-en"));
+    }
+
+    // Скачиваем RU модель (большая)
+    status = checkStatus(installDir);
+    if (!status.modelRuReady) {
+        emit logMessage(QStringLiteral("📥 Downloading Russian model (~1.8 GB, please wait)..."));
+        downloadAndExtract(
+            QStringLiteral("model-ru"),
+            VOSK_MODEL_RU_URL,
+            installDir + QStringLiteral("/model-ru"),
+            VOSK_MODEL_RU_PREFIX
+        );
+    } else {
+        emit logMessage(QStringLiteral("✅ Russian model — already installed"));
+        emit componentReady(QStringLiteral("model-ru"));
+    }
+
+    status = checkStatus(installDir);
+    if (status.anyModelReady()) {
+        emit logMessage(QStringLiteral("🎉 Vosk setup complete! Voice input is ready."));
+        emit setupFinished(true, QString());
+    } else {
+        emit setupFinished(false,
+            QStringLiteral("No Vosk models could be installed.\n"
+                           "Check internet connection and try again."));
+    }
+}
+
+void VoskDownloader::downloadAndExtract(const QString& name,
+                                         const QString& url,
+                                         const QString& extractTo,
+                                         const QString& stripPrefix)
+{
+    emit downloadStarted(name);
+
+    // Временный файл для ZIP
+    QString tempPath = QDir::tempPath() + QStringLiteral("/jarvis_vosk_%1.zip").arg(name);
+
+    QNetworkAccessManager nam;
+    QUrl qurl(url);                          // без Most Vexing Parse
+    QNetworkRequest req(qurl);
+    // Qt6: RedirectPolicy задаётся через setTransferTimeout или напрямую
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QVariant::fromValue(QNetworkRequest::NoLessSafeRedirectPolicy));
+
+    QNetworkReply* reply = nam.get(req);
+
+    // Синхронное ожидание (мы в отдельном потоке)
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(reply, &QNetworkReply::downloadProgress,
+            this, [this, name](qint64 received, qint64 total) {
+        int pct = (total > 0) ? static_cast<int>(received * 100 / total) : 0;
+        emit downloadProgress(name, pct, total);
+    });
+    loop.exec();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        emit logMessage(QStringLiteral("❌ Download failed [%1]: %2")
+                        .arg(name, reply->errorString()));
+        reply->deleteLater();
+        return;
+    }
+
+    // Сохраняем ZIP
+    QFile zipFile(tempPath);
+    if (!zipFile.open(QIODevice::WriteOnly)) {
+        emit logMessage(QStringLiteral("❌ Cannot write temp file: %1").arg(tempPath));
+        reply->deleteLater();
+        return;
+    }
+    zipFile.write(reply->readAll());
+    zipFile.close();
+    reply->deleteLater();
+
+    emit logMessage(QStringLiteral("📦 Extracting %1...").arg(name));
+    emit extracting(name);
+
+    // Распаковываем через PowerShell
+    bool ok = extractZipPowerShell(tempPath, extractTo, stripPrefix);
+
+    QFile::remove(tempPath);
+
+    if (ok) {
+        emit logMessage(QStringLiteral("✅ %1 installed to: %2").arg(name, extractTo));
+        emit componentReady(name);
+    } else {
+        emit logMessage(QStringLiteral("❌ Extraction failed for: %1").arg(name));
+    }
+}
+
+bool VoskDownloader::extractZipPowerShell(const QString& zipPath,
+                                           const QString& targetDir,
+                                           const QString& stripPrefix)
+{
+    QDir().mkpath(targetDir);
+
+    // Используем PowerShell Expand-Archive (встроен в Windows 10+)
+    // stripPrefix — убираем верхнюю папку из архива
+    QString script;
+    if (stripPrefix.isEmpty()) {
+        script = QStringLiteral(
+            "Expand-Archive -Path '%1' -DestinationPath '%2' -Force"
+        ).arg(zipPath, targetDir);
+    } else {
+        // Распаковываем во временную папку, потом перемещаем содержимое
+        QString tempExtract = targetDir + QStringLiteral("_tmp_extract");
+        script = QStringLiteral(
+            "$tmp = '%1'; "
+            "Expand-Archive -Path '%2' -DestinationPath $tmp -Force; "
+            "$src = Join-Path $tmp '%3'; "
+            "if (Test-Path $src) { "
+            "  Get-ChildItem $src | Move-Item -Destination '%4' -Force; "
+            "  Remove-Item $tmp -Recurse -Force "
+            "} else { "
+            "  Get-ChildItem $tmp | Move-Item -Destination '%4' -Force; "
+            "  Remove-Item $tmp -Recurse -Force "
+            "}"
+        ).arg(tempExtract, zipPath, stripPrefix, targetDir);
+    }
+
+    QProcess ps;
+    ps.start(QStringLiteral("powershell.exe"),
+             { QStringLiteral("-NoProfile"),
+               QStringLiteral("-NonInteractive"),
+               QStringLiteral("-Command"),
+               script });
+
+    if (!ps.waitForStarted(5000)) {
+        qWarning() << "[Vosk] PowerShell not available";
+        return false;
+    }
+
+    ps.waitForFinished(300000);  // 5 минут максимум
+
+    if (ps.exitCode() != 0) {
+        qWarning() << "[Vosk] PowerShell extract error:"
+                   << ps.readAllStandardError();
+        return false;
+    }
+
+    return true;
+}
 
 // ============================================================
 //  VoiceRecorder
@@ -35,44 +264,35 @@ VoiceRecorder::VoiceRecorder(QObject* parent) : QObject(parent)
             this,           &VoiceRecorder::onSilenceTimeout);
 }
 
-VoiceRecorder::~VoiceRecorder()
-{
-    stop();
-}
+VoiceRecorder::~VoiceRecorder() { stop(); }
 
 bool VoiceRecorder::start(const WhisperConfig& config)
 {
     if (m_recording.load()) return true;
     m_config = config;
 
-    // Формат: 16-bit signed PCM, 16kHz, mono — именно то что ест Whisper
     m_format.setSampleRate(16000);
     m_format.setChannelCount(1);
     m_format.setSampleFormat(QAudioFormat::Int16);
 
-    // Ищем устройство ввода
     QAudioDevice inputDevice = QMediaDevices::defaultAudioInput();
     if (inputDevice.isNull()) {
         emit error(QStringLiteral("No audio input device found"));
         return false;
     }
 
-    // Проверяем поддержку формата, иначе fallback
     if (!inputDevice.isFormatSupported(m_format)) {
-        // Пробуем 44100 с конвертацией
         m_format.setSampleRate(44100);
         if (!inputDevice.isFormatSupported(m_format)) {
-            emit error(QStringLiteral("Audio format not supported by device"));
+            emit error(QStringLiteral("Audio format not supported"));
             return false;
         }
-        qDebug() << "[Voice] Using 44100Hz with downsampling to 16kHz";
     }
 
     m_audioSource = new QAudioSource(inputDevice, m_format, this);
-    // Маленький буфер = малая задержка обнаружения речи
     m_audioSource->setBufferSize(4096);
-
     m_audioDevice = m_audioSource->start();
+
     if (!m_audioDevice) {
         emit error(QStringLiteral("Failed to open audio device"));
         return false;
@@ -84,9 +304,7 @@ bool VoiceRecorder::start(const WhisperConfig& config)
     m_recording.store(true);
     m_speaking = false;
     m_currentBuffer.clear();
-
-    qDebug() << "[Voice] Recorder started. Device:" << inputDevice.description()
-             << "| Silence threshold:" << config.silenceDbThreshold << "dB";
+    qDebug() << "[Voice] Recorder started:" << inputDevice.description();
     return true;
 }
 
@@ -95,7 +313,6 @@ void VoiceRecorder::stop()
     if (!m_recording.load()) return;
     m_recording.store(false);
     m_silenceTimer->stop();
-
     if (m_audioSource) {
         m_audioSource->stop();
         m_audioSource->deleteLater();
@@ -104,42 +321,31 @@ void VoiceRecorder::stop()
     m_audioDevice = nullptr;
     m_currentBuffer.clear();
     m_speaking = false;
-    qDebug() << "[Voice] Recorder stopped";
 }
 
 void VoiceRecorder::onAudioDataReady()
 {
     if (!m_audioDevice || !m_recording.load()) return;
-
     QByteArray raw = m_audioDevice->readAll();
     if (raw.isEmpty()) return;
 
-    // Конвертируем если нужно (44100 → 16000 downsampling)
     QByteArray pcm16 = (m_format.sampleRate() == 16000)
-                       ? raw
-                       : convertToFloat32_16kHz(raw);
+                       ? raw : downsample44to16(raw);
+
+    emit audioChunkReady(pcm16);
 
     float db = computeRmsDb(pcm16);
-
     if (db > m_config.silenceDbThreshold) {
-        // Звук есть
         if (!m_speaking) {
             m_speaking = true;
             m_currentBuffer.clear();
             emit speechStarted();
-            qDebug() << "[Voice] Speech started, level:" << db << "dB"
-                     << (db < m_config.whisperDbThreshold ? "[WHISPER]" : "[VOICE]");
         }
         m_currentBuffer.append(pcm16);
         m_silenceTimer->start(m_config.silenceAfterSpeechMs);
-
-        // Защита от слишком долгой записи
-        int recordedMs = (m_currentBuffer.size() / 2) * 1000 / 16000;
-        if (recordedMs >= m_config.maxRecordingMs) {
-            onSilenceTimeout();
-        }
+        int ms = (m_currentBuffer.size() / 2) * 1000 / 16000;
+        if (ms >= m_config.maxRecordingMs) onSilenceTimeout();
     } else if (m_speaking) {
-        // Добиваем буфер тишиной чтобы Whisper не обрезал конец
         m_currentBuffer.append(pcm16);
     }
 }
@@ -147,382 +353,334 @@ void VoiceRecorder::onAudioDataReady()
 void VoiceRecorder::onSilenceTimeout()
 {
     if (!m_speaking) return;
-
-    int durationMs = (m_currentBuffer.size() / 2) * 1000 / 16000;
-    if (durationMs < m_config.minSpeechMs) {
-        // Слишком короткий звук — шум, игнорируем
-        qDebug() << "[Voice] Too short (" << durationMs << "ms), ignoring";
+    int ms = (m_currentBuffer.size() / 2) * 1000 / 16000;
+    if (ms < m_config.minSpeechMs) {
         m_currentBuffer.clear();
         m_speaking = false;
         return;
     }
-
-    qDebug() << "[Voice] Speech ended, duration:" << durationMs << "ms,"
-             << "buffer:" << m_currentBuffer.size() << "bytes";
-
     emit speechEnded(m_currentBuffer);
     m_currentBuffer.clear();
     m_speaking = false;
 }
 
-// ── Вычисление RMS уровня в dB ───────────────────────────────
-
 float VoiceRecorder::computeRmsDb(const QByteArray& data) const
 {
     if (data.size() < 2) return -100.0f;
-
-    const int16_t* samples = reinterpret_cast<const int16_t*>(data.constData());
-    int count = data.size() / 2;
-
+    const int16_t* s = reinterpret_cast<const int16_t*>(data.constData());
+    int n = data.size() / 2;
     double sum = 0.0;
-    for (int i = 0; i < count; ++i) {
-        double s = static_cast<double>(samples[i]) / 32768.0;
-        sum += s * s;
-    }
-    double rms = std::sqrt(sum / count);
-    if (rms < 1e-10) return -100.0f;
-    return static_cast<float>(20.0 * std::log10(rms));
+    for (int i = 0; i < n; ++i) { double v = s[i] / 32768.0; sum += v * v; }
+    double rms = std::sqrt(sum / n);
+    return (rms < 1e-10) ? -100.0f : static_cast<float>(20.0 * std::log10(rms));
 }
 
-// ── Простой downsampler 44100 → 16000 ────────────────────────
-// (линейная интерполяция, достаточно для голоса)
-
-QByteArray VoiceRecorder::convertToFloat32_16kHz(const QByteArray& src) const
+QByteArray VoiceRecorder::downsample44to16(const QByteArray& src) const
 {
-    const int16_t* in    = reinterpret_cast<const int16_t*>(src.constData());
-    int inCount          = src.size() / 2;
-    int outCount         = static_cast<int>(inCount * 16000.0 / 44100.0);
-
-    QByteArray out(outCount * 2, '\0');
-    int16_t* outPtr = reinterpret_cast<int16_t*>(out.data());
-
-    for (int i = 0; i < outCount; ++i) {
-        float srcIdx = i * 44100.0f / 16000.0f;
-        int   idx0   = static_cast<int>(srcIdx);
-        int   idx1   = qMin(idx0 + 1, inCount - 1);
-        float frac   = srcIdx - idx0;
-        outPtr[i] = static_cast<int16_t>(
-            in[idx0] * (1.0f - frac) + in[idx1] * frac);
+    const int16_t* in = reinterpret_cast<const int16_t*>(src.constData());
+    int inN  = src.size() / 2;
+    int outN = static_cast<int>(inN * 16000.0 / 44100.0);
+    QByteArray out(outN * 2, '\0');
+    int16_t* o = reinterpret_cast<int16_t*>(out.data());
+    for (int i = 0; i < outN; ++i) {
+        float fi = i * 44100.0f / 16000.0f;
+        int i0 = static_cast<int>(fi), i1 = qMin(i0 + 1, inN - 1);
+        float f = fi - i0;
+        o[i] = static_cast<int16_t>(in[i0] * (1.0f - f) + in[i1] * f);
     }
     return out;
 }
 
 // ============================================================
-//  WhisperWorker
+//  VoskWorker
 // ============================================================
 
-WhisperWorker::WhisperWorker(QObject* parent) : QObject(parent) {}
+VoskWorker::VoskWorker(QObject* parent) : QObject(parent) {}
 
-WhisperWorker::~WhisperWorker()
+VoskWorker::~VoskWorker()
 {
-#ifndef JARVIS_WHISPER_STUB
-    if (m_ctx) {
-        whisper_free(m_ctx);
-        m_ctx = nullptr;
-    }
+#ifdef JARVIS_VOSK_AVAILABLE
+    if (m_recoRu) vosk_recognizer_free(static_cast<VoskRecognizer*>(m_recoRu));
+    if (m_recoEn) vosk_recognizer_free(static_cast<VoskRecognizer*>(m_recoEn));
+    if (m_modelRu) vosk_model_free(static_cast<VoskModel*>(m_modelRu));
+    if (m_modelEn) vosk_model_free(static_cast<VoskModel*>(m_modelEn));
 #endif
 }
 
-void WhisperWorker::loadModel(const QString& modelPath, int threads, bool useGpu)
+void VoskWorker::loadModels(const QString& modelPathRu,
+                             const QString& modelPathEn,
+                             int threads)
 {
-#ifdef JARVIS_WHISPER_STUB
-    Q_UNUSED(modelPath) Q_UNUSED(threads) Q_UNUSED(useGpu)
-    emit modelLoaded(false, QStringLiteral("Whisper stub — model not compiled in"));
-    return;
+    if (m_loaded) { emit modelsLoaded(true, QString()); return; }
+
+#ifdef JARVIS_VOSK_AVAILABLE
+    vosk_set_log_level(-1);
+    bool any = false;
+
+    if (QDir(modelPathRu).exists()) {
+        m_modelRu = vosk_model_new(modelPathRu.toUtf8().constData());
+        if (m_modelRu) {
+            m_recoRu = vosk_recognizer_new(
+                static_cast<VoskModel*>(m_modelRu), 16000.0f);
+            if (m_recoRu) {
+                vosk_recognizer_set_words(static_cast<VoskRecognizer*>(m_recoRu), 1);
+                any = true;
+                qDebug() << "[Vosk] RU model loaded";
+            }
+        }
+    }
+    if (QDir(modelPathEn).exists()) {
+        m_modelEn = vosk_model_new(modelPathEn.toUtf8().constData());
+        if (m_modelEn) {
+            m_recoEn = vosk_recognizer_new(
+                static_cast<VoskModel*>(m_modelEn), 16000.0f);
+            if (m_recoEn) {
+                vosk_recognizer_set_words(static_cast<VoskRecognizer*>(m_recoEn), 1);
+                any = true;
+                qDebug() << "[Vosk] EN model loaded";
+            }
+        }
+    }
+    Q_UNUSED(threads)
+    m_loaded = any;
+    emit modelsLoaded(any, any ? QString()
+        : QStringLiteral("Failed to load any Vosk model"));
 #else
-    if (m_loaded) { emit modelLoaded(true, QString()); return; }
-
-    if (!QFile::exists(modelPath)) {
-        emit modelLoaded(false, QStringLiteral(
-            "Whisper model not found: %1\n"
-            "Download: https://huggingface.co/ggerganov/whisper.cpp\n"
-            "Place to: redist/whisper/ggml-medium.bin").arg(modelPath));
-        return;
-    }
-
-    qDebug() << "[Whisper] Loading model:" << modelPath;
-
-    whisper_context_params cparams = whisper_context_default_params();
-    cparams.use_gpu = useGpu;
-
-    m_ctx = whisper_init_from_file_with_params(
-        modelPath.toUtf8().constData(), cparams);
-
-    if (!m_ctx) {
-        emit modelLoaded(false, QStringLiteral("Failed to load Whisper model"));
-        return;
-    }
-
-    m_loaded = true;
-    qDebug() << "[Whisper] Model loaded. Threads:" << threads << "| GPU:" << useGpu;
-    emit modelLoaded(true, QString());
+    Q_UNUSED(modelPathRu) Q_UNUSED(modelPathEn) Q_UNUSED(threads)
+    emit modelsLoaded(false, QStringLiteral("Vosk stub build"));
 #endif
 }
 
-void WhisperWorker::transcribe(QByteArray pcmData, QString language)
+void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
 {
-#ifdef JARVIS_WHISPER_STUB
-    Q_UNUSED(pcmData) Q_UNUSED(language)
-    emit error(QStringLiteral("Whisper not available (stub build)"));
-    return;
+#ifdef JARVIS_VOSK_AVAILABLE
+    if (!m_loaded) { emit error(QStringLiteral("Models not loaded")); return; }
+
+    bool whisper = isWhisperLevel(pcmData);
+
+    auto tryReco = [&](void* reco) -> QString {
+        if (!reco) return {};
+        auto* r = static_cast<VoskRecognizer*>(reco);
+        vosk_recognizer_reset(r);
+        vosk_recognizer_accept_waveform(r, pcmData.constData(), pcmData.size());
+        const char* j = vosk_recognizer_final_result(r);
+        if (!j) return {};
+        QJsonDocument d = QJsonDocument::fromJson(QByteArray(j));
+        return d.isObject()
+            ? d.object().value(QStringLiteral("text")).toString().trimmed()
+            : QString();
+    };
+
+    QString ru = tryReco(m_recoRu);
+    QString en = tryReco(m_recoEn);
+
+    QString text, lang;
+    if (preferredLang == "ru" || preferredLang == "auto") {
+        if (!ru.isEmpty()) { text = ru; lang = "ru"; }
+        else if (!en.isEmpty()) { text = en; lang = "en"; }
+    } else {
+        if (!en.isEmpty()) { text = en; lang = "en"; }
+        else if (!ru.isEmpty()) { text = ru; lang = "ru"; }
+    }
+
+    text = text.simplified().trimmed();
+    if (text.isEmpty()) return;
+
+    qDebug() << "[Vosk] [" << lang << "]:" << text << (whisper ? "[WHISPER]" : "");
+    emit recognized(text, lang, whisper);
 #else
-    if (!m_loaded || !m_ctx) {
-        emit error(QStringLiteral("Whisper model not loaded"));
-        return;
-    }
-
-    int sampleCount = pcmData.size() / 2;
-    std::vector<float> samples(sampleCount);
-    const int16_t* raw = reinterpret_cast<const int16_t*>(pcmData.constData());
-    for (int i = 0; i < sampleCount; ++i)
-        samples[i] = raw[i] / 32768.0f;
-
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-
-    bool autoLang = (language == "auto" || language.isEmpty());
-    params.language        = autoLang ? nullptr : language.toUtf8().constData();
-    params.detect_language = autoLang;
-    params.temperature         = 0.0f;
-    params.temperature_inc     = 0.1f;
-    params.no_speech_thold     = 0.4f;
-    params.logprob_thold       = -1.2f;
-    params.print_timestamps    = false;
-    params.print_progress      = false;
-    params.print_special       = false;
-    params.print_realtime      = false;
-    params.n_threads           = 4;
-
-    int ret = whisper_full(m_ctx, params, samples.data(), static_cast<int>(samples.size()));
-    if (ret != 0) {
-        emit error(QStringLiteral("Whisper inference failed (code %1)").arg(ret));
-        return;
-    }
-
-    QString result;
-    int segCount = whisper_full_n_segments(m_ctx);
-    for (int i = 0; i < segCount; ++i)
-        result += QString::fromUtf8(whisper_full_get_segment_text(m_ctx, i));
-    result = result.simplified().trimmed();
-
-    // В новом whisper.cpp API язык определяется через whisper_full_lang_id()
-    QString detectedLang = language;
-    if (autoLang) {
-        int langId = whisper_full_lang_id(m_ctx);
-        if (langId >= 0)
-            detectedLang = QString::fromUtf8(whisper_lang_str(langId));
-    }
-
-    float confidence = 0.0f;
-    if (segCount > 0) {
-        for (int i = 0; i < segCount; ++i)
-            confidence += (1.0f - whisper_full_get_segment_no_speech_prob(m_ctx, i));
-        confidence /= segCount;
-    }
-
-    bool isWhisperMode = (confidence < 0.75f && !result.isEmpty());
-
-    qDebug() << "[Whisper] Result:" << result
-             << "| Lang:" << detectedLang
-             << "| Confidence:" << confidence
-             << (isWhisperMode ? "[WHISPER]" : "");
-
-    if (!result.isEmpty())
-        emit transcribed(result, detectedLang, confidence, isWhisperMode);
+    Q_UNUSED(pcmData) Q_UNUSED(preferredLang)
+    emit error(QStringLiteral("Vosk not available"));
 #endif
+}
+
+QString VoskWorker::tryRecognize(void* recognizer, const QByteArray& pcmData) const
+{
+#ifdef JARVIS_VOSK_AVAILABLE
+    auto* r = static_cast<VoskRecognizer*>(recognizer);
+    vosk_recognizer_reset(r);
+    vosk_recognizer_accept_waveform(r, pcmData.constData(), pcmData.size());
+    const char* j = vosk_recognizer_final_result(r);
+    if (!j) return {};
+    QJsonDocument d = QJsonDocument::fromJson(QByteArray(j));
+    return d.isObject()
+        ? d.object().value(QStringLiteral("text")).toString().trimmed()
+        : QString();
+#else
+    Q_UNUSED(recognizer) Q_UNUSED(pcmData) return {};
+#endif
+}
+
+bool VoskWorker::isWhisperLevel(const QByteArray& data) const
+{
+    if (data.size() < 2) return false;
+    const int16_t* s = reinterpret_cast<const int16_t*>(data.constData());
+    int n = data.size() / 2;
+    double sum = 0.0;
+    for (int i = 0; i < n; ++i) { double v = s[i] / 32768.0; sum += v * v; }
+    double rms = std::sqrt(sum / n);
+    if (rms < 1e-10) return false;
+    return (20.0 * std::log10(rms)) < -35.0;
 }
 
 // ============================================================
-//  VoiceInput — главный контроллер
+//  VoiceInput
 // ============================================================
 
 VoiceInput::VoiceInput(QObject* parent) : QObject(parent)
 {
-    // Whisper в отдельном потоке — не блокирует UI
-    m_whisperThread = new QThread(this);
-    m_worker        = new WhisperWorker();
-    m_worker->moveToThread(m_whisperThread);
-
-    // Рекордер в главном потоке (Qt Audio требует event loop)
+    m_thread = new QThread(this);
+    m_worker = new VoskWorker();
+    m_worker->moveToThread(m_thread);
     m_recorder = new VoiceRecorder(this);
 
-    // Сигналы worker → контроллер
-    connect(m_worker,   &WhisperWorker::modelLoaded,
-            this,       &VoiceInput::onModelLoaded);
-    connect(m_worker,   &WhisperWorker::transcribed,
-            this,       &VoiceInput::onTranscribed);
-    connect(m_worker,   &WhisperWorker::error,
-            this,       &VoiceInput::errorOccurred);
-
-    // Сигналы рекордера → контроллер
-    connect(m_recorder, &VoiceRecorder::speechStarted,
-            this,       &VoiceInput::speechDetected);
-    connect(m_recorder, &VoiceRecorder::speechEnded,
-            this,       &VoiceInput::onSpeechEnded);
-    connect(m_recorder, &VoiceRecorder::error,
-            this,       &VoiceInput::onRecorderError);
-
-    // Управление worker через очередь (thread-safe)
-    connect(this,       &VoiceInput::requestLoadModel,
-            m_worker,   &WhisperWorker::loadModel,
+    connect(m_worker,   &VoskWorker::modelsLoaded, this, &VoiceInput::onModelsLoaded);
+    connect(m_worker,   &VoskWorker::recognized,   this, &VoiceInput::onRecognized);
+    connect(m_worker,   &VoskWorker::error,        this, &VoiceInput::errorOccurred);
+    connect(m_recorder, &VoiceRecorder::speechStarted, this, &VoiceInput::speechDetected);
+    connect(m_recorder, &VoiceRecorder::speechEnded,   this, &VoiceInput::onSpeechEnded);
+    connect(m_recorder, &VoiceRecorder::error,         this, &VoiceInput::onRecorderError);
+    connect(this, &VoiceInput::requestLoadModels, m_worker, &VoskWorker::loadModels,
             Qt::QueuedConnection);
-    connect(this,       &VoiceInput::requestTranscribe,
-            m_worker,   &WhisperWorker::transcribe,
+    connect(this, &VoiceInput::requestRecognize,  m_worker, &VoskWorker::recognize,
             Qt::QueuedConnection);
 
-    m_whisperThread->start(QThread::LowPriority);
+    m_thread->start(QThread::LowPriority);
 }
 
 VoiceInput::~VoiceInput()
 {
     stopListening();
-    m_whisperThread->quit();
-    m_whisperThread->wait(3000);
+    m_thread->quit();
+    m_thread->wait(3000);
     delete m_worker;
+    if (m_setupThread) {
+        m_setupThread->quit();
+        m_setupThread->wait(3000);
+        delete m_downloader;
+    }
 }
 
-// ============================================================
-//  Резолвинг пути к модели — ищем в нескольких местах
-// ============================================================
-
-QString VoiceInput::resolveModelPath(const QString& hint)
+QString VoiceInput::voskInstallDir()
 {
-    const QString modelName = QStringLiteral("ggml-medium.bin");
-
-    // Список мест где может лежать модель — от приоритетного к запасному
-    QStringList candidates;
-
-    // 1. Явно указанный путь
-    if (!hint.isEmpty()) candidates << hint;
-
-    // 2. Рядом с exe (для установленной версии через Inno Setup)
+    // 1. Рядом с exe (для установленной версии — windeployqt скопирует DLL)
     QString exeDir = QCoreApplication::applicationDirPath();
-    candidates << exeDir + QStringLiteral("/whisper/") + modelName;
-    candidates << exeDir + QStringLiteral("/redist/whisper/") + modelName;
+    if (QFile::exists(exeDir + QStringLiteral("/libvosk.dll")))
+        return exeDir;
 
-    // 3. AppData/Roaming/JARVIS/whisper/ (скачанная модель)
-    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    candidates << appData + QStringLiteral("/whisper/") + modelName;
+    // 2. AppData/JARVIS/vosk (скачанная версия)
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+           + QStringLiteral("/vosk");
+}
 
-    // 4. Путь разработчика (redist/whisper/ относительно CWD)
-    candidates << QStringLiteral("redist/whisper/") + modelName;
-
-    for (const QString& path : candidates) {
-        if (QFile::exists(path)) {
-            qDebug() << "[Voice] Model found at:" << path;
-            return path;
-        }
-    }
-
-    // Не нашли — возвращаем целевой путь для скачивания (AppData)
-    QDir().mkpath(appData + QStringLiteral("/whisper"));
-    return appData + QStringLiteral("/whisper/") + modelName;
+VoskSetupStatus VoiceInput::checkSetupStatus()
+{
+    return VoskDownloader::checkStatus(voskInstallDir());
 }
 
 void VoiceInput::initialize(const WhisperConfig& config)
 {
     m_config = config;
 
-    // Резолвим реальный путь к модели
-    QString modelPath = resolveModelPath(config.modelPath);
-    m_config.modelPath = modelPath;
+    auto status = checkSetupStatus();
 
-    if (QFile::exists(modelPath)) {
-        // Модель есть — сразу загружаем
-        qDebug() << "[Voice] Initializing Whisper, model:" << modelPath;
-        emit requestLoadModel(modelPath, config.threads, config.useGpu);
-    } else {
-        // Модели нет — скачиваем автоматически
-        qDebug() << "[Voice] Model not found, downloading...";
-        downloadModelIfNeeded();
-    }
-}
-
-void VoiceInput::downloadModelIfNeeded()
-{
-    if (m_downloading) return;
-    m_downloading = true;
-
-    const QString modelPath = m_config.modelPath;
-    const QString modelUrl  = QStringLiteral(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin");
-
-    qDebug() << "[Voice] Downloading model to:" << modelPath;
-    emit modelDownloadProgress(0);
-
-    auto* nam   = new QNetworkAccessManager(this);
-    auto* reply = nam->get(QNetworkRequest(QUrl(modelUrl)));
-
-    // Прогресс скачивания
-    connect(reply, &QNetworkReply::downloadProgress,
-            this, [this](qint64 received, qint64 total) {
-        if (total > 0) {
-            int pct = static_cast<int>(received * 100 / total);
-            emit modelDownloadProgress(pct);
-        }
-    });
-
-    // Завершение скачивания
-    connect(reply, &QNetworkReply::finished, this, [this, reply, modelPath, nam]() {
-        m_downloading = false;
-
-        if (reply->error() != QNetworkReply::NoError) {
-            QString err = QStringLiteral("Model download failed: ") + reply->errorString()
-                + QStringLiteral("\nDownload manually:\n")
-                + QStringLiteral("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin\n")
-                + QStringLiteral("Save to: ") + modelPath;
-            emit modelDownloadFinished(false, err);
-            emit initError(err);
-            reply->deleteLater();
-            nam->deleteLater();
-            return;
-        }
-
-        // Сохраняем файл
-        QFile f(modelPath);
-        if (f.open(QIODevice::WriteOnly)) {
-            f.write(reply->readAll());
-            f.close();
-            qDebug() << "[Voice] Model downloaded to:" << modelPath;
-            emit modelDownloadFinished(true, QString());
-            // Загружаем модель
-            emit requestLoadModel(modelPath, m_config.threads, m_config.useGpu);
-        } else {
-            QString err = QStringLiteral("Cannot save model to: ") + modelPath;
-            emit modelDownloadFinished(false, err);
-            emit initError(err);
-        }
-
-        reply->deleteLater();
-        nam->deleteLater();
-    });
-}
-
-void VoiceInput::onModelLoaded(bool success, const QString& err)
-{
-    if (!success) {
-        qWarning() << "[Voice] Model load failed:" << err;
-        emit initError(err);
+    if (!status.fullyReady()) {
+        qDebug() << "[Voice] Vosk not installed, starting setup...";
+        emit setupRequired();
+        startSetup();
         return;
     }
+
+    // Всё есть — загружаем модели
+    loadModelsFromDisk();
+}
+
+void VoiceInput::startSetup()
+{
+    QString installDir = voskInstallDir();
+
+    m_setupThread = new QThread(this);
+    m_downloader  = new VoskDownloader();
+    m_downloader->moveToThread(m_setupThread);
+
+    connect(m_downloader, &VoskDownloader::downloadStarted, this,
+            [this](const QString& c) {
+        emit setupLogMessage(QStringLiteral("⬇ Downloading: %1").arg(c));
+    });
+    connect(m_downloader, &VoskDownloader::downloadProgress, this,
+            [this](const QString& c, int pct, qint64 total) {
+        emit setupProgress(c, pct, total);
+    });
+    connect(m_downloader, &VoskDownloader::extracting, this,
+            [this](const QString& c) {
+        emit setupLogMessage(QStringLiteral("📦 Extracting: %1...").arg(c));
+    });
+    connect(m_downloader, &VoskDownloader::componentReady, this,
+            [this](const QString& c) {
+        emit setupComponentReady(c);
+    });
+    connect(m_downloader, &VoskDownloader::logMessage, this,
+            [this](const QString& msg) {
+        emit setupLogMessage(msg);
+    });
+    connect(m_downloader, &VoskDownloader::setupFinished,
+            this, &VoiceInput::onSetupFinished);
+
+    // Запускаем установку при старте потока
+    connect(m_setupThread, &QThread::started,
+            m_downloader,  [this, installDir]() {
+        m_downloader->setupVosk(installDir);
+    }, Qt::QueuedConnection);
+
+    m_setupThread->start(QThread::LowPriority);
+}
+
+void VoiceInput::onSetupFinished(bool success, const QString& error)
+{
+    m_setupThread->quit();
+
+    if (!success) {
+        emit setupFinished(false, error);
+        emit initError(error);
+        return;
+    }
+
+    emit setupFinished(true, QString());
+    // Загружаем модели которые только что скачали
+    loadModelsFromDisk();
+}
+
+void VoiceInput::loadModelsFromDisk()
+{
+    QString installDir = voskInstallDir();
+    QString pathRu = installDir + QStringLiteral("/model-ru");
+    QString pathEn = installDir + QStringLiteral("/model-en");
+
+    m_config.modelPathRu = pathRu;
+    m_config.modelPathEn = pathEn;
+
+    qDebug() << "[Voice] Loading models. RU:" << pathRu << "EN:" << pathEn;
+    emit requestLoadModels(pathRu, pathEn, m_config.threads);
+}
+
+void VoiceInput::onModelsLoaded(bool success, const QString& err)
+{
+    if (!success) { emit initError(err); return; }
     m_initialized = true;
-    qDebug() << "[Voice] Ready. Whisper model loaded.";
+    qDebug() << "[Voice] Vosk ready";
     emit ready();
 }
 
 void VoiceInput::startListening()
 {
     if (!m_initialized) {
-        emit errorOccurred(QStringLiteral("Voice input not initialized"));
+        emit errorOccurred(QStringLiteral("Voice input not ready yet"));
         return;
     }
     if (m_listening) return;
-
     if (!m_recorder->start(m_config)) return;
-
     m_listening = true;
     emit listeningStarted();
-    qDebug() << "[Voice] Listening started"
-             << (m_wakeWordMode ? "(wake word mode)" : "(always-on mode)");
 }
 
 void VoiceInput::stopListening()
@@ -530,7 +688,6 @@ void VoiceInput::stopListening()
     if (!m_listening) return;
     m_recorder->stop();
     m_listening = false;
-    qDebug() << "[Voice] Listening stopped";
 }
 
 bool VoiceInput::isListening() const
@@ -538,47 +695,32 @@ bool VoiceInput::isListening() const
     return m_listening && m_recorder->isRecording();
 }
 
-void VoiceInput::setConfig(const WhisperConfig& config)
-{
-    m_config = config;
-}
+void VoiceInput::setConfig(const WhisperConfig& config) { m_config = config; }
 
 void VoiceInput::onSpeechEnded(QByteArray pcmData)
 {
-    // Отправляем на распознавание в Whisper поток
-    emit requestTranscribe(pcmData, m_config.language);
+    emit requestRecognize(pcmData, m_config.language);
 }
 
-void VoiceInput::onTranscribed(const QString& text, const QString& lang,
-                                float confidence, bool isWhisper)
+void VoiceInput::onRecognized(const QString& text, const QString& lang, bool isWhisper)
 {
-    Q_UNUSED(confidence)
-
     if (text.isEmpty()) return;
-
     emit whisperModeDetected(isWhisper);
 
-    // Проверяем wake word если режим активации
     if (m_wakeWordMode) {
         QString lower = text.toLower();
         for (const QString& ww : m_config.wakeWords) {
             if (lower.contains(ww)) {
                 emit wakeWordDetected(ww);
-                // Убираем wake word из текста и отправляем остаток
                 QString cmd = lower;
                 cmd.remove(ww);
                 cmd = cmd.simplified();
-                if (!cmd.isEmpty())
-                    emit textRecognized(cmd, lang);
+                if (!cmd.isEmpty()) emit textRecognized(cmd, lang);
                 return;
             }
         }
-        // Wake word не найден — игнорируем (фоновый шум)
-        qDebug() << "[Voice] No wake word in:" << text;
         return;
     }
-
-    // Режим always-on — отправляем всё
     emit textRecognized(text, lang);
 }
 
@@ -587,16 +729,8 @@ void VoiceInput::onRecorderError(const QString& message)
     emit errorOccurred(message);
 }
 
-bool VoiceInput::isModelAvailable(const QString& modelPath)
+QString VoiceInput::resolveModelPath(const QString& subdir)
 {
-    if (!modelPath.isEmpty() && QFile::exists(modelPath))
-        return true;
-    // Проверяем все известные места
-    return !resolveModelPath(modelPath).isEmpty()
-           && QFile::exists(resolveModelPath(modelPath));
-}
-
-QString VoiceInput::defaultModelPath()
-{
-    return resolveModelPath();
+    QString installDir = voskInstallDir();
+    return installDir + QStringLiteral("/") + subdir;
 }

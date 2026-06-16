@@ -1,12 +1,14 @@
 #pragma once
 #include <QString>
-#include <QSet>
-#include <QMap>
 
 // Определяет язык текста и хранит текущий язык сессии.
 // Логика: если в тексте >= 2 кириллических символа → RU, иначе EN.
 // После каждого сообщения пользователя язык обновляется и сохраняется
 // для передачи в системный промпт Claude.
+//
+// ИСПРАВЛЕНИЕ: дефолт Unknown вместо Russian.
+// Если пользователь пишет на EN, а предыдущий язык был Russian — это
+// вызывало Claude отвечать по-русски на английские вопросы.
 class LanguageDetector {
 public:
     enum class Language { Russian, English, Unknown };
@@ -24,45 +26,56 @@ public:
         }
         if (cyrillicCount >= 2) return Language::Russian;
         if (latinCount    >= 2) return Language::English;
-        // Короткие/цифровые сообщения — возвращаем Unknown (не меняем текущий)
+        // Короткие/цифровые сообщения — Unknown (не меняем текущий)
         return Language::Unknown;
     }
 
     // Обновить текущий язык сессии на основе сообщения пользователя.
-    // Возвращает true если язык изменился.
+    // ВСЕГДА обновляем при явном обнаружении языка — не ждём "изменения".
+    // Это гарантирует что EN запрос после RU сразу даёт EN инструкцию.
     bool update(const QString &userMessage) {
         Language detected = detect(userMessage);
         if (detected == Language::Unknown) return false;
-        if (detected == m_current) return false;
+        bool changed = (detected != m_current);
         m_current = detected;
-        return true;
+        return changed;
     }
 
     Language current() const { return m_current; }
 
-    // Строка для системного промпта — указывает Claude на каком языке отвечать
+    // Строка для системного промпта — указывает Claude на каком языке отвечать.
+    // ИСПРАВЛЕНИЕ: при Unknown не форсируем русский — позволяем Claude
+    // самому выбрать язык ответа по контексту запроса.
     QString systemInstruction() const {
         switch (m_current) {
         case Language::Russian:
             return QStringLiteral(
-                "ВАЖНО: Пользователь пишет по-русски. "
-                "Отвечай ВСЕГДА на русском языке, даже если вопрос задан на английском. "
-                "Не переключайся на английский без явной просьбы.");
+                "IMPORTANT: The user is writing in Russian. "
+                "Always respond in Russian. "
+                "Do not switch to English unless explicitly asked.");
         case Language::English:
             return QStringLiteral(
-                "IMPORTANT: The user writes in English. "
-                "Always respond in English, even if asked in another language. "
+                "IMPORTANT: The user is writing in English. "
+                "Always respond in English. "
                 "Do not switch to Russian without explicit request.");
         default:
-            return {};
+            // Unknown: не форсируем язык — Claude отвечает на языке запроса
+            return QStringLiteral(
+                "Respond in the same language the user used in their message.");
         }
     }
 
     // Имя языка для отображения в UI
     QString languageName() const {
-        return m_current == Language::Russian ? QStringLiteral("RU") : QStringLiteral("EN");
+        switch (m_current) {
+        case Language::Russian: return QStringLiteral("RU");
+        case Language::English: return QStringLiteral("EN");
+        default:                return QStringLiteral("AUTO");
+        }
     }
 
 private:
-    Language m_current = Language::Russian; // дефолт — русский (аудитория проекта)
+    // ИСПРАВЛЕНИЕ: дефолт Unknown — не форсируем язык до первого сообщения.
+    // Раньше был Russian, что ломало ответы на английские запросы.
+    Language m_current = Language::Unknown;
 };

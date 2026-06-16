@@ -67,34 +67,34 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent Mul
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
 # ============================================================
-# whisper.cpp — локальная статическая сборка
-# Скачай: https://github.com/ggerganov/whisper.cpp
-# Распакуй в: redist/whisper/
-# Модель (ggml-medium.bin):
-#   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
-#   Положи в: redist/whisper/ggml-medium.bin
+# Vosk — офлайн распознавание речи (замена Whisper)
+# Скачай: https://alphacephei.com/vosk/install
+# Распакуй DLL в: redist/vosk/
+#
+# Структура:
+#   redist/vosk/libvosk.dll          — основная DLL
+#   redist/vosk/vosk_api.h           — заголовок
+#   redist/vosk/libvosk.lib          — import lib для MSVC
+#
+# Модели (папки):
+#   redist/vosk/model-ru/            — vosk-model-ru-0.42 (~1.8GB)
+#   redist/vosk/model-en/            — vosk-model-small-en-us-0.15 (~40MB)
+#
+# Скачать модели:
+#   https://alphacephei.com/vosk/models
 # ============================================================
 
-set(_whisper_root "${CMAKE_SOURCE_DIR}/redist/whisper")
+set(_vosk_dir "${CMAKE_SOURCE_DIR}/redist/vosk")
 
-if(EXISTS "${_whisper_root}/src/whisper.cpp")
-    # Отключаем всё лишнее из whisper.cpp сборки
-    set(WHISPER_BUILD_TESTS     OFF CACHE BOOL "" FORCE)
-    set(WHISPER_BUILD_EXAMPLES  OFF CACHE BOOL "" FORCE)
-    set(GGML_CUDA               OFF CACHE BOOL "" FORCE)
-    set(GGML_METAL              OFF CACHE BOOL "" FORCE)
-    set(GGML_VULKAN             OFF CACHE BOOL "" FORCE)
-    set(GGML_OPENCL             OFF CACHE BOOL "" FORCE)
-    set(GGML_BLAS               OFF CACHE BOOL "" FORCE)
-    set(BUILD_SHARED_LIBS       OFF CACHE BOOL "" FORCE)
-
-    add_subdirectory(${_whisper_root} whisper_build EXCLUDE_FROM_ALL)
-
-    set(WHISPER_AVAILABLE TRUE)
-    message(STATUS "whisper.cpp found via add_subdirectory: ${_whisper_root}")
+if(EXISTS "${_vosk_dir}/vosk_api.h" AND EXISTS "${_vosk_dir}/libvosk.lib")
+    set(VOSK_AVAILABLE TRUE)
+    message(STATUS "Vosk found: ${_vosk_dir}")
 else()
-    set(WHISPER_AVAILABLE FALSE)
-    message(WARNING "whisper.cpp NOT found in redist/whisper/. Voice input will be disabled.")
+    set(VOSK_AVAILABLE FALSE)
+    message(WARNING
+            "Vosk NOT found in redist/vosk/. Voice input will be disabled.\n"
+            "Download: https://alphacephei.com/vosk/install\n"
+            "Extract vosk_api.h, libvosk.lib, libvosk.dll to: ${_vosk_dir}/")
 endif()
 
 # --- Версия и GitHub ---
@@ -198,6 +198,10 @@ add_library(JarvisCore STATIC
         # Голосовой ввод — Whisper.cpp, VAD, шёпот, wake word
         core/voice_input.h
         core/voice_input.cpp
+
+        # Пассивная запись голоса для датасета fine-tuning
+        core/passive_listener.h
+        core/passive_listener.cpp
 )
 
 target_compile_definitions(JarvisCore PRIVATE
@@ -233,16 +237,13 @@ target_link_libraries(JarvisCore PRIVATE
         psapi
 )
 
-# Whisper.cpp — линкуем если нашли
-if(WHISPER_AVAILABLE)
-    target_link_libraries(JarvisCore PUBLIC whisper)
-    target_include_directories(JarvisCore PRIVATE
-            "${_whisper_root}/include"
-            "${_whisper_root}/ggml/include"
-    )
-    target_compile_definitions(JarvisCore PRIVATE JARVIS_WHISPER_AVAILABLE)
+# Vosk — линкуем если нашли
+if(VOSK_AVAILABLE)
+    target_include_directories(JarvisCore PRIVATE "${_vosk_dir}")
+    target_link_libraries(JarvisCore PUBLIC "${_vosk_dir}/libvosk.lib")
+    target_compile_definitions(JarvisCore PRIVATE JARVIS_VOSK_AVAILABLE)
 else()
-    target_compile_definitions(JarvisCore PRIVATE JARVIS_WHISPER_STUB)
+    target_compile_definitions(JarvisCore PRIVATE JARVIS_VOSK_STUB)
 endif()
 
 if(MSVC)
@@ -317,6 +318,26 @@ if(WIN32)
                 COMMENT "Deploying Qt runtime..."
         )
     endif()
+endif()
+
+# --- Копируем Vosk DLL рядом с exe ---
+if(VOSK_AVAILABLE)
+    foreach(_vosk_dll
+            "${_vosk_dir}/libvosk.dll"
+            "${_vosk_dir}/libgcc_s_seh-1.dll"
+            "${_vosk_dir}/libstdc++-6.dll"
+            "${_vosk_dir}/libwinpthread-1.dll"
+    )
+        if(EXISTS "${_vosk_dll}")
+            add_custom_command(TARGET jarvis POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_vosk_dll}"
+                    "$<TARGET_FILE_DIR:jarvis>"
+                    COMMENT "Copying Vosk runtime: ${_vosk_dll}"
+            )
+        endif()
+    endforeach()
+    message(STATUS "Vosk DLLs will be copied to bin/ on build")
 endif()
 
 

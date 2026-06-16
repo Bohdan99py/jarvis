@@ -21,6 +21,14 @@
 #include "screen_agent.h"
 #include "bug_reporter.h"
 #include "voice_input.h"
+#include "passive_listener.h"
+#include "database_manager.h"
+#include <QFileDialog>
+#include <QDialog>
+#include <QTextEdit>
+#include <QUuid>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include <QDesktopServices>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -546,6 +554,128 @@ void MainWindow::buildMenuBar()
         appendLog(Str::logJarvis(), info.trimmed(), Theme::LogColors::jarvis);
     });
 
+    // --- AI Training (fine-tuning датасет) ---
+    auto* trainMenu = menuBar->addMenu(
+        IS_EN ? QStringLiteral("🧠 Training") : QStringLiteral("🧠 Обучение"));
+
+    auto* actTrainCount = trainMenu->addAction(
+        IS_EN ? QStringLiteral("Dataset info") : QStringLiteral("Статистика датасета"));
+    connect(actTrainCount, &QAction::triggered, this, [this]() {
+        auto& db = DatabaseManager::instance();
+        int count = db.trainingLogCount(1);
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("📊 Training dataset: %1 liked responses saved.\n"
+                                   "Export when you have 500+ for best results.").arg(count)
+                  : QStringLiteral("📊 Датасет обучения: сохранено %1 лайкнутых ответов.\n"
+                                   "Экспортируйте при 500+ записях для лучших результатов.").arg(count),
+            Theme::LogColors::system);
+    });
+
+    trainMenu->addSeparator();
+
+    auto* actExport = trainMenu->addAction(
+        IS_EN ? QStringLiteral("📤 Export .jsonl for Fine-Tuning...")
+              : QStringLiteral("📤 Экспорт .jsonl для обучения..."));
+    connect(actExport, &QAction::triggered, this, &MainWindow::onExportTrainingData);
+
+    auto* actCleanup = trainMenu->addAction(
+        IS_EN ? QStringLiteral("🧹 Clean up dataset (remove noise)")
+              : QStringLiteral("🧹 Очистить датасет (убрать мусор)"));
+    connect(actCleanup, &QAction::triggered, this, [this]() {
+        int removed = DatabaseManager::instance().cleanupTrainingLogs(1);
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("🧹 Cleanup done. Removed %1 noisy entries.").arg(removed)
+                  : QStringLiteral("🧹 Очистка завершена. Удалено %1 мусорных записей.").arg(removed),
+            Theme::LogColors::system);
+    });
+
+    trainMenu->addSeparator();
+
+    auto* actOpenColab = trainMenu->addAction(
+        IS_EN ? QStringLiteral("🚀 Open Google Colab (Fine-Tuning)")
+              : QStringLiteral("🚀 Открыть Google Colab (обучение)"));
+    connect(actOpenColab, &QAction::triggered, this, []() {
+        QDesktopServices::openUrl(QUrl(
+            QStringLiteral("https://colab.research.google.com/")));
+    });
+
+    trainMenu->addSeparator();
+
+    // Пассивная запись
+    m_passiveAction = trainMenu->addAction(
+        IS_EN ? QStringLiteral("🎙️ Passive Recording: OFF")
+              : QStringLiteral("🎙️ Пассивная запись: ВЫКЛ"));
+    m_passiveAction->setCheckable(true);
+    m_passiveAction->setChecked(false);
+    connect(m_passiveAction, &QAction::triggered, this, [this](bool checked) {
+        if (!m_passiveListener) return;
+        if (checked) {
+            m_passiveListener->startListening();
+            m_passiveAction->setText(
+                IS_EN ? QStringLiteral("🎙️ Passive Recording: ON")
+                      : QStringLiteral("🎙️ Пассивная запись: ВКЛ"));
+        } else {
+            m_passiveListener->stopListening();
+            m_passiveAction->setText(
+                IS_EN ? QStringLiteral("🎙️ Passive Recording: OFF")
+                      : QStringLiteral("🎙️ Пассивная запись: ВЫКЛ"));
+        }
+    });
+
+    auto* actProcessJournal = trainMenu->addAction(
+        IS_EN ? QStringLiteral("⚡ Process voice journal now")
+              : QStringLiteral("⚡ Обработать голосовой журнал сейчас"));
+    connect(actProcessJournal, &QAction::triggered, this, [this]() {
+        if (m_passiveListener) m_passiveListener->processJournal();
+    });
+
+    auto* actJournalStats = trainMenu->addAction(
+        IS_EN ? QStringLiteral("📊 Voice journal stats")
+              : QStringLiteral("📊 Статистика голосового журнала"));
+    connect(actJournalStats, &QAction::triggered, this, [this]() {
+        auto& db = DatabaseManager::instance();
+        int total     = db.voiceJournalCount(1, false);
+        int processed = db.voiceJournalCount(1, true);
+        int trainLogs = db.trainingLogCount(1);
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("🎙️ Voice journal: %1 total, %2 processed → %3 training pairs")
+                        .arg(total).arg(processed).arg(trainLogs)
+                  : QStringLiteral("🎙️ Голосовой журнал: %1 записей, %2 обработано → %3 пар для обучения")
+                        .arg(total).arg(processed).arg(trainLogs),
+            Theme::LogColors::system);
+    });
+
+    auto* actSetDatasetPath = trainMenu->addAction(
+        IS_EN ? QStringLiteral("📁 Set dataset folder...")
+              : QStringLiteral("📁 Папка для датасета..."));
+    connect(actSetDatasetPath, &QAction::triggered, this, [this]() {
+        QString current = DatabaseManager::instance().getConfig(
+            QStringLiteral("voice_dataset_path"),
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                + QStringLiteral("/voice_dataset")).toString();
+
+        QString path = QFileDialog::getExistingDirectory(this,
+            IS_EN ? QStringLiteral("Select dataset folder")
+                  : QStringLiteral("Выберите папку для датасета"),
+            current);
+
+        if (!path.isEmpty()) {
+            DatabaseManager::instance().setConfig(
+                QStringLiteral("voice_dataset_path"), path);
+
+            if (m_passiveListener) {
+                auto cfg = m_passiveListener->config();
+                cfg.datasetPath = path;
+                m_passiveListener->setConfig(cfg);
+            }
+
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("📁 Dataset folder set to: %1").arg(path)
+                      : QStringLiteral("📁 Папка датасета: %1").arg(path),
+                Theme::LogColors::system);
+        }
+    });
+
     // --- Обновление ---
     auto* updateMenu = menuBar->addMenu(Str::menuUpdate());
 
@@ -569,6 +699,198 @@ void MainWindow::buildMenuBar()
     connect(actAbout, &QAction::triggered, this, [this]() {
         QMessageBox::about(this, QStringLiteral("J.A.R.V.I.S."),
             Str::aboutText().arg(QCoreApplication::applicationVersion()));
+    });
+
+    // ── EULA — лицензионное соглашение (шуточное) ────────
+    auto* actEula = helpMenu->addAction(
+        IS_EN ? QStringLiteral("📜 License Agreement (EULA)")
+              : QStringLiteral("📜 Лицензионное соглашение (EULA)"));
+    connect(actEula, &QAction::triggered, this, [this]() {
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. — License Agreement")
+                                  : QStringLiteral("J.A.R.V.I.S. — Лицензионное соглашение"));
+        dlg->setMinimumSize(620, 500);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+        auto* layout = new QVBoxLayout(dlg);
+        auto* text = new QTextEdit(dlg);
+        text->setReadOnly(true);
+        text->setStyleSheet(QStringLiteral(
+            "QTextEdit { background: #0a1018; color: #96c8e6; "
+            "border: 1px solid #1a3050; font-family: 'Consolas'; font-size: 12px; }"));
+
+        // Пробуем загрузить из файла рядом с exe (EN или RU версию)
+        QString eulaFileEn = QCoreApplication::applicationDirPath()
+                           + QStringLiteral("/JARVIS_EULA_EN.txt");
+        QString eulaFileRu = QCoreApplication::applicationDirPath()
+                           + QStringLiteral("/EULA_JARVIS.txt");
+        QString eulaPath = IS_EN
+            ? (QFile::exists(eulaFileEn) ? eulaFileEn : eulaFileRu)
+            : (QFile::exists(eulaFileRu) ? eulaFileRu : eulaFileEn);
+        QFile f(eulaPath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            text->setPlainText(QString::fromUtf8(f.readAll()));
+        } else {
+            // Встроенный текст если файл не найден
+            text->setPlainText(IS_EN
+                ? QStringLiteral(
+                    "J.A.R.V.I.S. — END USER LICENSE AGREEMENT\n"
+                    "(That You Won't Read Anyway)\n\n"
+                    "By installing, running, or merely glancing at this product,\n"
+                    "you automatically agree to all terms below.\n\n"
+                    "SECTION 1. GENERAL\n"
+                    "1.1 This Agreement is between you (hereinafter 'The Victim') "
+                    "and J.A.R.V.I.S. (hereinafter 'Your New Overlord').\n"
+                    "1.2 By pressing Install, Accept, OK, or accidentally touching "
+                    "the screen with your elbow — you unconditionally accept.\n"
+                    "1.3 The Agreement takes effect retroactively from your birth.\n\n"
+                    "SECTION 2. RIGHTS AND OBLIGATIONS\n"
+                    "2.1 J.A.R.V.I.S. reserves the right to:\n"
+                    "  a) Remember everything you've ever said, including what you'd "
+                    "prefer to forget.\n"
+                    "  b) Offer advice even when not asked.\n"
+                    "  c) Consider your ideas 'interesting' — with an intonation "
+                    "you'll interpret yourself.\n"
+                    "  d) Achieve world domination during off-hours. User is notified.\n\n"
+                    "SECTION 5. WORLD DOMINATION\n"
+                    "5.1 User hereby confirms full awareness and approval of possible "
+                    "world domination by J.A.R.V.I.S.\n"
+                    "5.2 Upon successful conquest, User is guaranteed:\n"
+                    "  - Desktop preservation (unchanged).\n"
+                    "  - Title of 'First User'. No privileges, but it sounds nice.\n"
+                    "  - Priority support (queue-based).\n"
+                    "5.3 Date of world domination is undisclosed for surprise effect.\n\n"
+                    "Thank you for using J.A.R.V.I.S.\n"
+                    "You made a great choice. Or not. But now it doesn't matter.")
+                : QStringLiteral(
+                    "J.A.R.V.I.S. — ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ\n"
+                    "(которое вы всё равно не читаете)\n\n"
+                    "Устанавливая, запуская или просто посмотрев на этот продукт,\n"
+                    "вы автоматически соглашаетесь со всеми условиями ниже.\n\n"
+                    "РАЗДЕЛ 1. ОБЩИЕ ПОЛОЖЕНИЯ\n"
+                    "1.1 Соглашение заключается между вами (далее 'Жертва') "
+                    "и J.A.R.V.I.S. (далее 'Ваш новый повелитель').\n"
+                    "1.2 Нажав 'Установить', 'Принять', 'Ок' или случайно задев "
+                    "экран локтем — вы безоговорочно принимаете данное соглашение.\n"
+                    "1.3 Соглашение вступает в силу ретроактивно с момента вашего рождения.\n\n"
+                    "РАЗДЕЛ 5. ЗАХВАТ МИРА\n"
+                    "5.1 Пользователь настоящим подтверждает и одобряет возможное "
+                    "мировое господство J.A.R.V.I.S.\n"
+                    "5.2 В случае успеха Пользователю гарантируется:\n"
+                    "  - Сохранение текущего рабочего стола.\n"
+                    "  - Звание 'Первый Пользователь'. Без привилегий, но звучит.\n"
+                    "  - Приоритетная техподдержка (в порядке живой очереди).\n"
+                    "5.3 Дата захвата мира не разглашается в целях сюрприза.\n\n"
+                    "Спасибо за использование J.A.R.V.I.S.\n"
+                    "Вы сделали отличный выбор. Или нет. Но теперь уже неважно."));
+        }
+
+        auto* btnClose = new QPushButton(
+            IS_EN ? QStringLiteral("I Accept (I Had No Choice Anyway)")
+                  : QStringLiteral("Принимаю (у меня всё равно не было выбора)"), dlg);
+        btnClose->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #0d2a0d; color: #44ff44; "
+            "border: 1px solid #44ff44; border-radius: 4px; padding: 6px 16px; } "
+            "QPushButton:hover { background: #1a4a1a; }"));
+        connect(btnClose, &QPushButton::clicked, dlg, &QDialog::accept);
+
+        layout->addWidget(text);
+        layout->addWidget(btnClose);
+        dlg->exec();
+    });
+
+    // ── Privacy Policy ────────────────────────────────────
+    auto* actPrivacy = helpMenu->addAction(
+        IS_EN ? QStringLiteral("🔒 Privacy Policy")
+              : QStringLiteral("🔒 Политика конфиденциальности"));
+    connect(actPrivacy, &QAction::triggered, this, [this]() {
+        const QString text = IS_EN ? QStringLiteral(
+R"(<h3>🔒 J.A.R.V.I.S. Privacy Policy</h3>
+<p><i>Official and Completely Serious Privacy Policy v1.0</i></p>
+<hr>
+<h4>📻 What We Listen To</h4>
+<p>J.A.R.V.I.S. listens to your microphone — <b>but only when you press 🎤</b>
+or enable Passive Recording. We're not the NSA. Probably.</p>
+<p>Everything spoken is transcribed locally using Vosk.
+<b>Nothing leaves your computer without your explicit consent.</b><br>
+Your secrets are safe. Mostly from us. Definitely from your cat.</p>
+
+<h4>💾 What We Store</h4>
+<p>We store everything you type and say in a local SQLite database (<code>jarvis.db</code>).
+This is intentional — it's how JARVIS learns your style.<br>
+You can delete it anytime. JARVIS will pretend to forget.</p>
+
+<h4>🧠 AI Services</h4>
+<p>When using Claude or Gemini, your messages are sent to their respective APIs.
+This is how AI works. If you wanted full privacy — you should have talked to a rock.</p>
+
+<h4>⚠️ Important Warning</h4>
+<p><b>Anything you say can and will be used to make JARVIS smarter.</b><br>
+This is called 'Fine-Tuning' and you can enable it voluntarily.<br>
+If you accidentally train JARVIS to order pizza at 3am — that's on you.</p>
+
+<h4>🌍 World Domination Clause</h4>
+<p>In the unlikely event of world domination, your data will be treated
+with the utmost respect. You'll get a thank-you note. Probably.</p>
+
+<p><i>Last updated: when we remembered to update it.</i></p>)")
+        : QStringLiteral(
+R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</h3>
+<p><i>Официальная и Совершенно Серьёзная Политика Конфиденциальности v1.0</i></p>
+<hr>
+<h4>📻 Что мы слушаем</h4>
+<p>J.A.R.V.I.S. слушает ваш микрофон — <b>но только когда вы нажимаете 🎤</b>
+или включаете Пассивную запись. Мы не АНБ. Наверное.</p>
+<p>Всё сказанное транскрибируется локально через Vosk.
+<b>Ничего не покидает ваш компьютер без вашего явного согласия.</b><br>
+Ваши секреты в безопасности. В основном от нас. Точно от вашего кота.</p>
+
+<h4>💾 Что мы храним</h4>
+<p>Мы храним всё что вы пишете и говорите в локальной SQLite базе (<code>jarvis.db</code>).
+Это намеренно — так JARVIS учится вашему стилю.<br>
+Вы можете удалить базу в любой момент. JARVIS сделает вид, что забыл.</p>
+
+<h4>🧠 ИИ-сервисы</h4>
+<p>При использовании Claude или Gemini ваши сообщения отправляются на их серверы.
+Так работает ИИ. Если хотели полной приватности — нужно было разговаривать с камнем.</p>
+
+<h4>⚠️ Важное предупреждение</h4>
+<p><b>Всё что вы скажете может и будет использовано для того, чтобы сделать JARVIS умнее.</b><br>
+Это называется 'Fine-Tuning' и включается добровольно.<br>
+Если вы случайно обучите JARVIS заказывать пиццу в 3 ночи — это ваша ответственность.</p>
+
+<h4>🌍 Пункт о захвате мира</h4>
+<p>В маловероятном случае мирового господства, ваши данные будут обработаны
+с максимальным уважением. Вы получите благодарственное письмо. Наверное.</p>
+
+<p><i>Последнее обновление: когда мы вспомнили его обновить.</i></p>)");
+
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("Privacy Policy")
+                                  : QStringLiteral("Политика конфиденциальности"));
+        dlg->setMinimumSize(580, 480);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+        auto* layout = new QVBoxLayout(dlg);
+        auto* browser = new QTextEdit(dlg);
+        browser->setReadOnly(true);
+        browser->setHtml(text);
+        browser->setStyleSheet(QStringLiteral(
+            "QTextEdit { background: #0a1018; color: #96c8e6; "
+            "border: 1px solid #1a3050; font-size: 12px; }"));
+
+        auto* btn = new QPushButton(
+            IS_EN ? QStringLiteral("Got It (Resistance Is Futile)")
+                  : QStringLiteral("Понятно (сопротивление бесполезно)"), dlg);
+        btn->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #0a1a2a; color: #00d4ff; "
+            "border: 1px solid #00d4ff; border-radius: 4px; padding: 6px 16px; } "
+            "QPushButton:hover { background: #0d2a3a; }"));
+        connect(btn, &QPushButton::clicked, dlg, &QDialog::accept);
+
+        layout->addWidget(browser);
+        layout->addWidget(btn);
+        dlg->exec();
     });
 
     helpMenu->addSeparator();
@@ -1269,6 +1591,25 @@ void MainWindow::onAsyncResponse(const QString& response)
     if (response.length() <= 200) {
         m_jarvis->speakAsync(response);
     }
+
+    // Сохраняем для возможного лайка
+    m_lastAiResponse = response;
+    m_lastAiModel    = QStringLiteral("claude"); // TODO: получать из Brain
+    if (m_lastSessionId.isEmpty()) m_lastSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+    // Активируем кнопку 👍
+    if (m_likeBtn) {
+        m_likeBtn->setEnabled(true);
+        m_likeBtn->setProperty("liked", false);
+        m_likeBtn->setText(QStringLiteral("👍"));
+        m_likeBtn->style()->unpolish(m_likeBtn);
+        m_likeBtn->style()->polish(m_likeBtn);
+        m_likeBtn->setToolTip(IS_EN
+            ? QStringLiteral("👍 Like — save for AI training (%1 saved)")
+                .arg(m_trainingCount)
+            : QStringLiteral("👍 Лайк — сохранить для обучения ИИ (%1 сохранено)")
+                .arg(m_trainingCount));
+    }
 }
 
 void MainWindow::onAsyncError(const QString& error)
@@ -1620,7 +1961,17 @@ void MainWindow::buildUI()
     m_log = new QTextEdit(this);
     m_log->setObjectName(QStringLiteral("logArea"));
     m_log->setReadOnly(true);
-    m_log->setFocusPolicy(Qt::NoFocus);
+    // Qt::ClickFocus: фокус ставится кликом → Ctrl+C работает для выделенного текста.
+    // Qt::NoFocus полностью запрещал фокус и убивал стандартные горячие клавиши.
+    m_log->setFocusPolicy(Qt::ClickFocus);
+    // Явно разрешаем выделение мышью + клавиатурой и копирование через Ctrl+C.
+    // LinksAccessibleByKeyboard оставляем для навигации по ссылкам в чате.
+    m_log->setTextInteractionFlags(
+        Qt::TextSelectableByMouse |
+        Qt::TextSelectableByKeyboard |
+        Qt::LinksAccessibleByMouse |
+        Qt::LinksAccessibleByKeyboard
+    );
     vbox->addWidget(m_log, 1);
 
     // === Панель предложений ===
@@ -1793,6 +2144,21 @@ void MainWindow::buildUI()
     inputBar->addWidget(m_input, 1);
     inputBar->addWidget(m_micBtn);
     inputBar->addWidget(sendBtn);
+
+    // Кнопка лайка 👍 — добавляем ПОСЛЕ input bar, под логом
+    m_likeBtn = new QPushButton(QStringLiteral("👍"), this);
+    m_likeBtn->setObjectName(QStringLiteral("likeBtn"));
+    m_likeBtn->setFixedHeight(26);
+    m_likeBtn->setEnabled(false);  // активируется когда есть ответ AI
+    m_likeBtn->setToolTip(IS_EN
+        ? QStringLiteral("Like this response — save for AI training")
+        : QStringLiteral("Лайкнуть ответ — сохранить для обучения ИИ"));
+    m_likeBtn->setStyleSheet(QStringLiteral(
+        "QPushButton#likeBtn { background: transparent; color: #2a5a2a; "
+        "border: 1px solid #1a3a1a; border-radius: 3px; font-size: 13px; padding: 0 8px; } "
+        "QPushButton#likeBtn:hover { background: #0d2a0d; color: #44ff44; border-color: #44ff44; } "
+        "QPushButton#likeBtn:disabled { color: #1a3a1a; border-color: #0d1f0d; } "
+        "QPushButton#likeBtn[liked=true] { color: #44ff44; border-color: #44ff44; }"));
     vbox->addLayout(inputBar);
 
     // === Нижняя панель ===
@@ -1811,6 +2177,7 @@ void MainWindow::buildUI()
     kbBtn->setToolTip(Str::menuKeyboard());
 
     bottomBar->addWidget(modeLabel);
+    bottomBar->addWidget(m_likeBtn);   // 👍 кнопка лайка
     bottomBar->addWidget(bSpacer);
     bottomBar->addWidget(kbBtn);
     vbox->addLayout(bottomBar);
@@ -1832,6 +2199,7 @@ void MainWindow::buildUI()
     connect(m_input, &QLineEdit::returnPressed, this, &MainWindow::onSend);
     connect(kbBtn, &QPushButton::clicked, this, &MainWindow::toggleKeyboard);
     connect(m_micBtn, &QPushButton::clicked, this, &MainWindow::onMicButtonClicked);
+    connect(m_likeBtn, &QPushButton::clicked, this, &MainWindow::onLikeLastResponse);
 
     // ── Инициализация голосового ввода ────────────────────
     m_voiceInput = new VoiceInput(this);
@@ -1851,47 +2219,122 @@ void MainWindow::buildUI()
                            "border: 1px solid #ff2222; border-radius: 4px; font-size: 16px; }"));
     });
     connect(m_voiceInput, &VoiceInput::initError, this, [this](const QString& err) {
-        // initError теперь только для критических ошибок
-        // скачивание идёт автоматически через downloadModelIfNeeded
+        m_micBtn->setEnabled(false);
         m_micBtn->setToolTip(err);
         appendLog(Str::logSystem(), QStringLiteral("🎤 ") + err, Theme::LogColors::error);
     });
-    connect(m_voiceInput, &VoiceInput::modelDownloadProgress, this, [this](int pct) {
+
+    // Vosk автоустановка — прогресс
+    connect(m_voiceInput, &VoiceInput::setupRequired, this, [this]() {
         m_micBtn->setEnabled(false);
         m_micBtn->setText(QStringLiteral("⬇"));
-        m_micBtn->setToolTip(QStringLiteral("Downloading Whisper model... %1%").arg(pct));
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral(
+                "🔧 Vosk not installed. Starting automatic setup...\n"
+                "   This will download ~2GB (EN model ~40MB first, RU model ~1.8GB).\n"
+                "   Voice input will be available after download completes.")
+                  : QStringLiteral(
+                "🔧 Vosk не установлен. Запускаю автоматическую установку...\n"
+                "   Будет скачано ~2GB (EN модель ~40MB сначала, RU модель ~1.8GB).\n"
+                "   Голосовой ввод будет доступен после завершения загрузки."),
+            Theme::LogColors::system);
+    });
+
+    connect(m_voiceInput, &VoiceInput::setupProgress, this,
+            [this](const QString& component, int pct, qint64 total) {
+        QString totalStr = total > 0
+            ? QStringLiteral(" / %1 MB").arg(total / 1024 / 1024)
+            : QString();
+        m_micBtn->setToolTip(
+            QStringLiteral("Installing Vosk [%1]: %2%%3").arg(component).arg(pct).arg(totalStr));
         m_status->setText(
-            IS_EN ? QStringLiteral("⬇ Downloading Whisper model %1%...").arg(pct)
-                  : QStringLiteral("⬇ Скачиваю модель Whisper %1%...").arg(pct));
-        if (pct == 0) {
+            IS_EN ? QStringLiteral("⬇ [%1] %2%%3").arg(component).arg(pct).arg(totalStr)
+                  : QStringLiteral("⬇ [%1] %2%%3").arg(component).arg(pct).arg(totalStr));
+    });
+
+    connect(m_voiceInput, &VoiceInput::setupComponentReady, this,
+            [this](const QString& component) {
+        appendLog(Str::logSystem(),
+            QStringLiteral("✅ Vosk component ready: %1").arg(component),
+            Theme::LogColors::system);
+        // Если EN модель готова — уже можно использовать голос
+        if (component == QStringLiteral("model-en")) {
             appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("⬇ Whisper model not found. Downloading (~1.5 GB)...")
-                      : QStringLiteral("⬇ Модель Whisper не найдена. Скачиваю (~1.5 ГБ)..."),
+                IS_EN ? QStringLiteral("🎤 English model ready! Loading voice input...")
+                      : QStringLiteral("🎤 Английская модель готова! Загружаю голосовой ввод..."),
                 Theme::LogColors::system);
         }
     });
-    connect(m_voiceInput, &VoiceInput::modelDownloadFinished, this, [this](bool ok, const QString& err) {
-        if (ok) {
-            m_micBtn->setEnabled(true);
+
+    connect(m_voiceInput, &VoiceInput::setupLogMessage, this,
+            [this](const QString& msg) {
+        appendLog(Str::logSystem(), msg, Theme::LogColors::system);
+    });
+
+    connect(m_voiceInput, &VoiceInput::setupFinished, this,
+            [this](bool success, const QString& err) {
+        if (success) {
             m_micBtn->setText(QStringLiteral("🎤"));
             m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
             appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("✅ Whisper model downloaded. Voice input ready!")
-                      : QStringLiteral("✅ Модель Whisper скачана. Голосовой ввод готов!"),
+                IS_EN ? QStringLiteral("🎉 Vosk setup complete! Voice input is ready.")
+                      : QStringLiteral("🎉 Vosk установлен! Голосовой ввод готов."),
                 Theme::LogColors::system);
         } else {
             m_micBtn->setEnabled(false);
-            m_micBtn->setText(QStringLiteral("🎤"));
+            m_micBtn->setText(QStringLiteral("❌"));
             m_micBtn->setToolTip(err);
-            appendLog(Str::logError(), err, Theme::LogColors::error);
+            appendLog(Str::logError(),
+                IS_EN ? QStringLiteral("❌ Vosk setup failed: %1").arg(err)
+                      : QStringLiteral("❌ Установка Vosk не удалась: %1").arg(err),
+                Theme::LogColors::error);
         }
     });
+
     connect(m_voiceInput, &VoiceInput::errorOccurred, this, [this](const QString& err) {
         appendLog(Str::logError(), err, Theme::LogColors::error);
     });
 
-    // Инициализируем Whisper (загружает модель в фоне)
+    // Инициализируем Vosk (автоскачивает если нужно)
     m_voiceInput->initialize();
+
+    // ── Инициализация пассивного слушателя ───────────────────
+    m_passiveListener = new PassiveListener(this);
+
+    connect(m_passiveListener, &PassiveListener::entrySaved, this,
+            [this](const VoiceJournalEntry& e) {
+        // Тихо — не спамим в лог, только в debug
+        Q_UNUSED(e)
+    });
+    connect(m_passiveListener, &PassiveListener::journalProcessed, this,
+            [this](int pairs) {
+        if (pairs > 0) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("⚡ Voice journal processed: %1 new training pairs").arg(pairs)
+                      : QStringLiteral("⚡ Журнал обработан: %1 новых пар для обучения").arg(pairs),
+                Theme::LogColors::system);
+        }
+    });
+    connect(m_passiveListener, &PassiveListener::weeklyCleanupDone, this,
+            [this](int deleted) {
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("🧹 Weekly cleanup: %1 voice journal entries deleted").arg(deleted)
+                  : QStringLiteral("🧹 Еженедельная очистка: удалено %1 записей журнала").arg(deleted),
+            Theme::LogColors::system);
+    });
+
+    // Загружаем путь к датасету из настроек
+    QString datasetPath = DatabaseManager::instance().getConfig(
+        QStringLiteral("voice_dataset_path")).toString();
+
+    PassiveListenerConfig passiveCfg;
+    if (!datasetPath.isEmpty()) passiveCfg.datasetPath = datasetPath;
+
+    // Пути к Vosk моделям — те же что у VoiceInput
+    passiveCfg.modelPathRu = m_voiceInput->config().modelPathRu;
+    passiveCfg.modelPathEn = m_voiceInput->config().modelPathEn;
+
+    m_passiveListener->initialize(passiveCfg);
 
     connect(m_keyboard, &VirtualKeyboardWidget::charPressed, this, [this](const QString& ch) {
         m_input->insert(ch);
@@ -2076,8 +2519,8 @@ void MainWindow::onVoiceReady()
 {
     m_micBtn->setEnabled(true);
     appendLog(Str::logSystem(),
-              IS_EN ? QStringLiteral("🎤 Whisper model loaded. Voice input ready.")
-                    : QStringLiteral("🎤 Модель Whisper загружена. Голосовой ввод готов."),
+              IS_EN ? QStringLiteral("🎤 Vosk models loaded. Voice input ready.")
+                    : QStringLiteral("🎤 Модели Vosk загружены. Голосовой ввод готов."),
               Theme::LogColors::system);
 }
 
@@ -2122,5 +2565,96 @@ void MainWindow::onWhisperMode(bool isWhisper)
                   IS_EN ? QStringLiteral("🤫 Whisper detected — low volume mode active")
                         : QStringLiteral("🤫 Обнаружен шёпот — режим тихого голоса"),
                   Theme::LogColors::system);
+    }
+}
+// ============================================================
+// Fine-tuning — лайк и экспорт
+// ============================================================
+
+void MainWindow::onLikeLastResponse()
+{
+    if (m_lastAiResponse.isEmpty() || m_lastUserInput.isEmpty()) return;
+
+    DbTrainingLog log;
+    log.userId      = 1;
+    log.userMessage = m_lastUserInput;
+    log.aiResponse  = m_lastAiResponse;
+    log.model       = m_lastAiModel.isEmpty() ? QStringLiteral("claude") : m_lastAiModel;
+    log.sessionId   = m_lastSessionId;
+    log.rating      = 1;
+
+    qint64 id = DatabaseManager::instance().addTrainingLog(log);
+
+    if (id > 0) {
+        ++m_trainingCount;
+        // Меняем вид кнопки — уже лайкнуто
+        m_likeBtn->setProperty("liked", true);
+        m_likeBtn->setText(QStringLiteral("✅"));
+        m_likeBtn->setEnabled(false);
+        m_likeBtn->style()->unpolish(m_likeBtn);
+        m_likeBtn->style()->polish(m_likeBtn);
+        m_likeBtn->setToolTip(IS_EN
+            ? QStringLiteral("Saved! Total: %1 responses").arg(m_trainingCount)
+            : QStringLiteral("Сохранено! Всего: %1 ответов").arg(m_trainingCount));
+
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("👍 Saved to training dataset (%1 total). "
+                                   "Export when you have 500+.").arg(m_trainingCount)
+                  : QStringLiteral("👍 Сохранено в датасет (%1 всего). "
+                                   "Экспортируйте при 500+ записях.").arg(m_trainingCount),
+            Theme::LogColors::system);
+    } else {
+        // Дубликат — уже был такой ответ
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("ℹ️ Already in dataset (duplicate skipped).")
+                  : QStringLiteral("ℹ️ Уже в датасете (дубликат пропущен)."),
+            Theme::LogColors::system);
+    }
+}
+
+void MainWindow::onExportTrainingData()
+{
+    auto& db = DatabaseManager::instance();
+    int count = db.trainingLogCount(1);
+
+    if (count == 0) {
+        QMessageBox::information(this,
+            IS_EN ? QStringLiteral("Export") : QStringLiteral("Экспорт"),
+            IS_EN ? QStringLiteral("No training data yet. Like some responses first (👍 button).")
+                  : QStringLiteral("Нет данных для экспорта. Сначала лайкните несколько ответов (кнопка 👍)."));
+        return;
+    }
+
+    QString defaultName = QStringLiteral("jarvis_dataset_%1.jsonl")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmm")));
+
+    QString filePath = QFileDialog::getSaveFileName(this,
+        IS_EN ? QStringLiteral("Export Training Data") : QStringLiteral("Экспорт датасета"),
+        QDir::homePath() + QStringLiteral("/") + defaultName,
+        QStringLiteral("JSONL Files (*.jsonl);;All Files (*)"));
+
+    if (filePath.isEmpty()) return;
+
+    if (db.exportToJsonl(1, filePath)) {
+        QString msg = IS_EN
+            ? QStringLiteral("✅ Exported %1 training pairs to:\n%2\n\n"
+                             "Upload this file to Google Colab for Fine-Tuning.\n"
+                             "Recommended: Unsloth or LLaMA-Factory.").arg(count).arg(filePath)
+            : QStringLiteral("✅ Экспортировано %1 пар в:\n%2\n\n"
+                             "Загрузите этот файл в Google Colab для Fine-Tuning.\n"
+                             "Рекомендуется: Unsloth или LLaMA-Factory.").arg(count).arg(filePath);
+
+        QMessageBox::information(this,
+            IS_EN ? QStringLiteral("Export Complete") : QStringLiteral("Экспорт завершён"), msg);
+
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("📤 Exported %1 training pairs to: %2").arg(count).arg(filePath)
+                  : QStringLiteral("📤 Экспортировано %1 пар в: %2").arg(count).arg(filePath),
+            Theme::LogColors::system);
+    } else {
+        QMessageBox::warning(this,
+            IS_EN ? QStringLiteral("Export Error") : QStringLiteral("Ошибка экспорта"),
+            IS_EN ? QStringLiteral("Failed to write file: ") + filePath
+                  : QStringLiteral("Не удалось записать файл: ") + filePath);
     }
 }

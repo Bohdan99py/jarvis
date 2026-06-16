@@ -22,6 +22,9 @@
 #include <QRegularExpression>
 #include <QFileInfo>
 #include <QCoreApplication>
+#include <QTimer>
+#include <QPointer>
+#include <QWidget>
 
 // shellapi.h уже включён через screen_agent.h (Q_OS_WIN блок)
 
@@ -403,7 +406,31 @@ void ScreenAgent::describeScreen(
     std::function<void(const QString&)> callback,
     const QRect& region) const
 {
-    const QString b64 = captureToBase64(region);
+    // ИСПРАВЛЕНИЕ: скрываем главное окно JARVIS перед захватом —
+    // иначе Claude описывает собственный интерфейс вместо реального экрана.
+    QWidget* mainWin = nullptr;
+    for (QWidget* w : QApplication::topLevelWidgets()) {
+        if (w->isVisible() && w->inherits("QMainWindow")) {
+            mainWin = w;
+            break;
+        }
+    }
+    if (mainWin) mainWin->hide();
+
+    // Ждём 400ms чтобы ОС успела перерисовать экран без нашего окна
+    QPointer<const ScreenAgent> self = this;
+    QTimer::singleShot(400, [self, claudeApiKey, callback, region, mainWin]() {
+        // Захватываем экран пока JARVIS скрыт
+        QString b64;
+        if (self) b64 = self->captureToBase64(region);
+
+        // Восстанавливаем окно сразу после захвата
+        if (mainWin) { mainWin->show(); mainWin->raise(); mainWin->activateWindow(); }
+
+        if (!self || b64.isEmpty()) {
+            callback(QStringLiteral("[Vision: capture failed]"));
+            return;
+        }
 
     auto* nam = new QNetworkAccessManager();
     QNetworkRequest req(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")));
@@ -450,6 +477,7 @@ void ScreenAgent::describeScreen(
         reply->deleteLater();
         nam->deleteLater();
     });
+    }); // конец QTimer::singleShot
 }
 
 void ScreenAgent::executeVisualCommand(
@@ -457,7 +485,27 @@ void ScreenAgent::executeVisualCommand(
     const QString& claudeApiKey,
     std::function<void(const QString&)> callback)
 {
-    const QString b64 = captureToBase64();
+    // ИСПРАВЛЕНИЕ: скрываем JARVIS перед захватом экрана
+    QWidget* mainWin = nullptr;
+    for (QWidget* w : QApplication::topLevelWidgets()) {
+        if (w->isVisible() && w->inherits("QMainWindow")) {
+            mainWin = w;
+            break;
+        }
+    }
+    if (mainWin) mainWin->hide();
+
+    QPointer<ScreenAgent> self = this;
+    QTimer::singleShot(400, [self, userCommand, claudeApiKey, callback, mainWin]() {
+        QString b64;
+        if (self) b64 = self->captureToBase64();
+
+        if (mainWin) { mainWin->show(); mainWin->raise(); mainWin->activateWindow(); }
+
+        if (!self || b64.isEmpty()) {
+            callback(QStringLiteral("[Vision: capture failed]"));
+            return;
+        }
 
     auto* nam = new QNetworkAccessManager();
     QNetworkRequest req(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")));
@@ -496,7 +544,7 @@ void ScreenAgent::executeVisualCommand(
 
     auto* reply = nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     QObject::connect(reply, &QNetworkReply::finished,
-                     [this, reply, callback, nam]() {
+                     [self, reply, callback, nam]() {
 
         QString instructions;
         const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
@@ -517,30 +565,30 @@ void ScreenAgent::executeVisualCommand(
         for (const QString& line : instructions.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
             auto m = reClick.match(line);
             if (m.hasMatch()) {
-                click(m.captured(1).toInt(), m.captured(2).toInt());
+                if (self) self->click(m.captured(1).toInt(), m.captured(2).toInt());
                 done.append(QStringLiteral("🖱 click(") + m.captured(1) + QStringLiteral(",") + m.captured(2) + QStringLiteral(")"));
                 QThread::msleep(200); continue;
             }
             m = reType.match(line);
             if (m.hasMatch()) {
-                typeText(m.captured(1));
+                if (self) self->typeText(m.captured(1));
                 done.append(QStringLiteral("⌨ type: ") + m.captured(1));
                 QThread::msleep(100); continue;
             }
             m = reKey.match(line);
             if (m.hasMatch()) {
-                pressKey(m.captured(1));
+                if (self) self->pressKey(m.captured(1));
                 done.append(QStringLiteral("⌨ key: ") + m.captured(1));
                 QThread::msleep(100); continue;
             }
             m = reUrl.match(line);
             if (m.hasMatch()) {
-                openUrl(m.captured(1));
+                if (self) self->openUrl(m.captured(1));
                 done.append(QStringLiteral("🌐 ") + m.captured(1)); continue;
             }
             m = reFocus.match(line);
             if (m.hasMatch()) {
-                focusWindow(m.captured(1));
+                if (self) self->focusWindow(m.captured(1));
                 done.append(QStringLiteral("🪟 focus: ") + m.captured(1));
                 QThread::msleep(300); continue;
             }
@@ -550,7 +598,8 @@ void ScreenAgent::executeVisualCommand(
             ? QStringLiteral("Could not parse actions from Vision response")
             : done.join(QStringLiteral("\n"));
 
-        emit const_cast<ScreenAgent*>(this)->actionCompleted(result);
+        emit const_cast<ScreenAgent*>(self.data())->actionCompleted(result);
         callback(result);
     });
+    }); // конец QTimer::singleShot
 }

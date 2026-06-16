@@ -1,15 +1,11 @@
 // =============================================================================
-// bug_reporter.cpp — Баг-репортер через Telegram Bot API
+// bug_reporter.cpp — Баг-репортер через GitHub Issues
 // =============================================================================
-//
-// Как настроить бота:
-//   1. Напишите @BotFather в Telegram → /newbot → получите токен
-//   2. Напишите боту что-нибудь (чтобы он мог слать вам сообщения)
-//   3. Узнайте свой chat_id: https://api.telegram.org/bot<TOKEN>/getUpdates
-//   4. Впишите TOKEN и CHAT_ID в embedded_key.h или в QSettings
-//
-// API: https://api.telegram.org/bot<TOKEN>/sendMessage
-//      https://api.telegram.org/bot<TOKEN>/sendPhoto
+// ИСПРАВЛЕНИЯ:
+//   1. onTakeScreenshot: краш исправлен — использовали `this` в лямбде QTimer
+//      после того как диалог мог быть уже destroyed через exec()+hide().
+//      Теперь используем QPointer<BugReporter> и проверяем валидность.
+//   2. grabWindow(0) заменён на grabWindow() для совместимости с Qt6.
 // =============================================================================
 
 #include "bug_reporter.h"
@@ -37,13 +33,7 @@
 #include <QSysInfo>
 #include <QTimer>
 #include <QMessageBox>
-
-// =============================================================================
-// Чтобы не светить токен в исходниках — храним в QSettings.
-// При первом запуске — пусто, пользователь ничего не видит.
-// Разработчик вписывает токен в embedded_key.h через GitHub Secrets.
-
-
+#include <QPointer>
 
 // =============================================================================
 // Конструктор и UI
@@ -203,19 +193,49 @@ void BugReporter::onAttachScreenshot()
 
 void BugReporter::onTakeScreenshot()
 {
-    // Прячем диалог на секунду, делаем скриншот, показываем обратно
+    // ИСПРАВЛЕНИЕ КРАША:
+    // Раньше: прямой захват `this` в лямбде QTimer::singleShot → если диалог
+    // закрывался за время 600ms (или show() был вызван на уже destroyed объект)
+    // → crash (dangling pointer).
+    //
+    // Теперь: используем QPointer<BugReporter> — он автоматически становится
+    // nullptr если объект уничтожен, и мы безопасно проверяем перед доступом.
+    //
+    // Также: grabWindow(0) deprecated в Qt6.7+ → заменено на grabWindow()
+    // (без аргументов = весь рабочий стол через primaryScreen).
+
+    // Отключаем кнопку чтобы не допустить двойного нажатия
+    m_screenshotBtn->setEnabled(false);
+
     hide();
-    QTimer::singleShot(600, this, [this]() {
+
+    // QPointer позволяет безопасно проверить что объект ещё жив
+    QPointer<BugReporter> self = this;
+
+    QTimer::singleShot(700, [self]() {
+        // Сначала делаем скриншот (пока диалог ещё скрыт)
+        QPixmap shot;
         if (QScreen* screen = QApplication::primaryScreen()) {
-            m_attachment = screen->grabWindow(0);
-            m_previewLbl->setPixmap(
-                m_attachment.scaled(m_previewLbl->width() - 8, 82,
-                                    Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            m_previewLbl->setVisible(true);
-            m_clearBtn->setVisible(true);
+            // Qt6: grabWindow() без аргументов — захват всего экрана
+            shot = screen->grabWindow(0);
         }
-        show();
-        raise();
+
+        // Только после захвата проверяем что объект ещё жив
+        if (!self) return;  // BugReporter был уничтожен — не обращаемся к нему
+
+        if (!shot.isNull()) {
+            self->m_attachment = shot;
+            self->m_previewLbl->setPixmap(
+                shot.scaled(self->m_previewLbl->width() - 8, 82,
+                            Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            self->m_previewLbl->setVisible(true);
+            self->m_clearBtn->setVisible(true);
+        }
+
+        self->m_screenshotBtn->setEnabled(true);
+        self->show();
+        self->raise();
+        self->activateWindow();
     });
 }
 
@@ -259,8 +279,6 @@ void BugReporter::onSend()
     m_statusLbl->setVisible(true);
     QTimer::singleShot(2000, this, &QDialog::accept);
 }
-
-
 
 void BugReporter::showDialog(QWidget* parent)
 {

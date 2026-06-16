@@ -12,6 +12,11 @@
 #include <QUuid>
 #include <QThread>
 #include <QFileInfo>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QTextStream>
+#include <QFile>
 
 // ============================================================
 //  Синглтон
@@ -201,6 +206,34 @@ bool DatabaseManager::createTables()
     execQuery("CREATE INDEX IF NOT EXISTS idx_pattern_user ON behavior_patterns(user_id, frequency DESC)");
     execQuery("CREATE INDEX IF NOT EXISTS idx_pattern_trig ON behavior_patterns(user_id, trigger)");
 
+    // training_logs — лайкнутые диалоги для fine-tuning
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS training_logs (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL DEFAULT 1
+                     REFERENCES users(id) ON DELETE CASCADE,
+        user_message TEXT    NOT NULL,
+        ai_response  TEXT    NOT NULL,
+        model        TEXT    NOT NULL DEFAULT 'claude',
+        session_id   TEXT    NOT NULL DEFAULT '',
+        rating       INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_train_user ON training_logs(user_id, rating DESC)");
+    execQuery("CREATE UNIQUE INDEX IF NOT EXISTS idx_train_dedup ON training_logs(user_id, user_message, ai_response)");
+
+    // voice_journal — сырые транскрипции от PassiveListener
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS voice_journal (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 1
+                    REFERENCES users(id) ON DELETE CASCADE,
+        transcript  TEXT    NOT NULL,
+        language    TEXT    NOT NULL DEFAULT 'auto',
+        confidence  REAL    NOT NULL DEFAULT 0.0,
+        processed   INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_journal_user ON voice_journal(user_id, processed, created_at)");
+
     return true;
 }
 
@@ -211,7 +244,38 @@ bool DatabaseManager::runMigrations()
     int ver = 0;
     if (q.next()) ver = q.value(0).toInt();
     if (ver < 1) { execQuery("UPDATE schema_version SET version=1"); ver = 1; }
-    if (ver < 2) { execQuery("UPDATE schema_version SET version=2"); }
+    if (ver < 2) { execQuery("UPDATE schema_version SET version=2"); ver = 2; }
+    if (ver < 3) {
+        // Добавляем таблицу training_logs если её нет (для существующих БД)
+        execQuery(R"(CREATE TABLE IF NOT EXISTS training_logs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL DEFAULT 1,
+            user_message TEXT    NOT NULL,
+            ai_response  TEXT    NOT NULL,
+            model        TEXT    NOT NULL DEFAULT 'claude',
+            session_id   TEXT    NOT NULL DEFAULT '',
+            rating       INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_train_user ON training_logs(user_id, rating DESC)");
+        execQuery("CREATE UNIQUE INDEX IF NOT EXISTS idx_train_dedup ON training_logs(user_id, user_message, ai_response)");
+        execQuery("UPDATE schema_version SET version=3");
+        ver = 3;
+    }
+    if (ver < 4) {
+        // Добавляем voice_journal для пассивной записи голоса
+        execQuery(R"(CREATE TABLE IF NOT EXISTS voice_journal (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL DEFAULT 1,
+            transcript  TEXT    NOT NULL,
+            language    TEXT    NOT NULL DEFAULT 'auto',
+            confidence  REAL    NOT NULL DEFAULT 0.0,
+            processed   INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_journal_user ON voice_journal(user_id, processed, created_at)");
+        execQuery("UPDATE schema_version SET version=4");
+    }
     return true;
 }
 
@@ -827,4 +891,239 @@ bool DatabaseManager::clearPatterns(qint64 userId)
     q.bindValue(":uid", userId);
     if (!q.exec()) { logError("clearPatterns", q.lastError()); return false; }
     return true;
+}
+
+// ============================================================
+//  training_logs — fine-tuning датасет
+// ============================================================
+
+qint64 DatabaseManager::addTrainingLog(const DbTrainingLog& log)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    // INSERT OR IGNORE — не дублируем одинаковые пары вопрос/ответ
+    q.prepare(R"(INSERT OR IGNORE INTO training_logs
+                 (user_id, user_message, ai_response, model, session_id, rating)
+                 VALUES (:uid, :umsg, :aresp, :model, :sid, :rating))");
+    q.bindValue(":uid",    log.userId);
+    q.bindValue(":umsg",   log.userMessage.simplified());
+    q.bindValue(":aresp",  log.aiResponse.simplified());
+    q.bindValue(":model",  log.model);
+    q.bindValue(":sid",    log.sessionId);
+    q.bindValue(":rating", log.rating);
+    if (!q.exec()) { logError("addTrainingLog", q.lastError()); return -1; }
+    return q.lastInsertId().toLongLong();
+}
+
+bool DatabaseManager::deleteTrainingLog(qint64 id)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM training_logs WHERE id=:id");
+    q.bindValue(":id", id);
+    if (!q.exec()) { logError("deleteTrainingLog", q.lastError()); return false; }
+    return true;
+}
+
+QList<DbTrainingLog> DatabaseManager::getTrainingLogs(qint64 userId, int limit)
+{
+    QList<DbTrainingLog> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(SELECT * FROM training_logs WHERE user_id=:uid
+                 ORDER BY rating DESC, created_at DESC LIMIT :lim)");
+    q.bindValue(":uid", userId);
+    q.bindValue(":lim", limit);
+    if (q.exec()) {
+        while (q.next()) {
+            DbTrainingLog t;
+            t.id          = q.value("id").toLongLong();
+            t.userId      = q.value("user_id").toLongLong();
+            t.userMessage = q.value("user_message").toString();
+            t.aiResponse  = q.value("ai_response").toString();
+            t.model       = q.value("model").toString();
+            t.sessionId   = q.value("session_id").toString();
+            t.rating      = q.value("rating").toInt();
+            t.createdAt   = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+            res.append(t);
+        }
+    }
+    return res;
+}
+
+int DatabaseManager::trainingLogCount(qint64 userId)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT COUNT(*) FROM training_logs WHERE user_id=:uid");
+    q.bindValue(":uid", userId);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+    return 0;
+}
+
+bool DatabaseManager::exportToJsonl(qint64 userId, const QString& filePath)
+{
+    auto logs = getTrainingLogs(userId);
+    if (logs.isEmpty()) return false;
+
+    QFile f(filePath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        logError("exportToJsonl: cannot open file", QSqlError());
+        return false;
+    }
+
+    QTextStream out(&f);
+    out.setEncoding(QStringConverter::Utf8);
+
+    for (const DbTrainingLog& log : logs) {
+        // Формат Alpaca / Unsloth / LLaMA-Factory
+        QJsonObject obj;
+        obj["instruction"] = log.userMessage;
+        obj["input"]       = QString();
+        obj["output"]      = log.aiResponse;
+        obj["model"]       = log.model;
+        out << QJsonDocument(obj).toJson(QJsonDocument::Compact) << "\n";
+    }
+
+    f.close();
+    qDebug() << "[DB] Exported" << logs.size() << "training logs to:" << filePath;
+    return true;
+}
+
+int DatabaseManager::cleanupTrainingLogs(qint64 userId)
+{
+    auto db = connection();
+    int removed = 0;
+    QSqlQuery q(db);
+
+    // 1. Удаляем слишком короткие сообщения пользователя (< 5 символов)
+    q.prepare("DELETE FROM training_logs WHERE user_id=:uid AND length(user_message) < 5");
+    q.bindValue(":uid", userId);
+    q.exec();
+    removed += q.numRowsAffected();
+
+    // 2. Удаляем слишком короткие ответы AI (< 20 символов — мусор)
+    q.prepare("DELETE FROM training_logs WHERE user_id=:uid AND length(ai_response) < 20");
+    q.bindValue(":uid", userId);
+    q.exec();
+    removed += q.numRowsAffected();
+
+    // 3. Удаляем типичные ошибки распознавания речи
+    const QStringList noisePatterns = {
+        "...", "???", "хм", "мм", "ну", "эм", "ага", "ок", "окей",
+        "ok", "uh", "um", "hmm", "yeah", "yep", "nope"
+    };
+    for (const QString& pattern : noisePatterns) {
+        q.prepare("DELETE FROM training_logs WHERE user_id=:uid "
+                  "AND lower(trim(user_message))=:p");
+        q.bindValue(":uid", userId);
+        q.bindValue(":p",   pattern.toLower());
+        q.exec();
+        removed += q.numRowsAffected();
+    }
+
+    // 4. Оставляем только уникальные пары (дубли уже отсечены UNIQUE INDEX,
+    //    но могут быть "почти дубли" с разными пробелами — нормализация при вставке)
+
+    qDebug() << "[DB] Cleanup removed" << removed << "training log entries";
+    return removed;
+}
+
+// ============================================================
+//  voice_journal — пассивная запись голоса
+// ============================================================
+
+qint64 DatabaseManager::addVoiceJournalEntry(const QString& transcript,
+                                              const QString& language,
+                                              float confidence,
+                                              const QDateTime& capturedAt)
+{
+    if (transcript.trimmed().length() < 3) return -1;
+
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(INSERT INTO voice_journal (user_id, transcript, language, confidence, created_at)
+                 VALUES (:uid, :tr, :lang, :conf, :at))");
+    q.bindValue(":uid",  1);
+    q.bindValue(":tr",   transcript.simplified());
+    q.bindValue(":lang", language);
+    q.bindValue(":conf", static_cast<double>(confidence));
+    q.bindValue(":at",   capturedAt.toString(Qt::ISODate));
+    if (!q.exec()) { logError("addVoiceJournalEntry", q.lastError()); return -1; }
+    return q.lastInsertId().toLongLong();
+}
+
+bool DatabaseManager::markJournalEntryProcessed(qint64 id)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("UPDATE voice_journal SET processed=1 WHERE id=:id");
+    q.bindValue(":id", id);
+    if (!q.exec()) { logError("markJournalEntryProcessed", q.lastError()); return false; }
+    return true;
+}
+
+QList<QMap<QString,QVariant>> DatabaseManager::getUnprocessedJournalEntries(qint64 userId, int limit)
+{
+    QList<QMap<QString,QVariant>> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(SELECT id, transcript, language, confidence, created_at
+                 FROM voice_journal
+                 WHERE user_id=:uid AND processed=0
+                 ORDER BY created_at ASC
+                 LIMIT :lim)");
+    q.bindValue(":uid", userId);
+    q.bindValue(":lim", limit);
+    if (q.exec()) {
+        while (q.next()) {
+            QMap<QString,QVariant> row;
+            row["id"]         = q.value("id").toLongLong();
+            row["transcript"] = q.value("transcript").toString();
+            row["language"]   = q.value("language").toString();
+            row["confidence"] = q.value("confidence").toFloat();
+            row["created_at"] = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+            res.append(row);
+        }
+    }
+    return res;
+}
+
+int DatabaseManager::voiceJournalCount(qint64 userId, bool processedOnly)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    if (processedOnly) {
+        q.prepare("SELECT COUNT(*) FROM voice_journal WHERE user_id=:uid AND processed=1");
+    } else {
+        q.prepare("SELECT COUNT(*) FROM voice_journal WHERE user_id=:uid");
+    }
+    q.bindValue(":uid", userId);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+    return 0;
+}
+
+int DatabaseManager::cleanupOldJournalEntries(qint64 userId, int olderThanDays)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    // Удаляем обработанные записи старше N дней
+    q.prepare(R"(DELETE FROM voice_journal
+                 WHERE user_id=:uid AND processed=1
+                 AND created_at < datetime('now', :days))");
+    q.bindValue(":uid",  userId);
+    q.bindValue(":days", QStringLiteral("-%1 days").arg(olderThanDays));
+    if (!q.exec()) { logError("cleanupOldJournalEntries", q.lastError()); return 0; }
+    int removed = q.numRowsAffected();
+
+    // Также удаляем необработанные старше 2x периода (мусор который никто не обработал)
+    q.prepare(R"(DELETE FROM voice_journal
+                 WHERE user_id=:uid AND processed=0
+                 AND created_at < datetime('now', :days))");
+    q.bindValue(":uid",  userId);
+    q.bindValue(":days", QStringLiteral("-%1 days").arg(olderThanDays * 2));
+    if (q.exec()) removed += q.numRowsAffected();
+
+    qDebug() << "[DB] voice_journal cleanup: deleted" << removed << "entries";
+    return removed;
 }

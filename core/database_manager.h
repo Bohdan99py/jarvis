@@ -81,6 +81,18 @@ struct DbBehaviorPattern {
     QDateTime lastSeen;
 };
 
+// Запись для fine-tuning датасета (лайкнутые диалоги)
+struct DbTrainingLog {
+    qint64    id           = 0;
+    qint64    userId       = 1;
+    QString   userMessage;             // вопрос пользователя
+    QString   aiResponse;              // полный ответ JARVIS
+    QString   model;                   // "claude" | "gemini" | "local"
+    QString   sessionId;
+    int       rating       = 1;        // 1 = 👍, в будущем можно 1-5
+    QDateTime createdAt;
+};
+
 // ============================================================
 //  DatabaseManager — синглтон
 // ============================================================
@@ -156,6 +168,26 @@ public:
     QList<DbBehaviorPattern> findPatterns(qint64 userId, const QString& triggerHint);
     bool                     clearPatterns(qint64 userId);
 
+    // ── training_logs (👍 лайкнутые диалоги для fine-tuning) ─
+    qint64                   addTrainingLog(const DbTrainingLog& log);
+    bool                     deleteTrainingLog(qint64 id);
+    QList<DbTrainingLog>     getTrainingLogs(qint64 userId, int limit = 10000);
+    int                      trainingLogCount(qint64 userId);
+    // Экспорт в .jsonl формат для Unsloth/LLaMA-Factory
+    bool                     exportToJsonl(qint64 userId, const QString& filePath);
+    // Очистка мусора — дубли, короткие ответы, ошибки распознавания
+    int                      cleanupTrainingLogs(qint64 userId);
+
+    // ── voice_journal (пассивная запись голоса) ────────────
+    // Используем универсальные параметры чтобы не тащить passive_listener.h
+    qint64 addVoiceJournalEntry(const QString& transcript, const QString& language,
+                                float confidence, const QDateTime& capturedAt);
+    bool   markJournalEntryProcessed(qint64 id);
+    // Возвращает необработанные записи как QList<QMap>
+    QList<QMap<QString,QVariant>> getUnprocessedJournalEntries(qint64 userId, int limit = 200);
+    int    voiceJournalCount(qint64 userId, bool processedOnly = false);
+    int    cleanupOldJournalEntries(qint64 userId, int olderThanDays = 7);
+
 signals:
     void databaseError(const QString& error);
     void messageSaved(qint64 messageId);
@@ -176,5 +208,5 @@ private:
     QString        m_lastError;
     mutable QMutex m_mutex;
 
-    static constexpr int k_schemaVersion = 2;
+    static constexpr int k_schemaVersion = 3;
 };

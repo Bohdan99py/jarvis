@@ -43,10 +43,15 @@ void LearnerWorker::setWatchPaths(const QStringList& paths)
 void LearnerWorker::runFullCycle()
 {
     qDebug() << "[Learner] Starting full cycle";
-    m_stopRequested.store(0);                    // std::atomic::store — OK
+    m_stopRequested.store(0);
 
     int filesIndexed  = indexProjectFiles();
     int patternsFound = analyzeChat();
+
+    // Автоматически чистим мусор из training_logs
+    int cleaned = DatabaseManager::instance().cleanupTrainingLogs(1);
+    if (cleaned > 0)
+        qDebug() << "[Learner] Auto-cleanup removed" << cleaned << "noise entries from training_logs";
 
     qDebug() << "[Learner] Cycle done. Files:" << filesIndexed
              << "Patterns:" << patternsFound;

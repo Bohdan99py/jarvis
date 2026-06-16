@@ -1,6 +1,11 @@
 ; =====================================================================
 ; Inno Setup script for J.A.R.V.I.S.
 ; Версия и MyAppBuildDir подставляются GitHub Actions при сборке.
+;
+; ИСПРАВЛЕНИЕ БАГА: EULA теперь показывается на языке установщика.
+;   Русский интерфейс → EULA_JARVIS.txt (RU)
+;   Английский интерфейс → JARVIS_EULA_EN.txt (EN)
+;   Реализовано через Pascal-скрипт InitializeSetup + [CustomMessages].
 ; =====================================================================
 
 #define MyAppName "JARVIS"
@@ -31,12 +36,18 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#MyAppExeName}
-LicenseFile=EULA_JARVIS.txt
+; ИСПРАВЛЕНИЕ: LicenseFile убран из [Setup] — задаётся динамически через
+; Pascal-скрипт InitializeSetup() ниже в зависимости от языка.
 InfoBeforeFile=JARVIS_INSTALL_NOTES.txt
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+; Путь к файлу лицензии для каждого языка
+[CustomMessages]
+russian.LicenseFilePath=EULA_JARVIS.txt
+english.LicenseFilePath=JARVIS_EULA_EN.txt
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
@@ -98,6 +109,61 @@ Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; \
   Flags: runhidden skipifdoesntexist
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}"
-Type: filesandordirs; Name: "{userappdata}\JARVIS"
-Type: filesandordirs; Name: "{userappdata}\Bohdan99py\JARVIS"
+Type: filesandordirs; Name: "{userappdata}\JARVIS\logs"
+
+; =====================================================================
+; Pascal-скрипт: динамически выбираем файл лицензии по языку.
+; Inno Setup не поддерживает LicenseFile= как [CustomMessages]-переменную
+; напрямую — обходим через WizardForm.LicenseMemo.
+; =====================================================================
+[Code]
+var
+  LicensePage: TOutputMsgMemoWizardPage;
+
+function GetLicensePath(): String;
+var
+  LicenseFile: String;
+begin
+  // ActiveLanguage() возвращает Name из [Languages]
+  if ActiveLanguage() = 'russian' then
+    LicenseFile := 'EULA_JARVIS.txt'
+  else
+    LicenseFile := 'JARVIS_EULA_EN.txt';
+
+  Result := ExpandConstant('{src}\' + LicenseFile);
+
+  // Fallback: если файл лежит рядом с .iss а не в {src}
+  if not FileExists(Result) then
+    Result := ExtractFilePath(ExpandConstant('{srcexe}')) + LicenseFile;
+end;
+
+procedure InitializeWizard();
+var
+  LicenseText: AnsiString;
+  LicensePath: String;
+begin
+  // Создаём страницу с лицензией вручную (вместо статического LicenseFile=)
+  LicensePath := GetLicensePath();
+
+  if FileExists(LicensePath) then
+  begin
+    LoadStringFromFile(LicensePath, LicenseText);
+    LicensePage := CreateOutputMsgMemoPage(
+      wpWelcome,
+      // Заголовок страницы
+      IfThen(ActiveLanguage() = 'russian',
+        'Лицензионное соглашение',
+        'License Agreement'),
+      // Подзаголовок
+      IfThen(ActiveLanguage() = 'russian',
+        'Прочитайте следующее лицензионное соглашение перед установкой J.A.R.V.I.S.',
+        'Please read the following license agreement before installing J.A.R.V.I.S.'),
+      // Текст лицензии
+      String(LicenseText),
+      // Метка под текстом
+      IfThen(ActiveLanguage() = 'russian',
+        'Нажимая "Далее", вы принимаете условия лицензионного соглашения.',
+        'By clicking Next, you accept the terms of the license agreement.')
+    );
+  end;
+end;
