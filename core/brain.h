@@ -100,6 +100,10 @@ class Brain : public QObject
 public:
     explicit Brain(QObject* parent = nullptr);
 
+    // --- Браузерный routing (вызывается из MainWindow) ---
+    QString         resolveWebTarget(const QString& lower) const;
+    QString         suggestWebTarget(const QString& lower) const;
+
     // Главный метод — анализирует ввод + контекст → Intent.
     // Если intent.hasLocalAnswer() == true — отображай localResponse напрямую,
     // НЕ вызывая dispatchToApi().

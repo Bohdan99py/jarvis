@@ -335,6 +335,7 @@ void VoiceRecorder::onAudioDataReady()
     emit audioChunkReady(pcm16);
 
     float db = computeRmsDb(pcm16);
+    emit volumeLevel(db);   // для VAD индикатора в UI
     if (db > m_config.silenceDbThreshold) {
         if (!m_speaking) {
             m_speaking = true;
@@ -538,6 +539,7 @@ VoiceInput::VoiceInput(QObject* parent) : QObject(parent)
     connect(m_worker,   &VoskWorker::recognized,   this, &VoiceInput::onRecognized);
     connect(m_worker,   &VoskWorker::error,        this, &VoiceInput::errorOccurred);
     connect(m_recorder, &VoiceRecorder::speechStarted, this, &VoiceInput::speechDetected);
+    connect(m_recorder, &VoiceRecorder::volumeLevel,    this, &VoiceInput::volumeLevel);
     connect(m_recorder, &VoiceRecorder::speechEnded,   this, &VoiceInput::onSpeechEnded);
     connect(m_recorder, &VoiceRecorder::error,         this, &VoiceInput::onRecorderError);
     connect(this, &VoiceInput::requestLoadModels, m_worker, &VoskWorker::loadModels,

@@ -185,6 +185,8 @@ Intent::Action Brain::detectAction(const QString& lower) const
         QStringLiteral("open "),      QStringLiteral("launch "),
         QStringLiteral("start "),     QStringLiteral("run "),
         QStringLiteral("покажи файл"),QStringLiteral("перейди"),
+        QStringLiteral("зайди на"),   QStringLiteral("перейди на"),
+        QStringLiteral("go to "),     QStringLiteral("navigate to"),
     };
 
     // --- Modify / Create (код) ---
@@ -689,4 +691,117 @@ bool Brain::startsWithAny(const QString& text, const QStringList& words) const
         if (text.startsWith(w)) return true;
     }
     return false;
+}
+// ============================================================
+// resolveWebTarget — маппинг слов в URL для браузера
+// Вызывается из MainWindow::tryOpenApp когда AppLauncher не нашёл приложение
+// ============================================================
+
+QString Brain::resolveWebTarget(const QString& lower) const
+{
+    // Структура: { ключевые слова } → URL
+    static const struct {
+        QStringList keywords;
+        QString     url;
+    } kWebTargets[] = {
+        // Видео
+        {{ "youtube", "ютуб", "ютьюб", "посмотреть видео", "видео",
+           "watch something", "посмотреть что-нибудь", "хочу посмотреть" },
+           "https://www.youtube.com"},
+        {{ "twitch", "твич", "стрим", "stream" },
+           "https://www.twitch.tv"},
+        {{ "netflix", "нетфликс", "сериал" },
+           "https://www.netflix.com"},
+        {{ "kinopoisk", "кинопоиск", "фильм", "кино" },
+           "https://www.kinopoisk.ru"},
+
+        // Музыка
+        {{ "spotify", "спотифай" },
+           "https://open.spotify.com"},
+        {{ "youtube music", "ютуб музыка", "yt music", "музыку на ютубе" },
+           "https://music.youtube.com"},
+        {{ "soundcloud", "саундклауд" },
+           "https://soundcloud.com"},
+        // "музыка" без уточнения → YouTube Music
+        {{ "музыку", "музыка", "music", "послушать" },
+           "https://music.youtube.com"},
+
+        // Социальные сети
+        {{ "instagram", "инстаграм", "инста" },
+           "https://www.instagram.com"},
+        {{ "twitter", "твиттер", "x.com" },
+           "https://x.com"},
+        {{ "telegram", "телеграм" },
+           "https://web.telegram.org"},
+        {{ "vk", "вконтакте", "вк" },
+           "https://vk.com"},
+        {{ "reddit", "реддит" },
+           "https://www.reddit.com"},
+        {{ "discord", "дискорд" },
+           "https://discord.com/app"},
+
+        // Работа / инструменты
+        {{ "github", "гитхаб" },
+           "https://github.com"},
+        {{ "stackoverflow", "stack overflow", "стэковерфлоу" },
+           "https://stackoverflow.com"},
+        {{ "google docs", "гугл доки", "документ" },
+           "https://docs.google.com"},
+        {{ "google drive", "гугл диск", "google диск" },
+           "https://drive.google.com"},
+        {{ "gmail", "почта", "email", "мейл" },
+           "https://mail.google.com"},
+        {{ "chatgpt", "чатгпт", "gpt" },
+           "https://chat.openai.com"},
+
+        // Магазины / разработка
+        {{ "steam", "стим" },
+           "https://store.steampowered.com"},
+        {{ "epic games", "эпик", "epicgames" },
+           "https://store.epicgames.com"},
+        {{ "amazon", "амазон" },
+           "https://www.amazon.com"},
+        {{ "aliexpress", "алиэкспресс", "али" },
+           "https://www.aliexpress.com"},
+
+        // Поиск
+        {{ "google", "гугл", "загугли", "поищи" },
+           "https://www.google.com"},
+        {{ "yandex", "яндекс" },
+           "https://www.yandex.ru"},
+    };
+
+    for (const auto& target : kWebTargets) {
+        for (const QString& kw : target.keywords) {
+            if (lower.contains(kw)) return target.url;
+        }
+    }
+    return QString();
+}
+
+// ============================================================
+// suggestWebTarget — контекстная подсказка без явного открытия
+// Возвращает URL если фраза намекает на желание что-то сделать
+// ============================================================
+
+QString Brain::suggestWebTarget(const QString& lower) const
+{
+    // "хочу посмотреть что-нибудь" → YouTube (без глагола "открой")
+    static const struct { QStringList phrases; QString url; QString name; } kSuggestions[] = {
+        {{ "хочу посмотреть", "want to watch", "хочу глянуть" },
+           "https://www.youtube.com", "YouTube"},
+        {{ "хочу послушать музыку", "want to listen", "хочу музыку", "play music" },
+           "https://music.youtube.com", "YouTube Music"},
+        {{ "хочу почитать новости", "want to read news", "новости" },
+           "https://news.google.com", "Google News"},
+        {{ "хочу поиграть", "want to play", "запустить игру" },
+           "https://store.steampowered.com", "Steam"},
+    };
+
+    for (const auto& s : kSuggestions) {
+        for (const QString& ph : s.phrases) {
+            if (lower.contains(ph)) return s.url + QStringLiteral("|") + s.name;
+        }
+    }
+    return QString();
 }

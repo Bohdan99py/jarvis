@@ -177,6 +177,9 @@ public:
     bool                     exportToJsonl(qint64 userId, const QString& filePath);
     // Очистка мусора — дубли, короткие ответы, ошибки распознавания
     int                      cleanupTrainingLogs(qint64 userId);
+    // Обновляет рейтинг существующей пары (для лайка 👍)
+    bool                     updateTrainingLogRating(const QString& userMsg,
+                                                     const QString& aiResp, int rating);
 
     // ── voice_journal (пассивная запись голоса) ────────────
     // Используем универсальные параметры чтобы не тащить passive_listener.h

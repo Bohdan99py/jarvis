@@ -26,6 +26,9 @@
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
+#include <QTextBrowser>
+#include <QListWidget>
+#include <QFrame>
 #include <QUuid>
 #include <QJsonObject>
 #include <QJsonDocument>
@@ -395,8 +398,28 @@ void MainWindow::buildMenuBar()
         bool ok;
         QString model = QInputDialog::getText(this,
             QStringLiteral("Ollama"),
-            IS_EN ? QStringLiteral("Model name (e.g. llama3, mistral, phi3):")
-                  : QStringLiteral("Имя модели (например: llama3, mistral, phi3):"),
+            IS_EN ? QStringLiteral(
+                "Model name:\n\n"
+                "Fast (recommended):\n"
+                "  qwen2.5:3b      — very fast, good quality\n"
+                "  phi3:mini       — fast, Microsoft model\n"
+                "  gemma2:2b       — fast Google model\n\n"
+                "Quality:\n"
+                "  llama3.2:3b     — Meta, good balance\n"
+                "  mistral:7b      — good for code\n"
+                "  qwen2.5:7b      — best quality\n\n"
+                "Install: ollama pull qwen2.5:3b")
+                  : QStringLiteral(
+                "Имя модели:\n\n"
+                "Быстрые (рекомендую):\n"
+                "  qwen2.5:3b      — очень быстро, хорошее качество\n"
+                "  phi3:mini       — быстро, модель Microsoft\n"
+                "  gemma2:2b       — быстро, модель Google\n\n"
+                "Качественные:\n"
+                "  llama3.2:3b     — Meta, хороший баланс\n"
+                "  mistral:7b      — хороша для кода\n"
+                "  qwen2.5:7b      — лучшее качество\n\n"
+                "Установить: ollama pull qwen2.5:3b"),
             QLineEdit::Normal,
             m_jarvis->ollamaApi()->model(), &ok);
         if (ok && !model.trimmed().isEmpty()) {
@@ -590,14 +613,6 @@ void MainWindow::buildMenuBar()
     });
 
     trainMenu->addSeparator();
-
-    auto* actOpenColab = trainMenu->addAction(
-        IS_EN ? QStringLiteral("🚀 Open Google Colab (Fine-Tuning)")
-              : QStringLiteral("🚀 Открыть Google Colab (обучение)"));
-    connect(actOpenColab, &QAction::triggered, this, []() {
-        QDesktopServices::openUrl(QUrl(
-            QStringLiteral("https://colab.research.google.com/")));
-    });
 
     trainMenu->addSeparator();
 
@@ -902,13 +917,7 @@ R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</
         BugReporter::showDialog(this);
     });
 
-    // ── GitHub Issues ────────────────────────────────────
-    auto* actGithubIssues = helpMenu->addAction(
-        IS_EN ? QStringLiteral("GitHub Issues") : QStringLiteral("GitHub Issues"));
-    connect(actGithubIssues, &QAction::triggered, this, []() {
-        QDesktopServices::openUrl(
-            QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/issues")));
-    });
+    // GitHub Issues убран — есть кнопка "Отправить баг"
 
 // =============================================================================
 // ВСТАВИТЬ в buildMenuBar() в mainwindow.cpp
@@ -919,172 +928,570 @@ R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</
     auto* actWhatsNew = helpMenu->addAction(
         IS_EN ? QStringLiteral("What's New") : QStringLiteral("Что нового"));
     connect(actWhatsNew, &QAction::triggered, this, [this]() {
-        const QString news = IS_EN ? QStringLiteral(
-R"(<b>J.A.R.V.I.S. — Latest Changes</b><br><br>
+        // Левая колонка
+        const QString col1 = IS_EN ? QStringLiteral(
+R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
+• Real microphone, no internet needed<br>
+• Wake word "Jarvis" — hands-free<br>
+• Auto RU/EN, whisper detection<br>
+• Auto-installs on first launch<br>
+<br>
+<b>🗄️ SQLite Database</b><br>
+• Chat history, commands, memory<br>
+• WAL mode, migrations, per-thread<br>
+• Token counter by model/month<br>
+<br>
+<b>📚 Fine-Tuning Dataset</b><br>
+• 👍 Like → saves to training dataset<br>
+• All AI responses auto-saved (rating=0)<br>
+• Export .jsonl for Unsloth/LLaMA-Factory<br>
+• Auto-cleanup of noise entries<br>
+<br>
+<b>🌐 Smart Browser Routing</b><br>
+• "Open YouTube" → browser, not app<br>
+• "I want to watch" → suggests YouTube<br>
+• "Play music" → YouTube Music/Spotify<br>
+• 30+ sites mapped automatically)")
+        : QStringLiteral(
+R"(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
+• Реальный микрофон, без интернета<br>
+• Wake word "Джарвис" — без рук<br>
+• Авто RU/EN, шёпот детектируется<br>
+• Автоустановка при первом запуске<br>
+<br>
+<b>🗄️ База данных SQLite</b><br>
+• История, команды, память в jarvis.db<br>
+• WAL режим, миграции, потокобезопасно<br>
+• Счётчик токенов по модели/месяц<br>
+<br>
+<b>📚 Датасет для дообучения</b><br>
+• 👍 Лайк → сохраняет в датасет<br>
+• Все ответы AI автосохраняются (rating=0)<br>
+• Экспорт .jsonl для Unsloth/LLaMA-Factory<br>
+• Автоочистка мусорных записей<br>
+<br>
+<b>🌐 Умный браузерный routing</b><br>
+• "Открой YouTube" → браузер, не поиск<br>
+• "Хочу посмотреть" → предлагает YouTube<br>
+• "Включи музыку" → YouTube Music/Spotify<br>
+• 30+ сайтов в маппинге автоматически)");
 
-<b>🧠 Autonomous Brain (no internet needed)</b><br>
-&bull; Greetings, time/date, math — answered instantly without API<br>
-&bull; 35+ apps: open/close Steam, Chrome, CLion, Rider, Discord, Telegram, Blender, OBS...<br>
-&bull; System: lock screen, shutdown, restart<br>
-&bull; "What can you do" / "help" — local answer<br><br>
-
-<b>📚 Self-Learning (LearnedCommands)</b><br>
-&bull; After each AI response, JARVIS extracts executable steps<br>
-&bull; Next time the same request comes — runs locally, no API<br>
-&bull; Saved in %AppData%/Jarvis/learned_commands.json<br>
-&bull; Memory shown: ✓ (from memory, N uses)<br><br>
-
-<b>👁 Screen Vision (ScreenAgent)</b><br>
-&bull; "What do you see" — screenshot → Claude Vision → description<br>
-&bull; "Click on [text]" — OCR search on screen + mouse click<br>
-&bull; "Open YouTube" — browser control<br>
-&bull; Visual commands via Claude Vision + action execution<br><br>
-
-<b>♊ Gemini API Key in UI</b><br>
-&bull; Settings → Gemini API key... (no manual file editing)<br>
-&bull; Free key from aistudio.google.com<br><br>
-
-<b>🗑 Removed</b><br>
-&bull; Vibe Coding mode — now always active (Brain handles routing)<br><br>
-
+        // Правая колонка
+        const QString col2 = IS_EN ? QStringLiteral(
+R"(<b>🎙️ Passive Voice Recording</b><br>
+• Listens via tray → saves to journal<br>
+• Brain creates training pairs auto<br>
+• Weekly cleanup after 7 days<br>
+• Dataset folder on your 4TB drive<br>
+<br>
+<b>🤖 Background Learning</b><br>
+• Indexes .cpp/.h/.py of your project<br>
+• Extracts behavior patterns from chat<br>
+• Runs every 30 min at idle priority<br>
+<br>
+<b>😏 Character & Sarcasm</b><br>
+• Dry British humor, like MCU JARVIS<br>
+• No "Certainly!" or "Of course!"<br>
+• Direct, witty, human-like tone<br>
+• TTS reads summary, not symbols<br>
+<br>
+<b>📜 Legal (because why not)</b><br>
+• EULA — agreed from birth retroactively<br>
+• Privacy Policy — court of history clause<br>
+<br>
 <b>🐛 Fixed</b><br>
-&bull; brain.h: HWND/WORD without windows.h guard — fixed<br>
-&bull; screen_agent: parseVirtualKey made static, emit in const fixed<br>
-&bull; Brain::captureSnapshot — multiAgentMode default param added)"
-        ) : QStringLiteral(
-R"(<b>J.A.R.V.I.S. — Последние изменения</b><br><br>
-
-<b>🧠 Автономный мозг (без интернета)</b><br>
-&bull; Приветствия, время/дата, математика — ответ мгновенно без API<br>
-&bull; 35+ приложений: открыть/закрыть Steam, Chrome, CLion, Rider, Discord, Telegram, Blender, OBS...<br>
-&bull; Система: заблокировать, выключить, перезагрузить<br>
-&bull; "Что ты умеешь" / "помощь" — локальный ответ<br><br>
-
-<b>📚 Самообучение (LearnedCommands)</b><br>
-&bull; После каждого ответа AI — извлекает исполняемые шаги<br>
-&bull; Следующий раз тот же запрос — выполняет сам, без API<br>
-&bull; Сохраняется в %AppData%/Jarvis/learned_commands.json<br>
-&bull; Показывается: ✓ (из памяти, использований: N)<br><br>
-
-<b>👁 Зрение (ScreenAgent)</b><br>
-&bull; "Что видишь" — скриншот → Claude Vision → описание<br>
-&bull; "Кликни на [текст]" — OCR поиск на экране + клик мышью<br>
-&bull; "Открой YouTube" — управление браузером<br>
-&bull; Визуальные команды через Claude Vision + исполнение<br><br>
-
-<b>♊ Ключ Gemini API в интерфейсе</b><br>
-&bull; Настройки → Ключ Gemini API... (без ручного редактирования файлов)<br>
-&bull; Бесплатный ключ на aistudio.google.com<br><br>
-
-<b>🗑 Удалено</b><br>
-&bull; Режим Вайбкодинга — теперь всегда активен (Brain сам решает)<br><br>
-
+• Qt 6.9.3 in CI (aqt limitation)<br>
+• Vosk DLL auto-copied in release<br>
+• Most Vexing Parse in QNetworkRequest)")
+        : QStringLiteral(
+R"(<b>🎙️ Пассивная запись голоса</b><br>
+• Слушает через трей → журнал<br>
+• Brain создаёт пары для обучения<br>
+• Еженедельная очистка через 7 дней<br>
+• Папка датасета на 4TB диске<br>
+<br>
+<b>🤖 Фоновое обучение</b><br>
+• Индексирует .cpp/.h/.py проекта<br>
+• Извлекает паттерны поведения из чата<br>
+• Каждые 30 мин с минимальным приоритетом<br>
+<br>
+<b>😏 Характер и сарказм</b><br>
+• Сухой британский юмор как у MCU JARVIS<br>
+• Никаких "Конечно!" и "Безусловно!"<br>
+• Прямолинейно, остроумно, по-человечески<br>
+• TTS читает резюме, не символы<br>
+<br>
+<b>📜 Юридическое (раз уж зашла речь)</b><br>
+• EULA — согласие с момента рождения<br>
+• Политика — суд истории припомнит<br>
+<br>
 <b>🐛 Исправлено</b><br>
-&bull; screen_agent.h: HWND/WORD без guard — исправлено<br>
-&bull; parseVirtualKey сделан static, emit в const-методе — исправлено<br>
-&bull; Brain::captureSnapshot — добавлен дефолтный параметр)"
-        );
+• Qt 6.9.3 в CI (ограничение aqt)<br>
+• Vosk DLL автокопируется в release<br>
+• Most Vexing Parse в QNetworkRequest)");
 
-        QMessageBox* box = new QMessageBox(this);
-        box->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S.")
-                                  : QStringLiteral("Что нового в J.A.R.V.I.S."));
-        box->setTextFormat(Qt::RichText);
-        box->setText(news);
-        box->setIcon(QMessageBox::Information);
-        box->setStandardButtons(QMessageBox::Ok);
-        box->setStyleSheet(
-            QStringLiteral("QMessageBox { background-color: #0a1018; color: #c8e0f0; }"
-                           "QMessageBox QLabel { color: #c8e0f0; min-width: 500px; }"
-                           "QPushButton { background-color: #0f2438; color: #00d4ff; "
-                           "border: 1px solid #1a5070; padding: 6px 20px; border-radius: 4px; }"
-                           "QPushButton:hover { background-color: #1a3a5c; }"));
-        box->exec();
-        box->deleteLater();
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S. v3.2")
+                                  : QStringLiteral("Что нового в J.A.R.V.I.S. v3.2"));
+        dlg->setMinimumSize(820, 560);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog { background: #0a1018; color: #c8e0f0; }"
+            "QLabel  { color: #c8e0f0; font-size: 12px; }"
+            "QPushButton { background: #0f2438; color: #00d4ff; "
+            "border: 1px solid #1a5070; padding: 6px 24px; border-radius: 4px; }"
+            "QPushButton:hover { background: #1a3a5c; }"));
+
+        auto* mainLayout = new QVBoxLayout(dlg);
+        mainLayout->setContentsMargins(20, 16, 20, 16);
+        mainLayout->setSpacing(12);
+
+        // Заголовок
+        auto* title = new QLabel(
+            IS_EN ? QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.2 — What's New</b>")
+                  : QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.2 — Что нового</b>"),
+            dlg);
+        title->setTextFormat(Qt::RichText);
+        title->setAlignment(Qt::AlignCenter);
+        mainLayout->addWidget(title);
+
+        // Разделитель
+        auto* line = new QFrame(dlg);
+        line->setFrameShape(QFrame::HLine);
+        line->setStyleSheet(QStringLiteral("color: #1a3050;"));
+        mainLayout->addWidget(line);
+
+        // Две колонки
+        auto* colLayout = new QHBoxLayout();
+        colLayout->setSpacing(24);
+
+        auto makeColumn = [&](const QString& html) -> QLabel* {
+            auto* lbl = new QLabel(html, dlg);
+            lbl->setTextFormat(Qt::RichText);
+            lbl->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+            lbl->setWordWrap(true);
+            lbl->setStyleSheet(QStringLiteral(
+                "QLabel { background: #0d1a28; border: 1px solid #1a3050; "
+                "border-radius: 6px; padding: 12px; }"));
+            return lbl;
+        };
+
+        colLayout->addWidget(makeColumn(col1), 1);
+        colLayout->addWidget(makeColumn(col2), 1);
+        mainLayout->addLayout(colLayout);
+
+        // Кнопка OK
+        auto* btnOk = new QPushButton(QStringLiteral("OK"), dlg);
+        btnOk->setFixedWidth(120);
+        connect(btnOk, &QPushButton::clicked, dlg, &QDialog::accept);
+        auto* btnLayout = new QHBoxLayout();
+        btnLayout->addStretch();
+        btnLayout->addWidget(btnOk);
+        btnLayout->addStretch();
+        mainLayout->addLayout(btnLayout);
+
+        dlg->exec();
     });
 
     // --- Инструкция ---
     auto* actHelp = helpMenu->addAction(
-        IS_EN ? QStringLiteral("User Guide") : QStringLiteral("Инструкция пользователя"));
+        IS_EN ? QStringLiteral("📖 User Guide") : QStringLiteral("📖 Руководство пользователя"));
     connect(actHelp, &QAction::triggered, this, [this]() {
-        const QString guide = IS_EN ? QStringLiteral(
-R"(<b>J.A.R.V.I.S. — User Guide</b><br><br>
+        // Диалог с разделами — как интерактивная книга
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. — User Guide")
+                                  : QStringLiteral("J.A.R.V.I.S. — Руководство пользователя"));
+        dlg->setMinimumSize(900, 620);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog { background: #080e14; color: #c8e0f0; }"
+            "QListWidget { background: #0a1018; color: #96c8e6; border: 1px solid #1a3050; "
+            "  border-radius: 4px; font-size: 12px; outline: none; }"
+            "QListWidget::item { padding: 10px 14px; border-bottom: 1px solid #0d1a28; }"
+            "QListWidget::item:selected { background: #0f2438; color: #00d4ff; "
+            "  border-left: 3px solid #00d4ff; }"
+            "QListWidget::item:hover { background: #0d1a28; }"
+            "QTextBrowser { background: #0a1018; color: #c8e0f0; border: 1px solid #1a3050; "
+            "  border-radius: 4px; font-size: 12px; }"
+            "QPushButton { background: #0f2438; color: #00d4ff; border: 1px solid #1a5070; "
+            "  padding: 6px 24px; border-radius: 4px; }"
+            "QPushButton:hover { background: #1a3a5c; }"));
 
-<b>📋 COMMANDS (no internet needed)</b><br>
-<b>Apps:</b> open Steam · open Chrome · open Notepad · open Calculator · open Explorer<br>
-open CLion · open Rider · open Discord · open Telegram · open OBS · close Steam<br><br>
-<b>System:</b> lock screen · shutdown · restart · volume 70 · brightness up<br><br>
-<b>Info:</b> what time · what date · 2+2 · what can you do · help<br><br>
-<b>Search:</b> find file readme · find document resume · find where it says "text"<br><br>
+        auto* mainLayout = new QVBoxLayout(dlg);
+        mainLayout->setContentsMargins(16, 14, 16, 14);
+        mainLayout->setSpacing(10);
 
-<b>👁 VISUAL COMMANDS (requires Claude API)</b><br>
-what do you see · describe screen · click on [text] · find on screen [text]<br><br>
+        // Заголовок
+        auto* title = new QLabel(
+            QStringLiteral("<b style='font-size:14px;color:#00d4ff;'>📖 J.A.R.V.I.S. User Guide</b>"),
+            dlg);
+        title->setTextFormat(Qt::RichText);
+        mainLayout->addWidget(title);
 
-<b>🔍 SEARCH</b><br>
-find [query] in project · find [query] on PC · find [query] in browser history<br>
-find [query] in chat · find [query] online<br><br>
+        auto* splitLayout = new QHBoxLayout();
+        splitLayout->setSpacing(12);
 
-<b>💻 CODE (requires Claude API + project indexed)</b><br>
-add function X · fix bug in file.cpp · refactor class Y · create file Z<br><br>
+        // Левая панель — список разделов
+        auto* sectionList = new QListWidget(dlg);
+        sectionList->setFixedWidth(200);
 
-<b>⚙ SETTINGS</b><br>
-Settings → Claude API key... (console.anthropic.com)<br>
-Settings → Gemini API key... (aistudio.google.com — free)<br>
-Settings → Ollama model... (ollama.com — local, offline)<br>
-Project → Index folder... → choose your project root<br><br>
+        // Правая панель — содержимое раздела
+        auto* content_browser = new QTextBrowser(dlg);
+        content_browser->setOpenExternalLinks(true);
 
-<b>📎 ATTACHMENTS</b><br>
-Click 📎 or drag files into the window · Ctrl+O to open file picker<br><br>
+        splitLayout->addWidget(sectionList);
+        splitLayout->addWidget(content_browser, 1);
+        mainLayout->addLayout(splitLayout, 1);
 
-<b>⌨ KEYBOARD SHORTCUTS</b><br>
-Enter — send · Esc — close clarification · Ctrl+O — attach file)"
-        ) : QStringLiteral(
-R"(<b>J.A.R.V.I.S. — Инструкция пользователя</b><br><br>
+        // Кнопка закрыть
+        auto* btnClose = new QPushButton(QStringLiteral("OK"), dlg);
+        btnClose->setFixedWidth(120);
+        connect(btnClose, &QPushButton::clicked, dlg, &QDialog::accept);
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch();
+        btnRow->addWidget(btnClose);
+        btnRow->addStretch();
+        mainLayout->addLayout(btnRow);
 
-<b>📋 КОМАНДЫ (без интернета)</b><br>
-<b>Приложения:</b> открой Steam · открой Chrome · открой блокнот · открой калькулятор<br>
-открой CLion · открой Rider · открой Discord · открой Telegram · закрой Steam<br><br>
-<b>Система:</b> заблокируй · выключи · перезагрузи · громкость 70 · яркость выше<br><br>
-<b>Информация:</b> который час · какая дата · 2+2 · что ты умеешь · помощь<br><br>
-<b>Поиск:</b> найди файл readme · найди документ резюме · найди где написано "текст"<br><br>
+        // ── Разделы ─────────────────────────────────────────────
+        struct Section { QString icon; QString titleRu; QString titleEn; QString htmlRu; QString htmlEn; };
 
-<b>👁 ВИЗУАЛЬНЫЕ КОМАНДЫ (требует Claude API)</b><br>
-что видишь · опиши экран · кликни на [текст] · найди на экране [текст]<br><br>
+        QVector<Section> sections = {
+        {
+            "🚀", "Быстрый старт", "Quick Start",
+            R"(<h3 style='color:#00d4ff;'>🚀 Быстрый старт</h3>
+<p>Никакой настройки для базовых команд — просто запусти и пиши.</p>
+<h4 style='color:#44aaff;'>Первые шаги:</h4>
+<ol>
+<li>Запусти JARVIS из меню Пуск или рабочего стола</li>
+<li>Напиши <b>"привет"</b> или любую команду</li>
+<li>Для AI-ответов: <b>Настройки → Ключ Claude API...</b></li>
+</ol>
+<h4 style='color:#44aaff;'>Бесплатные AI-сервисы:</h4>
+<ul>
+<li><b>Gemini</b> — бесплатно, встроен (aistudio.google.com)</li>
+<li><b>Ollama</b> — полностью офлайн (ollama.com)</li>
+<li><b>Claude</b> — лучшее качество (~$1-3/мес)</li>
+</ul>
+<p style='color:#44ff44;'>✅ Приложение работает без интернета для локальных команд!</p>)",
+            R"(<h3 style='color:#00d4ff;'>🚀 Quick Start</h3>
+<p>No setup needed for basic commands — just launch and type.</p>
+<h4 style='color:#44aaff;'>First steps:</h4>
+<ol>
+<li>Launch JARVIS from Start Menu or Desktop</li>
+<li>Type <b>"hello"</b> or any command</li>
+<li>For AI answers: <b>Settings → Claude API key...</b></li>
+</ol>
+<h4 style='color:#44aaff;'>Free AI services:</h4>
+<ul>
+<li><b>Gemini</b> — free, built-in (aistudio.google.com)</li>
+<li><b>Ollama</b> — fully offline (ollama.com)</li>
+<li><b>Claude</b> — best quality (~$1-3/mo)</li>
+</ul>
+<p style='color:#44ff44;'>✅ Works without internet for local commands!</p>)"
+        },
+        {
+            "💬", "Команды", "Commands",
+            R"(<h3 style='color:#00d4ff;'>💬 Команды без интернета</h3>
+<table border='0' cellpadding='4'>
+<tr><td style='color:#44aaff;'><b>Команда</b></td><td style='color:#44aaff;'><b>Что делает</b></td></tr>
+<tr><td>открой Chrome / Steam</td><td>Запускает приложение</td></tr>
+<tr><td>закрой Steam</td><td>Завершает процесс</td></tr>
+<tr><td>заблокируй</td><td>Блокировка экрана</td></tr>
+<tr><td>выключи / перезагрузи</td><td>Выключение ПК</td></tr>
+<tr><td>который час / какая дата</td><td>Время и дата</td></tr>
+<tr><td>2+2 / 10*5</td><td>Математика мгновенно</td></tr>
+<tr><td>громкость 70 / тише</td><td>Управление звуком</td></tr>
+<tr><td>яркость выше</td><td>Яркость экрана</td></tr>
+<tr><td>открой ютуб</td><td>Открывает YouTube в браузере</td></tr>
+<tr><td>хочу послушать музыку</td><td>Предлагает Spotify/YouTube Music</td></tr>
+<tr><td>что ты умеешь</td><td>Полный список команд</td></tr>
+</table>
+<p style='color:#aaa;font-size:11px;'>Работает на русском и английском без переключения.</p>)",
+            R"(<h3 style='color:#00d4ff;'>💬 Offline Commands</h3>
+<table border='0' cellpadding='4'>
+<tr><td style='color:#44aaff;'><b>Command</b></td><td style='color:#44aaff;'><b>Action</b></td></tr>
+<tr><td>open Chrome / Steam</td><td>Launches the app</td></tr>
+<tr><td>close Steam</td><td>Kills the process</td></tr>
+<tr><td>lock screen</td><td>Locks Windows</td></tr>
+<tr><td>shutdown / restart</td><td>Powers off PC</td></tr>
+<tr><td>what time / what date</td><td>Time and date</td></tr>
+<tr><td>2+2 / 10*5</td><td>Instant math</td></tr>
+<tr><td>volume 70 / louder</td><td>Volume control</td></tr>
+<tr><td>brightness up</td><td>Screen brightness</td></tr>
+<tr><td>open youtube</td><td>Opens YouTube in browser</td></tr>
+<tr><td>play some music</td><td>Suggests Spotify/YouTube Music</td></tr>
+<tr><td>what can you do</td><td>Full command list</td></tr>
+</table>
+<p style='color:#aaa;font-size:11px;'>Works in Russian and English without switching.</p>)"
+        },
+        {
+            "🎤", "Голосовой ввод", "Voice Input",
+            R"(<h3 style='color:#00d4ff;'>🎤 Голосовой ввод (Vosk)</h3>
+<p>Работает полностью офлайн — никакого облака и API ключей.</p>
+<h4 style='color:#44aaff;'>Как использовать:</h4>
+<ol>
+<li>Нажми кнопку <b>🎤</b> в правом нижнем углу</li>
+<li>Скажи <b>"Джарвис"</b> (wake word) — кнопка станет зелёной</li>
+<li>Произнеси команду — она отправится автоматически</li>
+<li>Нажми 🎤 снова чтобы остановить</li>
+</ol>
+<h4 style='color:#44aaff;'>Особенности:</h4>
+<ul>
+<li>🤫 Распознаёт шёпот (порог -45 dB)</li>
+<li>🌍 Автоопределение русского и английского</li>
+<li>💻 Работает на CPU без GPU</li>
+<li>📦 Модели скачиваются автоматически при первом запуске<br>
+    <span style='color:#aaa;font-size:11px;'>EN модель ~40 МБ (быстро), RU модель ~1.8 ГБ (в фоне)</span></li>
+</ul>
+<h4 style='color:#44aaff;'>Если голос не работает:</h4>
+<ul>
+<li>Убедись что микрофон разрешён в Windows</li>
+<li>Папка <b>redist/vosk/model-ru/</b> должна существовать</li>
+<li>Кнопка 🎤 → показывает уровень звука в тултипе</li>
+</ul>)",
+            R"(<h3 style='color:#00d4ff;'>🎤 Voice Input (Vosk)</h3>
+<p>Fully offline — no cloud, no API keys needed.</p>
+<h4 style='color:#44aaff;'>How to use:</h4>
+<ol>
+<li>Click <b>🎤</b> button in bottom right</li>
+<li>Say <b>"Jarvis"</b> (wake word) — button turns green</li>
+<li>Speak your command — sent automatically</li>
+<li>Click 🎤 again to stop</li>
+</ol>
+<h4 style='color:#44aaff;'>Features:</h4>
+<ul>
+<li>🤫 Detects whisper level speech (-45 dB)</li>
+<li>🌍 Auto-detects Russian and English</li>
+<li>💻 Runs on CPU, no GPU needed</li>
+<li>📦 Models auto-download on first use<br>
+    <span style='color:#aaa;font-size:11px;'>EN ~40 MB (fast), RU ~1.8 GB (background)</span></li>
+</ul>
+<h4 style='color:#44aaff;'>If voice doesn't work:</h4>
+<ul>
+<li>Check microphone permission in Windows</li>
+<li>Folder <b>redist/vosk/model-ru/</b> must exist</li>
+<li>🎤 tooltip shows current dB level</li>
+</ul>)"
+        },
+        {
+            "🧠", "Обучение ИИ", "AI Training",
+            R"(<h3 style='color:#00d4ff;'>🧠 Как JARVIS обучается на тебе</h3>
+<p>JARVIS накапливает твои диалоги и учится отвечать в твоём стиле.</p>
 
-<b>🔍 ПОИСК</b><br>
-найди [запрос] в проекте · найди [запрос] на компьютере · найди [запрос] в истории браузера<br>
-найди [запрос] в нашем разговоре · найди [запрос] в интернете<br><br>
+<h4 style='color:#44aaff;'>📊 Шаг 1 — Сбор данных (автоматически)</h4>
+<p>Каждый ответ AI автоматически сохраняется в базу данных.<br>
+Нажми <b>👍</b> под ответом чтобы отметить его как "отличный".</p>
 
-<b>💻 КОД (требует Claude API + проект проиндексирован)</b><br>
-добавь функцию X · исправь баг в файл.cpp · перепиши класс Y · создай файл Z<br><br>
+<h4 style='color:#44aaff;'>📤 Шаг 2 — Экспорт датасета</h4>
+<p>Меню <b>🧠 Обучение → Экспорт .jsonl...</b><br>
+Файл весит несколько МБ и содержит пары вопрос/ответ.<br>
+Рекомендуем экспортировать при <b>500+ записях</b>.</p>
 
-<b>⚙ НАСТРОЙКИ</b><br>
-Настройки → Ключ Claude API... (console.anthropic.com)<br>
-Настройки → Ключ Gemini API... (aistudio.google.com — бесплатно)<br>
-Настройки → Модель Ollama... (ollama.com — локально, без интернета)<br>
-Проект → Индексировать папку... → выбрать корень проекта<br><br>
+<h4 style='color:#44aaff;'>🎙️ Шаг 3 — Пассивная запись (опционально)</h4>
+<p>Меню <b>🧠 Обучение → Пассивная запись: ВЫКЛ</b><br>
+JARVIS слушает микрофон в фоне и записывает твою речь.<br>
+Brain автоматически создаёт пары диалогов.<br>
+Данные удаляются через 7 дней.</p>
 
-<b>📎 ПРИКРЕПЛЕНИЯ</b><br>
-Кнопка 📎 или перетащить файлы в окно · Ctrl+O открыть выбор файлов<br><br>
+<h4 style='color:#44aaff;'>📁 Шаг 4 — Папка датасета</h4>
+<p>Меню <b>🧠 Обучение → Папка для датасета...</b><br>
+Укажи папку на большом диске (например 4TB).<br>
+Там будут храниться .jsonl файлы для обучения.</p>
 
-<b>⌨ ГОРЯЧИЕ КЛАВИШИ</b><br>
-Enter — отправить · Esc — закрыть уточнение · Ctrl+O — прикрепить файл)"
-        );
+<h4 style='color:#44aaff;'>🧹 Автоочистка</h4>
+<p>BackgroundLearner автоматически удаляет мусор:<br>
+короткие ответы, дубли, ошибки распознавания голоса.</p>
 
-        QMessageBox* box = new QMessageBox(this);
-        box->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. User Guide")
-                                  : QStringLiteral("Инструкция J.A.R.V.I.S."));
-        box->setTextFormat(Qt::RichText);
-        box->setText(guide);
-        box->setIcon(QMessageBox::Information);
-        box->setStandardButtons(QMessageBox::Ok);
-        box->setStyleSheet(
-            QStringLiteral("QMessageBox { background-color: #0a1018; color: #c8e0f0; }"
-                           "QMessageBox QLabel { color: #c8e0f0; min-width: 520px; }"
-                           "QPushButton { background-color: #0f2438; color: #00d4ff; "
-                           "border: 1px solid #1a5070; padding: 6px 20px; border-radius: 4px; }"
-                           "QPushButton:hover { background-color: #1a3a5c; }"));
-        box->exec();
-        box->deleteLater();
+<p style='color:#44ff44;background:#0d2a0d;padding:8px;border-radius:4px;'>
+💡 Чем больше лайков — тем качественнее будущая модель.<br>
+Цель: собрать 500-1000 👍 ответов, потом дообучить через Unsloth/LLaMA-Factory.</p>)",
+            R"(<h3 style='color:#00d4ff;'>🧠 How JARVIS Learns From You</h3>
+<p>JARVIS accumulates your dialogs and learns to respond in your style.</p>
+
+<h4 style='color:#44aaff;'>📊 Step 1 — Data Collection (automatic)</h4>
+<p>Every AI response is auto-saved to the database.<br>
+Press <b>👍</b> below a response to mark it as "great".</p>
+
+<h4 style='color:#44aaff;'>📤 Step 2 — Export Dataset</h4>
+<p>Menu <b>🧠 Training → Export .jsonl...</b><br>
+File is a few MB and contains question/answer pairs.<br>
+Recommended: export when you have <b>500+ entries</b>.</p>
+
+<h4 style='color:#44aaff;'>🎙️ Step 3 — Passive Recording (optional)</h4>
+<p>Menu <b>🧠 Training → Passive Recording: OFF</b><br>
+JARVIS listens in background and records your speech.<br>
+Brain automatically creates dialog pairs.<br>
+Data is deleted after 7 days.</p>
+
+<h4 style='color:#44aaff;'>📁 Step 4 — Dataset Folder</h4>
+<p>Menu <b>🧠 Training → Set dataset folder...</b><br>
+Point to a large drive (e.g. 4TB external).<br>
+.jsonl files will be stored there for training.</p>
+
+<h4 style='color:#44aaff;'>🧹 Auto-cleanup</h4>
+<p>BackgroundLearner automatically removes noise:<br>
+short replies, duplicates, voice recognition errors.</p>
+
+<p style='color:#44ff44;background:#0d2a0d;padding:8px;border-radius:4px;'>
+💡 More likes = better future model.<br>
+Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.</p>)"
+        },
+        {
+            "👁", "Зрение и экран", "Screen Vision",
+            R"(<h3 style='color:#00d4ff;'>👁 Зрение и управление экраном</h3>
+<p>JARVIS видит твой экран и может кликать по элементам.</p>
+<h4 style='color:#44aaff;'>Команды зрения:</h4>
+<table border='0' cellpadding='4'>
+<tr><td><b>что видишь</b></td><td>Скриншот → Claude анализирует</td></tr>
+<tr><td><b>опиши экран</b></td><td>Полное описание содержимого</td></tr>
+<tr><td><b>кликни на "OK"</b></td><td>OCR находит текст → клик</td></tr>
+<tr><td><b>нажми кнопку X</b></td><td>Поиск по тексту + клик мышью</td></tr>
+</table>
+<p style='color:#ffaa44;'>⚠️ Требует ключ Claude API (используется Vision модель)</p>
+<h4 style='color:#44aaff;'>Как прикрепить файл:</h4>
+<ul>
+<li>Кнопка <b>📎</b> — выбрать файл</li>
+<li>Перетащить файл в окно</li>
+<li>Поддерживаются: .txt .cpp .h .py .pdf .docx изображения</li>
+</ul>)",
+            R"(<h3 style='color:#00d4ff;'>👁 Screen Vision & Control</h3>
+<p>JARVIS sees your screen and can click elements.</p>
+<h4 style='color:#44aaff;'>Vision commands:</h4>
+<table border='0' cellpadding='4'>
+<tr><td><b>what do you see</b></td><td>Screenshot → Claude analyzes</td></tr>
+<tr><td><b>describe screen</b></td><td>Full content description</td></tr>
+<tr><td><b>click on "OK"</b></td><td>OCR finds text → clicks</td></tr>
+<tr><td><b>press button X</b></td><td>Text search + mouse click</td></tr>
+</table>
+<p style='color:#ffaa44;'>⚠️ Requires Claude API key (Vision model used)</p>
+<h4 style='color:#44aaff;'>How to attach a file:</h4>
+<ul>
+<li>Click <b>📎</b> button — choose file</li>
+<li>Drag & drop file into window</li>
+<li>Supported: .txt .cpp .h .py .pdf .docx images</li>
+</ul>)"
+        },
+        {
+            "⚙️", "Настройки", "Settings",
+            R"(<h3 style='color:#00d4ff;'>⚙️ Настройки</h3>
+<h4 style='color:#44aaff;'>API ключи:</h4>
+<ul>
+<li><b>Claude</b> — console.anthropic.com → API Keys → Create Key</li>
+<li><b>Gemini</b> — aistudio.google.com → Get API key (бесплатно)</li>
+<li><b>Ollama</b> — ollama.com → скачать → <code>ollama pull qwen2.5:3b</code></li>
+</ul>
+<h4 style='color:#44aaff;'>Модели Ollama (по скорости):</h4>
+<table border='0' cellpadding='3'>
+<tr><td style='color:#44ff44;'><b>qwen2.5:3b</b></td><td>Быстро, хорошее качество ✅</td></tr>
+<tr><td><b>phi3:mini</b></td><td>Быстро, Microsoft</td></tr>
+<tr><td><b>llama3.2:3b</b></td><td>Хороший баланс</td></tr>
+<tr><td><b>mistral:7b</b></td><td>Хорошо для кода</td></tr>
+</table>
+<h4 style='color:#44aaff;'>Режим Агента:</h4>
+<p>Настройки → Режим Агента — включает роутинг:<br>
+простые вопросы → Ollama (офлайн/бесплатно)<br>
+код и анализ → Claude API</p>
+<h4 style='color:#44aaff;'>Горячие клавиши:</h4>
+<ul>
+<li><b>Enter</b> — отправить сообщение</li>
+<li><b>Ctrl+O</b> — прикрепить файл</li>
+<li><b>Esc</b> — закрыть панель уточнения</li>
+</ul>)",
+            R"(<h3 style='color:#00d4ff;'>⚙️ Settings</h3>
+<h4 style='color:#44aaff;'>API Keys:</h4>
+<ul>
+<li><b>Claude</b> — console.anthropic.com → API Keys → Create Key</li>
+<li><b>Gemini</b> — aistudio.google.com → Get API key (free)</li>
+<li><b>Ollama</b> — ollama.com → install → <code>ollama pull qwen2.5:3b</code></li>
+</ul>
+<h4 style='color:#44aaff;'>Ollama models (by speed):</h4>
+<table border='0' cellpadding='3'>
+<tr><td style='color:#44ff44;'><b>qwen2.5:3b</b></td><td>Fast, good quality ✅</td></tr>
+<tr><td><b>phi3:mini</b></td><td>Fast, Microsoft model</td></tr>
+<tr><td><b>llama3.2:3b</b></td><td>Good balance</td></tr>
+<tr><td><b>mistral:7b</b></td><td>Good for code</td></tr>
+</table>
+<h4 style='color:#44aaff;'>Agent Mode:</h4>
+<p>Settings → Agent Mode — enables routing:<br>
+simple questions → Ollama (offline/free)<br>
+code & analysis → Claude API</p>
+<h4 style='color:#44aaff;'>Keyboard shortcuts:</h4>
+<ul>
+<li><b>Enter</b> — send message</li>
+<li><b>Ctrl+O</b> — attach file</li>
+<li><b>Esc</b> — close clarification panel</li>
+</ul>)"
+        },
+        {
+            "🔧", "Устранение проблем", "Troubleshooting",
+            R"(<h3 style='color:#00d4ff;'>🔧 Устранение проблем</h3>
+<h4 style='color:#ffaa44;'>Нет ответа от AI:</h4>
+<ul>
+<li>Проверь ключ API: <b>Настройки → Ключ Claude API...</b></li>
+<li>Попробуй переключить бэкенд в <b>Настройки → Режим Агента</b></li>
+<li>Gemini работает бесплатно как запасной вариант</li>
+</ul>
+<h4 style='color:#ffaa44;'>Приложение не найдено:</h4>
+<ul>
+<li>Используй полное имя: "открой Google Chrome" вместо "открой гугл"</li>
+<li>Английские и русские алиасы работают оба</li>
+</ul>
+<h4 style='color:#ffaa44;'>Голосовой ввод не работает:</h4>
+<ul>
+<li>Проверь разрешение микрофона в Windows (Настройки → Конфиденциальность)</li>
+<li>Папка redist/vosk/model-ru/ должна существовать</li>
+<li>Модели скачиваются только при первом нажатии 🎤</li>
+</ul>
+<h4 style='color:#ffaa44;'>Антивирус блокирует:</h4>
+<p>Добавь папку JARVIS в исключения антивируса.<br>
+JARVIS использует SendInput и ShellExecuteW — это нормально.</p>
+<h4 style='color:#ffaa44;'>Нашёл баг:</h4>
+<p>Меню <b>Помощь → 🐛 Сообщить о баге...</b> — описание уйдёт разработчику.</p>)",
+            R"(<h3 style='color:#00d4ff;'>🔧 Troubleshooting</h3>
+<h4 style='color:#ffaa44;'>No AI response:</h4>
+<ul>
+<li>Check API key: <b>Settings → Claude API key...</b></li>
+<li>Try switching backend in <b>Settings → Agent Mode</b></li>
+<li>Gemini works free as fallback</li>
+</ul>
+<h4 style='color:#ffaa44;'>App not found:</h4>
+<ul>
+<li>Use full name: "open Google Chrome" not "open google"</li>
+<li>Both English and Russian aliases work</li>
+</ul>
+<h4 style='color:#ffaa44;'>Voice input not working:</h4>
+<ul>
+<li>Check microphone permission in Windows Settings → Privacy</li>
+<li>Folder redist/vosk/model-ru/ must exist</li>
+<li>Models download only on first 🎤 click</li>
+</ul>
+<h4 style='color:#ffaa44;'>Antivirus blocking:</h4>
+<p>Add JARVIS folder to antivirus exclusions.<br>
+JARVIS uses SendInput and ShellExecuteW — this is normal.</p>
+<h4 style='color:#ffaa44;'>Found a bug:</h4>
+<p>Menu <b>Help → 🐛 Report a Bug...</b> — description goes to developer.</p>)"
+        },
+        };
+
+        // Заполняем список разделов
+        for (const Section& s : sections) {
+            sectionList->addItem(
+                QStringLiteral("  %1  %2").arg(s.icon, IS_EN ? s.titleEn : s.titleRu));
+        }
+
+        // При выборе раздела — показываем содержимое
+        bool isEnglish = IS_EN;
+        QObject::connect(sectionList, &QListWidget::currentRowChanged, dlg,
+            [&sections, content_browser, isEnglish](int row) {
+            if (row < 0 || row >= sections.size()) return;
+            content_browser->setHtml(isEnglish ? sections[row].htmlEn : sections[row].htmlRu);
+        });
+
+        // Открываем первый раздел
+        sectionList->setCurrentRow(0);
+
+        dlg->exec();
     });
 
 }
@@ -1203,6 +1610,26 @@ bool MainWindow::tryOpenApp(const QString& userText, const Intent& intent)
 
     if (target.isEmpty()) return false;
 
+    // ── Сначала проверяем — может это сайт а не приложение ──
+    {
+        Brain localBrain;
+        QString webUrl = localBrain.resolveWebTarget(target.toLower());
+        if (webUrl.isEmpty())
+            webUrl = localBrain.resolveWebTarget(userText.toLower());
+
+        if (!webUrl.isEmpty()) {
+            QDesktopServices::openUrl(QUrl(webUrl));
+            QString siteName = QUrl(webUrl).host().remove(QStringLiteral("www."));
+            const QString resp = IS_EN
+                ? QStringLiteral("Opening in browser: ") + siteName
+                : QStringLiteral("Открываю в браузере: ") + siteName;
+            appendLog(Str::logJarvis(), resp, Theme::LogColors::jarvis);
+            m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
+            m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);
+            return true;
+        }
+    }
+
     // Пробуем AppLauncher — он ищет через реестр, PATH и жёсткие пути
     auto result = m_appLauncher.launch(target);
     if (result.success) {
@@ -1305,6 +1732,28 @@ void MainWindow::onSend()
             if (lo.contains(t)) { isVisual = true; break; }
         if (isVisual) {
             handleVisualCommand(text);
+            m_input->setFocus();
+            return;
+        }
+    }
+
+    // ── 1.5 Контекстные подсказки браузера ──────────────
+    // "хочу посмотреть что-нибудь" → предлагает YouTube (без явного "открой")
+    {
+        Brain localBrain;
+        QString suggestion = localBrain.suggestWebTarget(text.toLower());
+        if (!suggestion.isEmpty()) {
+            QStringList parts = suggestion.split(QStringLiteral("|"));
+            QString url  = parts.value(0);
+            QString name = parts.value(1, QUrl(url).host());
+            showClarification(
+                IS_EN ? QStringLiteral("Open %1?").arg(name)
+                      : QStringLiteral("Открыть %1?").arg(name),
+                { IS_EN ? QStringLiteral("Yes, open") : QStringLiteral("Да, открыть"),
+                  IS_EN ? QStringLiteral("No, ask AI") : QStringLiteral("Нет, спросить AI") }
+            );
+            m_pendingSuggestionAction = QStringLiteral("open_url:") + url;
+            m_pendingInput = text;
             m_input->setFocus();
             return;
         }
@@ -1525,6 +1974,28 @@ void MainWindow::onClarificationChoice(int choice)
 {
     if (m_pendingInput.isEmpty()) return;
 
+    // Специальный случай: open_url — предложение открыть сайт
+    if (m_pendingSuggestionAction.startsWith(QStringLiteral("open_url:"))) {
+        hideClarification();
+        if (choice == 0) {
+            // Пользователь согласился — открываем URL
+            QString url = m_pendingSuggestionAction.mid(9); // убираем "open_url:"
+            QDesktopServices::openUrl(QUrl(url));
+            QString siteName = QUrl(url).host().remove(QStringLiteral("www."));
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("Opening: ") + siteName
+                      : QStringLiteral("Открываю: ") + siteName,
+                Theme::LogColors::jarvis);
+        } else {
+            // Отказался — отправляем в AI
+            m_input->setText(m_pendingInput);
+            onSend();
+        }
+        m_pendingSuggestionAction.clear();
+        m_pendingInput.clear();
+        return;
+    }
+
     static const QStringList domainSuffixes = {
         QString(),
         QStringLiteral(" в проекте"),
@@ -1594,8 +2065,22 @@ void MainWindow::onAsyncResponse(const QString& response)
 
     // Сохраняем для возможного лайка
     m_lastAiResponse = response;
-    m_lastAiModel    = QStringLiteral("claude"); // TODO: получать из Brain
-    if (m_lastSessionId.isEmpty()) m_lastSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_lastAiModel    = QStringLiteral("claude");
+    if (m_lastSessionId.isEmpty())
+        m_lastSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+    // Автоматически сохраняем ВСЕ ответы с rating=0 (без лайка)
+    // Лайк 👍 обновит rating до 1 — это приоритетные пары для fine-tuning
+    if (!m_lastUserInput.isEmpty() && !response.isEmpty()) {
+        DbTrainingLog autoLog;
+        autoLog.userId      = 1;
+        autoLog.userMessage = m_lastUserInput;
+        autoLog.aiResponse  = response;
+        autoLog.model       = m_lastAiModel;
+        autoLog.sessionId   = m_lastSessionId;
+        autoLog.rating      = 0;  // 0 = автосохранён, 1 = лайкнут пользователем
+        DatabaseManager::instance().addTrainingLog(autoLog);
+    }
 
     // Активируем кнопку 👍
     if (m_likeBtn) {
@@ -2132,7 +2617,7 @@ void MainWindow::buildUI()
     m_micBtn = new QPushButton(QStringLiteral("🎤"), this);
     m_micBtn->setObjectName(QStringLiteral("micBtn"));
     m_micBtn->setFixedWidth(44);
-    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Whisper)") : QStringLiteral("Голосовой ввод (Whisper)"));
+    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)") : QStringLiteral("Голосовой ввод (Vosk)"));
     m_micBtn->setStyleSheet(
         QStringLiteral("QPushButton#micBtn { background-color: #0d1f2d; color: #4a7a9b; "
                        "border: 1px solid #1a3050; border-radius: 4px; font-size: 16px; } "
@@ -2210,6 +2695,23 @@ void MainWindow::buildUI()
             this, &MainWindow::onVoiceText);
     connect(m_voiceInput, &VoiceInput::wakeWordDetected,
             this, &MainWindow::onWakeWord);
+    connect(m_voiceInput, &VoiceInput::volumeLevel, this, [this](float db) {
+        if (!m_voiceActive || !m_micBtn) return;
+        // Нормализуем -60..-20dB → 0..100%
+        bool speaking = (db > -45.0f);
+        // Меняем цвет кнопки: зелёный = говорит, обычный = тишина
+        m_micBtn->setStyleSheet(speaking
+            ? QStringLiteral("QPushButton { background: #0d3a0d; color: #44ff44; ")
+              + QStringLiteral("border: 1px solid #44ff44; border-radius: 4px; }")
+            : QString());
+        m_micBtn->setToolTip(
+            QStringLiteral("🎤 %1 | Level: %2 dB")
+                .arg(speaking
+                    ? (IS_EN ? QStringLiteral("Speaking...") : QStringLiteral("Говорю..."))
+                    : (IS_EN ? QStringLiteral("Listening")   : QStringLiteral("Слушаю")))
+                .arg(static_cast<int>(db)));
+    });
+
     connect(m_voiceInput, &VoiceInput::whisperModeDetected,
             this, &MainWindow::onWhisperMode);
     connect(m_voiceInput, &VoiceInput::speechDetected, this, [this]() {
@@ -2507,8 +3009,8 @@ void MainWindow::onMicButtonClicked()
         m_voiceActive = false;
         m_micBtn->setText(QStringLiteral("🎤"));
         m_micBtn->setProperty("active", false);
-        m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Whisper)")
-                                   : QStringLiteral("Голосовой ввод (Whisper)"));
+        m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)")
+                                   : QStringLiteral("Голосовой ввод (Vosk)"));
         m_micBtn->style()->unpolish(m_micBtn);
         m_micBtn->style()->polish(m_micBtn);
         m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
@@ -2559,7 +3061,7 @@ void MainWindow::onWakeWord(const QString& word)
 void MainWindow::onWhisperMode(bool isWhisper)
 {
     if (isWhisper) {
-        m_micBtn->setToolTip(IS_EN ? QStringLiteral("🤫 Whisper detected")
+        m_micBtn->setToolTip(IS_EN ? QStringLiteral("🤫 Quiet voice detected")
                                    : QStringLiteral("🤫 Обнаружен шёпот"));
         appendLog(Str::logSystem(),
                   IS_EN ? QStringLiteral("🤫 Whisper detected — low volume mode active")
@@ -2583,9 +3085,14 @@ void MainWindow::onLikeLastResponse()
     log.sessionId   = m_lastSessionId;
     log.rating      = 1;
 
-    qint64 id = DatabaseManager::instance().addTrainingLog(log);
+    // Сначала пробуем обновить существующую запись (автосохранённую)
+    // Если нет — добавляем новую
+    auto& db = DatabaseManager::instance();
+    // UPDATE rating где уже есть эта пара
+    db.updateTrainingLogRating(m_lastUserInput, m_lastAiResponse, 1);
+    qint64 id = db.addTrainingLog(log);  // INSERT OR IGNORE если не было
 
-    if (id > 0) {
+    if (id > 0 || true) {  // true — лайк засчитываем в любом случае
         ++m_trainingCount;
         // Меняем вид кнопки — уже лайкнуто
         m_likeBtn->setProperty("liked", true);

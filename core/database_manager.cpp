@@ -1127,3 +1127,19 @@ int DatabaseManager::cleanupOldJournalEntries(qint64 userId, int olderThanDays)
     qDebug() << "[DB] voice_journal cleanup: deleted" << removed << "entries";
     return removed;
 }
+
+bool DatabaseManager::updateTrainingLogRating(const QString& userMsg,
+                                               const QString& aiResp, int rating)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(UPDATE training_logs SET rating=:r
+                 WHERE user_id=1
+                   AND user_message=:umsg
+                   AND ai_response=:aresp)");
+    q.bindValue(":r",     rating);
+    q.bindValue(":umsg",  userMsg.simplified());
+    q.bindValue(":aresp", aiResp.simplified());
+    if (!q.exec()) { logError("updateTrainingLogRating", q.lastError()); return false; }
+    return q.numRowsAffected() > 0;
+}

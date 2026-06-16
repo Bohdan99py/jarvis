@@ -85,6 +85,7 @@ public:
 
 signals:
     void audioChunkReady(QByteArray pcmData);
+    void volumeLevel(float db);       // -100..0 dB, для визуализации VAD
     void speechStarted();
     void speechEnded(QByteArray fullPcmData);
     void error(const QString& message);
@@ -162,6 +163,7 @@ signals:
     void initError(const QString& message);
     void listeningStarted();
     void speechDetected();
+    void volumeLevel(float db);   // уровень микрофона -100..0 dB
     void textRecognized(const QString& text, const QString& language);
     void wakeWordDetected(const QString& word);
     void whisperModeDetected(bool isWhisper);

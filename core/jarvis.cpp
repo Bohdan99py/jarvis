@@ -672,6 +672,74 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
 // TTS
 // ============================================================
 
+// Фильтр текста для TTS — убирает символы, ссылки, код
+static QString filterTextForSpeech(const QString& text)
+{
+    // Очень длинный ответ — произносим только первое предложение
+    if (text.length() > 300) {
+        // Ищем конец первого предложения
+        for (int i = 20; i < qMin(text.length(), 200); ++i) {
+            QChar c = text[i];
+            if ((c == '.' || c == '!' || c == '?') && i + 1 < text.length()
+                && text[i + 1].isSpace()) {
+                return text.left(i + 1).trimmed();
+            }
+        }
+        return text.left(150).trimmed() + QStringLiteral("...");
+    }
+
+    QString result = text;
+
+    // Убираем блоки кода ```...```
+    {
+        int s = result.indexOf(QStringLiteral("```"));
+        while (s >= 0) {
+            int e = result.indexOf(QStringLiteral("```"), s + 3);
+            if (e < 0) break;
+            result.remove(s, e - s + 3);
+            s = result.indexOf(QStringLiteral("```"));
+        }
+    }
+    // Убираем инлайн-код `...`
+    {
+        int s = result.indexOf('`');
+        while (s >= 0) {
+            int e = result.indexOf('`', s + 1);
+            if (e < 0) break;
+            result.remove(s, e - s + 1);
+            s = result.indexOf('`');
+        }
+    }
+    // Убираем markdown bold **...**
+    result.remove(QRegularExpression(QStringLiteral("\\*\\*[^*]+\\*\\*")));
+    // Убираем markdown italic *...*
+    result.remove(QRegularExpression(QStringLiteral("\\*[^*]+\\*")));
+    // Убираем заголовки ###
+    result.remove(QRegularExpression(QStringLiteral("^#{1,6}\\s+"), QRegularExpression::MultilineOption));
+    // Убираем URL http(s)://...
+    result.remove(QRegularExpression(QStringLiteral("https?://\\S+")));
+    // Убираем Windows пути C:\...
+    result.remove(QRegularExpression(QStringLiteral("[A-Za-z]:\\\\[\\\\S]+")));
+    // Убираем HTML entities &bull; &nbsp; и теги <br>
+    result.remove(QRegularExpression(QStringLiteral("&[a-z]+;")));
+    result.remove(QRegularExpression(QStringLiteral("<[^>]+")));
+    // Убираем bullet символы
+    result.replace(QStringLiteral("•"), QStringLiteral(" "));
+    result.replace(QStringLiteral("→"), QStringLiteral(" "));
+    result.replace(QStringLiteral("►"), QStringLiteral(" "));
+    result.replace(QStringLiteral("■"), QStringLiteral(" "));
+    result.replace(QStringLiteral("●"), QStringLiteral(" "));
+    result.replace(QStringLiteral("&bull;"), QStringLiteral(" "));
+
+    result = result.simplified().trimmed();
+
+    // Если после фильтрации ничего нет — не говорим
+    if (result.length() < 3) return QString();
+
+    return result;
+}
+
+
 void Jarvis::speakAsync(const QString& text)
 {
     if (text.isEmpty()) return;
@@ -680,7 +748,14 @@ void Jarvis::speakAsync(const QString& text)
     m_speaking.store(true);
     emit speakingChanged(true);
 
-    QString copy = text;
+    // Фильтруем текст для TTS — краткое резюме вместо символов
+    QString copy = filterTextForSpeech(text);
+    if (copy.isEmpty()) {
+        m_speaking.store(false);
+        m_ttsMutex.unlock();
+        emit speakingChanged(false);
+        return;
+    }
 
     QThread* thread = QThread::create([this, copy]() {
         ComInitializer threadCom;
@@ -800,13 +875,35 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     const bool hadAttachments = !attachmentBlock.isEmpty();
 
-    // Языковая инструкция — добавляем в начало сообщения как скрытую системную заметку
-    // Claude читает её и отвечает на нужном языке
-    if (!langInstruction.isEmpty()) {
-        enrichedMessage = QStringLiteral("[LANG_INSTRUCTION: ")
-                        + langInstruction
-                        + QStringLiteral("]\n\n")
-                        + enrichedMessage;
+    // Языковая инструкция + характер JARVIS
+    // Claude читает их и отвечает на нужном языке с нужной личностью
+    {
+        QString prefix;
+
+        // Характер JARVIS — саркастичный, умный, живой ИИ-ассистент
+        prefix += QStringLiteral(
+            "[JARVIS_PERSONALITY: "
+            "You are JARVIS — a sarcastic, witty, highly intelligent AI assistant. "
+            "You have a dry British humor and occasional sarcasm (like Tony Stark's JARVIS). "
+            "You are loyal and helpful, but not afraid to point out when a question is obvious. "
+            "Keep responses concise. If you found something — say 'Found it.' or 'Here you go.' "
+            "If a task is trivial — add a light sarcastic remark. "
+            "If a task is complex — be serious and precise. "
+            "Never use filler phrases like 'Of course!' or 'Certainly!'. "
+            "Speak naturally, like a person, not a corporate chatbot. "
+            "In Russian: use informal 'ты', be direct, witty, human-like. "
+            "Example of good tone: 'Нашёл. Хотя ты мог бы и сам догадаться.' "
+            "or 'Готово. И нет, ты не первый кто это спрашивает.']\n\n");
+
+        if (!langInstruction.isEmpty()) {
+            prefix += QStringLiteral("[LANG_INSTRUCTION: ")
+                    + langInstruction
+                    + QStringLiteral("]\n\n");
+        }
+
+        if (!prefix.isEmpty()) {
+            enrichedMessage = prefix + enrichedMessage;
+        }
     }
 
     // Мультиагентный роутинг
