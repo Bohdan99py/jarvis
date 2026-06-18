@@ -131,6 +131,37 @@ jobs:
           git clone --depth=1 https://github.com/ggerganov/whisper.cpp redist/whisper
         shell: cmd
 
+      # === Vosk SDK — DLL для офлайн распознавания ===
+      - name: Download Vosk SDK
+        shell: pwsh
+        run: |
+          $voskUrl = "https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip"
+          $zipPath = "$env:TEMP\vosk-sdk.zip"
+          $extractDir = "$env:TEMP\vosk-extract"
+          $targetDir = "redist\vosk"
+          
+          Write-Host "Downloading Vosk SDK..."
+          Invoke-WebRequest -Uri $voskUrl -OutFile $zipPath -UseBasicParsing
+          
+          Write-Host "Extracting Vosk SDK..."
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          
+          # Копируем DLL и заголовки в redist/vosk/
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          $srcDir = "$extractDir\vosk-win64-0.3.45"
+          Copy-Item "$srcDir\libvosk.dll"          "$targetDir\" -Force
+          Copy-Item "$srcDir\libgcc_s_seh-1.dll"   "$targetDir\" -Force
+          Copy-Item "$srcDir\libstdc++-6.dll"      "$targetDir\" -Force
+          Copy-Item "$srcDir\libwinpthread-1.dll"   "$targetDir\" -Force
+          Copy-Item "$srcDir\vosk_api.h"           "$targetDir\" -Force -ErrorAction SilentlyContinue
+          
+          # Чистим
+          Remove-Item $zipPath -Force
+          Remove-Item $extractDir -Recurse -Force
+          
+          Write-Host "Vosk SDK installed to $targetDir"
+          Get-ChildItem $targetDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB, 1)) MB)" }
+
       # === Сборка ===
       - name: Configure CMake
         shell: pwsh
@@ -193,6 +224,35 @@ jobs:
           if (Test-Path $audioSrc) {
             Copy-Item -Recurse -Force $audioSrc release_package\audio
             Write-Host "Qt Audio plugins copied"
+          }
+
+          # Копируем документацию в пакет
+          $docs = @("PRIVACY_POLICY.txt", "JARVIS_INSTALL_NOTES.txt", "EULA_JARVIS.txt", "JARVIS_EULA_EN.txt", "README.md")
+          foreach ($doc in $docs) {
+            if (Test-Path $doc) {
+              Copy-Item -Force $doc release_package\
+              Write-Host "Copied doc: $doc"
+            }
+          }
+
+          # Копируем Vosk DLL в release_package
+          $voskDir = "redist\vosk"
+          $voskDlls = @("libvosk.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")
+          $voskMissing = @()
+          foreach ($dll in $voskDlls) {
+            $src = "$voskDir\$dll"
+            if (Test-Path $src) {
+              Copy-Item -Force $src release_package\
+              Write-Host "Copied Vosk DLL: $dll"
+            } else {
+              Write-Warning "MISSING Vosk DLL: $src"
+              $voskMissing += $dll
+            }
+          }
+          if ($voskMissing.Count -gt 0) {
+            Write-Error "Missing Vosk DLLs: $($voskMissing -join ', '). Voice input will not work!"
+          } else {
+            Write-Host "All Vosk DLLs copied successfully"
           }
 
       - name: Upload build artifacts
