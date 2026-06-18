@@ -23,6 +23,7 @@
 #include "voice_input.h"
 #include "passive_listener.h"
 #include "database_manager.h"
+#include "local_trainer.h"
 #include "VoskSetupDialog.h"
 #include <QFileDialog>
 #include <QDialog>
@@ -56,6 +57,9 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QInputDialog>
+#include <QComboBox>
+#include <QSpinBox>
+#include <QCheckBox>
 #include <QDesktopServices>
 #include <QUrl>
 #include <QFileDialog>
@@ -256,6 +260,20 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ── Зрение + управление окнами ───────────────────────
     m_screenAgent = new ScreenAgent(this);
+
+    // ── Паттерн-обучение: какие приложения используются ──────
+    m_appLearner = new ScreenshotLearner(this);
+    connect(m_appLearner, &ScreenshotLearner::suggestionReady,
+            this, [this](const AppSuggestion& s) {
+        if (s.confidence >= 0.65f && m_suggestionBar) {
+            QString desc = IS_EN
+                ? QStringLiteral("Usually at this time you use %1. Open it?").arg(s.appName)
+                : QStringLiteral("Обычно в это время вы используете %1. Открыть?").arg(s.appName);
+            m_pendingSuggestionAction = s.appName;
+            onSuggestion(desc, s.appName);
+        }
+    });
+    m_appLearner->start(2); // каждые 2 минуты
     connect(m_screenAgent, &ScreenAgent::actionCompleted,
             this, [this](const QString& desc) {
         appendLog(Str::logJarvis(), desc, Theme::LogColors::system);
@@ -778,7 +796,302 @@ void MainWindow::buildMenuBar()
               : QStringLiteral("📤 Экспорт .jsonl для обучения..."));
     connect(actExport, &QAction::triggered, this, &MainWindow::onExportTrainingData);
 
-    // --- Поиск по истории чатов ---
+    // --- One-click обучение через Ollama ---
+    auto* actTrainLocal = trainMenu->addAction(
+        IS_EN ? QStringLiteral("🚀 Train Local Model (Ollama)...")
+              : QStringLiteral("🚀 Обучить модель локально (Ollama)..."));
+    connect(actTrainLocal, &QAction::triggered, this, [this]() {
+        auto* trainer = new LocalTrainer(this);
+
+        // Проверяем Ollama перед показом диалога
+        if (!trainer->isOllamaAvailable()) {
+            QMessageBox::warning(this,
+                IS_EN ? QStringLiteral("Ollama Not Found") : QStringLiteral("Ollama не найдена"),
+                IS_EN ? QStringLiteral("Ollama is required for local training.\n\n"
+                           "Install from: https://ollama.com\n"
+                           "Then restart JARVIS.")
+                      : QStringLiteral("Для обучения нужна Ollama.\n\n"
+                           "Установите: https://ollama.com\n"
+                           "Затем перезапустите JARVIS."));
+            delete trainer;
+            return;
+        }
+
+        // Диалог настройки обучения
+        QDialog dlg(this);
+        dlg.setWindowTitle(IS_EN ? QStringLiteral("JARVIS — Train Personal Model")
+                                 : QStringLiteral("JARVIS — Обучение персональной модели"));
+        dlg.setMinimumSize(520, 420);
+        dlg.setStyleSheet(QStringLiteral(
+            "QDialog{background:#0a1018;color:#c8e0f0;}"
+            "QLabel{color:#c8e0f0;font-size:12px;}"
+            "QComboBox{background:#0f2438;color:#00d4ff;border:1px solid #1a5070;"
+            "padding:4px 12px;border-radius:4px;font-size:12px;}"
+            "QComboBox:drop-down{border:none;}"
+            "QSpinBox{background:#0f2438;color:#00d4ff;border:1px solid #1a5070;"
+            "padding:4px;border-radius:4px;}"
+            "QTextEdit{background:#0d1a28;color:#95a5a6;border:1px solid #1a3050;"
+            "font-family:Consolas,monospace;font-size:11px;border-radius:4px;}"
+            "QPushButton{background:#0f2438;color:#00d4ff;border:1px solid #1a5070;"
+            "padding:6px 20px;border-radius:4px;font-size:13px;}"
+            "QPushButton:hover{background:#1a3a5c;}"
+            "QPushButton#trainBtn{background:#00695c;color:#fff;border:1px solid #00897b;font-weight:bold;}"
+            "QPushButton#trainBtn:hover{background:#00897b;}"
+            "QPushButton#trainBtn:disabled{background:#333;color:#666;}"));
+
+        auto* layout = new QVBoxLayout(&dlg);
+        layout->setContentsMargins(20, 16, 20, 16);
+        layout->setSpacing(10);
+
+        // Заголовок
+        auto* titleLabel = new QLabel(
+            IS_EN ? QStringLiteral("<b style='color:#00d4ff;font-size:15px;'>"
+                                   "🚀 Train personalized model</b>")
+                  : QStringLiteral("<b style='color:#00d4ff;font-size:15px;'>"
+                                   "🚀 Обучение персональной модели</b>"), &dlg);
+        titleLabel->setTextFormat(Qt::RichText);
+        layout->addWidget(titleLabel);
+
+        auto* descLabel = new QLabel(
+            IS_EN ? QStringLiteral("Creates a custom Ollama model from your liked responses.\n"
+                                   "No internet, GPU, or coding required — just Ollama.")
+                  : QStringLiteral("Создаёт персональную модель из лайкнутых ответов.\n"
+                                   "Без интернета, GPU и программирования — только Ollama."), &dlg);
+        descLabel->setWordWrap(true);
+        layout->addWidget(descLabel);
+
+        // Статистика
+        auto& db = DatabaseManager::instance();
+        int likedCount = db.trainingLogCount(1);
+
+        auto* statsLabel = new QLabel(
+            (IS_EN ? QStringLiteral("👍 Liked responses available: <b style='color:#00d4ff;'>%1</b>")
+                   : QStringLiteral("👍 Лайкнутых ответов: <b style='color:#00d4ff;'>%1</b>"))
+                .arg(likedCount), &dlg);
+        statsLabel->setTextFormat(Qt::RichText);
+        layout->addWidget(statsLabel);
+
+        // Выбор базовой модели
+        auto* modelRow = new QHBoxLayout();
+        modelRow->addWidget(new QLabel(
+            IS_EN ? QStringLiteral("Base model:") : QStringLiteral("Базовая модель:"), &dlg));
+        auto* modelCombo = new QComboBox(&dlg);
+        QStringList installed = trainer->installedModels();
+        // Добавляем рекомендованные + установленные
+        QStringList options = { QStringLiteral("llama3.2:3b"), QStringLiteral("llama3.2:1b"),
+                                QStringLiteral("mistral:7b"), QStringLiteral("phi3:mini") };
+        for (const QString& m : installed) {
+            if (!options.contains(m)) options.prepend(m);
+        }
+        modelCombo->addItems(options);
+        modelCombo->setCurrentText(QStringLiteral("llama3.2:3b"));
+        modelRow->addWidget(modelCombo, 1);
+        layout->addLayout(modelRow);
+
+        // Макс пар
+        auto* pairsRow = new QHBoxLayout();
+        pairsRow->addWidget(new QLabel(
+            IS_EN ? QStringLiteral("Max examples:") : QStringLiteral("Макс. примеров:"), &dlg));
+        auto* pairsSpin = new QSpinBox(&dlg);
+        pairsSpin->setRange(10, 500);
+        pairsSpin->setValue(80);
+        pairsSpin->setToolTip(IS_EN ? QStringLiteral("More = better quality but slower inference")
+                                    : QStringLiteral("Больше = лучше качество, но медленнее"));
+        pairsRow->addWidget(pairsSpin);
+        pairsRow->addStretch();
+        layout->addLayout(pairsRow);
+
+        // Лог
+        auto* logView = new QTextEdit(&dlg);
+        logView->setReadOnly(true);
+        logView->setMaximumHeight(140);
+        layout->addWidget(logView, 1);
+
+        // Кнопки
+        auto* btnRow = new QHBoxLayout();
+        auto* trainBtn = new QPushButton(
+            IS_EN ? QStringLiteral("🚀 Start Training") : QStringLiteral("🚀 Начать обучение"), &dlg);
+        trainBtn->setObjectName(QStringLiteral("trainBtn"));
+        trainBtn->setMinimumHeight(38);
+        if (likedCount == 0) {
+            trainBtn->setEnabled(false);
+            trainBtn->setToolTip(IS_EN ? QStringLiteral("Like some responses first (👍 button)")
+                                       : QStringLiteral("Сначала лайкните ответы (кнопка 👍)"));
+        }
+        auto* cancelBtn = new QPushButton(
+            IS_EN ? QStringLiteral("Close") : QStringLiteral("Закрыть"), &dlg);
+        btnRow->addStretch();
+        btnRow->addWidget(cancelBtn);
+        btnRow->addWidget(trainBtn);
+        layout->addLayout(btnRow);
+
+        connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+        connect(trainer, &LocalTrainer::trainingProgress, logView,
+                [logView](const QString& msg) {
+            logView->append(msg);
+            auto* sb = logView->verticalScrollBar();
+            if (sb) sb->setValue(sb->maximum());
+        });
+
+        connect(trainer, &LocalTrainer::trainingFinished, &dlg,
+                [this, trainBtn, cancelBtn, logView, trainer](bool success, const QString& msg) {
+            trainBtn->setEnabled(true);
+            cancelBtn->setText(IS_EN ? QStringLiteral("Done") : QStringLiteral("Готово"));
+            if (success) {
+                logView->append(QStringLiteral("\n🎉 ") + msg);
+                appendLog(Str::logSystem(),
+                    IS_EN ? QStringLiteral("🎉 Personal model trained! Select '%1' in Ollama settings.")
+                                .arg(trainer->outputModel())
+                          : QStringLiteral("🎉 Модель обучена! Выберите '%1' в настройках Ollama.")
+                                .arg(trainer->outputModel()),
+                    Theme::LogColors::system);
+            } else {
+                logView->append(QStringLiteral("\n❌ ") + msg);
+            }
+        });
+
+        connect(trainBtn, &QPushButton::clicked, &dlg,
+                [trainer, trainBtn, modelCombo, pairsSpin]() {
+            trainBtn->setEnabled(false);
+            trainer->setBaseModel(modelCombo->currentText());
+            trainer->setMaxPairs(pairsSpin->value());
+            trainer->train(&DatabaseManager::instance());
+        });
+
+        dlg.exec();
+        delete trainer;
+    });
+
+    trainMenu->addSeparator();
+
+    // --- Паттерны использования ПК ---
+    auto* actAppPatterns = trainMenu->addAction(
+        IS_EN ? QStringLiteral("📊 App Usage Patterns...")
+              : QStringLiteral("📊 Паттерны использования..."));
+    connect(actAppPatterns, &QAction::triggered, this, [this]() {
+        QDialog dlg(this);
+        dlg.setWindowTitle(IS_EN ? QStringLiteral("JARVIS — App Usage Patterns")
+                                 : QStringLiteral("JARVIS — Паттерны использования"));
+        dlg.setMinimumSize(500, 450);
+        dlg.setStyleSheet(QStringLiteral(
+            "QDialog{background:#0a1018;color:#c8e0f0;}"
+            "QLabel{color:#c8e0f0;}"
+            "QTextEdit{background:#0d1a28;color:#95a5a6;border:1px solid #1a3050;"
+            "font-family:Consolas,monospace;font-size:12px;border-radius:4px;}"
+            "QPushButton{background:#0f2438;color:#00d4ff;border:1px solid #1a5070;"
+            "padding:6px 16px;border-radius:4px;}"
+            "QPushButton:hover{background:#1a3a5c;}"
+            "QCheckBox{color:#c8e0f0;}"));
+
+        auto* layout = new QVBoxLayout(&dlg);
+        layout->setContentsMargins(16, 14, 16, 14);
+        layout->setSpacing(10);
+
+        auto* title = new QLabel(
+            IS_EN ? QStringLiteral("<b style='color:#00d4ff;font-size:14px;'>"
+                                   "📊 App Usage Patterns</b>")
+                  : QStringLiteral("<b style='color:#00d4ff;font-size:14px;'>"
+                                   "📊 Паттерны использования ПК</b>"), &dlg);
+        title->setTextFormat(Qt::RichText);
+        layout->addWidget(title);
+
+        int total = m_appLearner ? m_appLearner->totalRecords() : 0;
+        auto* countLabel = new QLabel(
+            (IS_EN ? QStringLiteral("Total records: <b>%1</b>")
+                   : QStringLiteral("Всего записей: <b>%1</b>")).arg(total), &dlg);
+        countLabel->setTextFormat(Qt::RichText);
+        layout->addWidget(countLabel);
+
+        // Предложения на сейчас
+        auto* sugTitle = new QLabel(
+            IS_EN ? QStringLiteral("<b style='color:#2ecc71;'>Predictions for now:</b>")
+                  : QStringLiteral("<b style='color:#2ecc71;'>Предсказания на сейчас:</b>"), &dlg);
+        sugTitle->setTextFormat(Qt::RichText);
+        layout->addWidget(sugTitle);
+
+        auto suggestions = m_appLearner ? m_appLearner->suggestionsForNow(5) : QVector<AppSuggestion>{};
+        if (suggestions.isEmpty()) {
+            layout->addWidget(new QLabel(
+                IS_EN ? QStringLiteral("Not enough data yet. Keep using your PC!")
+                      : QStringLiteral("Ещё мало данных. Продолжайте использовать ПК!"), &dlg));
+        } else {
+            for (const auto& s : suggestions) {
+                QString line = QStringLiteral("  %1  — %2x  (%3%)")
+                    .arg(s.appName)
+                    .arg(s.frequency)
+                    .arg(static_cast<int>(s.confidence * 100));
+                auto* lbl = new QLabel(line, &dlg);
+                lbl->setStyleSheet(s.confidence >= 0.5f
+                    ? QStringLiteral("color:#2ecc71;font-size:13px;")
+                    : QStringLiteral("color:#7f8c8d;font-size:12px;"));
+                layout->addWidget(lbl);
+            }
+        }
+
+        // Статистика за сегодня
+        layout->addSpacing(8);
+        auto* todayTitle = new QLabel(
+            IS_EN ? QStringLiteral("<b style='color:#3498db;'>Today's usage:</b>")
+                  : QStringLiteral("<b style='color:#3498db;'>Сегодня:</b>"), &dlg);
+        todayTitle->setTextFormat(Qt::RichText);
+        layout->addWidget(todayTitle);
+
+        auto todayData = m_appLearner ? m_appLearner->todayStats() : QVector<AppUsageStat>{};
+        auto* statsView = new QTextEdit(&dlg);
+        statsView->setReadOnly(true);
+        statsView->setMaximumHeight(160);
+        if (todayData.isEmpty()) {
+            statsView->setText(IS_EN ? QStringLiteral("No data for today")
+                                     : QStringLiteral("Нет данных за сегодня"));
+        } else {
+            QString html;
+            for (const auto& st : todayData) {
+                html += QStringLiteral("<b>%1</b> — %2 min (%3 sessions)<br>")
+                    .arg(st.appName).arg(st.totalMinutes).arg(st.sessionCount);
+            }
+            statsView->setHtml(html);
+        }
+        layout->addWidget(statsView);
+
+        // Кнопки
+        auto* btnRow = new QHBoxLayout();
+
+        auto* enableCheck = new QCheckBox(
+            IS_EN ? QStringLiteral("Enable learning")
+                  : QStringLiteral("Включить обучение"), &dlg);
+        enableCheck->setChecked(m_appLearner && m_appLearner->isEnabled());
+        connect(enableCheck, &QCheckBox::toggled, this, [this](bool on) {
+            if (m_appLearner) {
+                m_appLearner->setEnabled(on);
+                if (on && !m_appLearner->isRunning()) m_appLearner->start(2);
+            }
+        });
+        btnRow->addWidget(enableCheck);
+
+        btnRow->addStretch();
+
+        auto* clearBtn = new QPushButton(
+            IS_EN ? QStringLiteral("Clear data") : QStringLiteral("Очистить"), &dlg);
+        connect(clearBtn, &QPushButton::clicked, this, [this, countLabel, statsView]() {
+            if (m_appLearner) {
+                m_appLearner->clearAllData();
+                countLabel->setText(QStringLiteral("Total: <b>0</b>"));
+                statsView->setText(QStringLiteral("Cleared"));
+            }
+        });
+        btnRow->addWidget(clearBtn);
+
+        auto* closeBtn = new QPushButton(
+            IS_EN ? QStringLiteral("Close") : QStringLiteral("Закрыть"), &dlg);
+        connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+        btnRow->addWidget(closeBtn);
+
+        layout->addLayout(btnRow);
+        dlg.exec();
+    });
+
+    trainMenu->addSeparator();
     auto* actSearch = trainMenu->addAction(
         IS_EN ? QStringLiteral("🔍 Search chat history...")
               : QStringLiteral("🔍 Поиск по истории чатов..."));

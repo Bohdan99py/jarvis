@@ -37,6 +37,7 @@ class QDropEvent;
 #include "voice_input.h"
 #include "passive_listener.h"
 #include "VoskSetupDialog.h"
+#include "screenshot_learner.h"
 
 class MainWindow : public QMainWindow
 {
@@ -150,6 +151,7 @@ private:
     LanguageDetector        m_langDetector;
     LearnedCommands*        m_learnedCmds  = nullptr;  // самообучение
     ScreenAgent*            m_screenAgent  = nullptr;  // зрение + клики
+    ScreenshotLearner*      m_appLearner   = nullptr;  // паттерны использования ПК
     QString                 m_lastUserInput;               // для самообучения
 
     // Голосовой ввод

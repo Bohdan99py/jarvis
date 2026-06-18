@@ -294,6 +294,14 @@ bool VoskDownloader::deleteModel(const QString& installDir, const QString& model
 
 void VoskDownloader::ensureDll()
 {
+    // DLL может быть: 1) рядом с exe (из installer), 2) в modelDir (legacy)
+    QString exeDir = QCoreApplication::applicationDirPath();
+    if (QFile::exists(exeDir + QStringLiteral("/libvosk.dll"))) {
+        emit logMessage(QStringLiteral("✅ libvosk.dll found (installed)"));
+        emit componentReady(QStringLiteral("dll"));
+        return;
+    }
+
     auto status = checkStatus(m_installDir);
     if (status.dllReady) {
         emit componentReady(QStringLiteral("dll"));
@@ -433,19 +441,32 @@ void VoiceInput::markFirstRunComplete()
 
 QString VoiceInput::voskInstallDir()
 {
-    // 1. Рядом с exe (installer bundled DLL)
-    QString exeDir = QCoreApplication::applicationDirPath();
-    if (QFile::exists(exeDir + QStringLiteral("/libvosk.dll")))
-        return exeDir;
-
-    // 2. AppData/JARVIS/vosk
+    // Модели ВСЕГДА в AppData — туда у пользователя есть права записи.
+    // Program Files (рядом с exe) — только для DLL, установленных installer'ом.
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
            + QStringLiteral("/vosk");
 }
 
+// Проверяем DLL в двух местах: рядом с exe (installer) или в AppData (legacy)
+static bool isDllAvailable()
+{
+    QString exeDir = QCoreApplication::applicationDirPath();
+    if (QFile::exists(exeDir + QStringLiteral("/libvosk.dll")))
+        return true;
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                      + QStringLiteral("/vosk");
+    return QFile::exists(appData + QStringLiteral("/libvosk.dll"));
+}
+
 VoskSetupStatus VoiceInput::checkSetupStatus()
 {
-    return VoskDownloader::checkStatus(voskInstallDir());
+    QString modelDir = voskInstallDir();
+    VoskSetupStatus status = VoskDownloader::checkStatus(modelDir);
+    // DLL может быть рядом с exe (из installer), а не в modelDir
+    if (!status.dllReady) {
+        status.dllReady = isDllAvailable();
+    }
+    return status;
 }
 
 QStringList VoiceInput::installedModelIds() const

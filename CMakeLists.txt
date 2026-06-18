@@ -161,6 +161,10 @@ add_library(JarvisCore STATIC
         core/learned_commands.cpp
         core/screen_agent.h
         core/screen_agent.cpp
+        core/local_trainer.h
+        core/local_trainer.cpp
+        core/screenshot_learner.h
+        core/screenshot_learner.cpp
         # Прикрепления файлов
         core/attachments_manager.h
         core/attachments_manager.cpp
