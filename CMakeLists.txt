@@ -198,6 +198,8 @@ add_library(JarvisCore STATIC
         # Голосовой ввод — Whisper.cpp, VAD, шёпот, wake word
         core/voice_input.h
         core/voice_input.cpp
+        core/VoskSetupDialog.h
+        core/VoskSetupDialog.cpp
 
         # Пассивная запись голоса для датасета fine-tuning
         core/passive_listener.h

@@ -23,6 +23,7 @@
 #include "voice_input.h"
 #include "passive_listener.h"
 #include "database_manager.h"
+#include "VoskSetupDialog.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -53,6 +54,7 @@
 #include <QMessageBox>
 #include <QMenu>
 #include <QAction>
+#include <QActionGroup>
 #include <QInputDialog>
 #include <QDesktopServices>
 #include <QUrl>
@@ -283,12 +285,66 @@ void MainWindow::applyLanguage(bool english)
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
     cfg.setValue(QStringLiteral("ui/english"), english);
 
-    m_input->setPlaceholderText(Str::inputPlaceholder());
-    m_status->setText(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"));
+    // ── Перестраиваем всё меню — все Str::* вернут новые строки ──
+    // Откладываем на следующий цикл: текущий QAction ещё в стеке вызовов
+    QTimer::singleShot(0, this, [this]() {
+        menuBar()->clear();
+        buildMenuBar();
+    });
 
+    // ── Заголовок окна ───────────────────────────────────────
+    setWindowTitle(IS_EN
+        ? QStringLiteral("J.A.R.V.I.S. — Personal Assistant v%1").arg(QStringLiteral(JARVIS_VERSION))
+        : QStringLiteral("J.A.R.V.I.S. — Персональный ассистент v%1").arg(QStringLiteral(JARVIS_VERSION)));
+
+    // ── Поле ввода ───────────────────────────────────────────
+    m_input->setPlaceholderText(Str::inputPlaceholder());
+
+    // ── Статус-бар ───────────────────────────────────────────
+    m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+
+    // ── Кнопка микрофона ─────────────────────────────────────
+    if (m_micBtn) {
+        if (!m_voiceActive) {
+            m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)")
+                                       : QStringLiteral("Голосовой ввод (Vosk)"));
+        }
+    }
+
+    // ── Кнопка лайка ─────────────────────────────────────────
+    if (m_likeBtn) {
+        m_likeBtn->setToolTip(IS_EN
+            ? QStringLiteral("Like this response — save for AI training")
+            : QStringLiteral("Лайкнуть ответ — сохранить для обучения ИИ"));
+    }
+
+    // ── Кнопка прикрепления ──────────────────────────────────
+    if (m_attachBtn) {
+        m_attachBtn->setToolTip(IS_EN
+            ? QStringLiteral("Attach files (Ctrl+O)")
+            : QStringLiteral("Прикрепить файлы (Ctrl+O)"));
+    }
+
+    // ── Панель обновления ────────────────────────────────────
+    if (m_updateBtn) {
+        m_updateBtn->setText(IS_EN ? QStringLiteral("Update")
+                                   : QStringLiteral("Обновить"));
+    }
+    if (m_updateDismiss) {
+        m_updateDismiss->setToolTip(IS_EN ? QStringLiteral("Dismiss")
+                                          : QStringLiteral("Скрыть"));
+    }
+
+    // ── Панель предложений ───────────────────────────────────
+    if (m_suggestionBtn) {
+        m_suggestionBtn->setText(IS_EN ? QStringLiteral("Yes")
+                                       : QStringLiteral("Да"));
+    }
+
+    // ── Лог: сообщение о смене языка ─────────────────────────
     appendLog(Str::logSystem(),
-              IS_EN ? QStringLiteral("Language set to English.")
-                    : QStringLiteral("Язык изменён на русский."),
+              IS_EN ? QStringLiteral("✅ Interface language changed to English.")
+                    : QStringLiteral("✅ Язык интерфейса изменён на русский."),
               Theme::LogColors::system);
 }
 
@@ -369,7 +425,58 @@ void MainWindow::buildMenuBar()
         }
     });
 
-    // ── Gemini API key ──────────────────────────────────
+    // ── Управление голосовыми моделями ──────────────────────
+    settingsMenu->addSeparator();
+    auto* actVoiceModels = settingsMenu->addAction(
+        IS_EN ? QStringLiteral("🎤 Voice Models...")
+              : QStringLiteral("🎤 Голосовые модели..."));
+    connect(actVoiceModels, &QAction::triggered, this, [this]() {
+        const bool isEn = IS_EN;
+
+        // Стековый QDialog — не нужен ни new ни WA_DeleteOnClose, деструктор сам всё чистит
+        QDialog dlg(this);
+        dlg.setWindowTitle(isEn ? QStringLiteral("JARVIS — Voice Models")
+                                : QStringLiteral("JARVIS — Голосовые модели"));
+        dlg.setMinimumSize(640, 520);
+        dlg.setStyleSheet(QStringLiteral(
+            "QDialog { background: #0a0a1a; color: #ecf0f1; }"
+            "QPushButton { background: #0f2438; color: #00d4ff; "
+            "border: 1px solid #1a5070; border-radius: 4px; padding: 5px 18px; }"
+            "QPushButton:hover { background: #1a3a5c; }"));
+
+        auto* layout = new QVBoxLayout(&dlg);
+        layout->setContentsMargins(16, 16, 16, 12);
+
+        // manager — parent = &dlg, удаляется вместе с диалогом
+        auto* manager = new VoskModelManagerWidget(m_voiceInput, &dlg);
+        connect(manager, &VoskModelManagerWidget::modelsChanged, this, [this, isEn]() {
+            appendLog(Str::logSystem(),
+                isEn ? QStringLiteral("🔄 Voice models updated — reloading...")
+                     : QStringLiteral("🔄 Модели обновлены — перезагрузка..."),
+                Theme::LogColors::system);
+        });
+
+        auto* scrollArea = new QScrollArea(&dlg);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setWidget(manager);
+        scrollArea->setStyleSheet(QStringLiteral(
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollBar:vertical { background: #111; width: 6px; }"
+            "QScrollBar::handle:vertical { background: #333; border-radius: 3px; }"));
+        layout->addWidget(scrollArea, 1);
+
+        auto* btnClose = new QPushButton(
+            isEn ? QStringLiteral("Close") : QStringLiteral("Закрыть"), &dlg);
+        btnClose->setFixedWidth(100);
+        connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::accept);
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch(); btnRow->addWidget(btnClose); btnRow->addStretch();
+        layout->addLayout(btnRow);
+
+        dlg.exec();
+        // После exec() dlg деструктор удалит manager, который сам отключит свои сигналы
+    });
+    settingsMenu->addSeparator();
     auto* actGeminiKey = settingsMenu->addAction(
         IS_EN ? QStringLiteral("Gemini API key...") : QStringLiteral("Ключ Gemini API..."));
     connect(actGeminiKey, &QAction::triggered, this, [this]() {
@@ -501,20 +608,24 @@ void MainWindow::buildMenuBar()
 
     auto* langMenu = settingsMenu->addMenu(Str::menuLanguage());
 
+    // QActionGroup даёт radio-поведение — одно из двух всегда выбрано
+    auto* langGroup = new QActionGroup(langMenu);
+    langGroup->setExclusive(true);
+
     auto* actLangRu = langMenu->addAction(Str::menuLangRu());
     actLangRu->setCheckable(true);
     actLangRu->setChecked(gUiLanguage() == UiLanguage::Russian);
-    connect(actLangRu, &QAction::triggered, this, [this, actLangRu](bool) {
-        applyLanguage(false);
-        actLangRu->setChecked(true);
+    langGroup->addAction(actLangRu);
+    connect(actLangRu, &QAction::triggered, this, [this](bool checked) {
+        if (checked) applyLanguage(false);
     });
 
     auto* actLangEn = langMenu->addAction(Str::menuLangEn());
     actLangEn->setCheckable(true);
     actLangEn->setChecked(gUiLanguage() == UiLanguage::English);
-    connect(actLangEn, &QAction::triggered, this, [this, actLangEn](bool) {
-        applyLanguage(true);
-        actLangEn->setChecked(true);
+    langGroup->addAction(actLangEn);
+    connect(actLangEn, &QAction::triggered, this, [this](bool checked) {
+        if (checked) applyLanguage(true);
     });
 
     // --- Проект ---
@@ -581,42 +692,256 @@ void MainWindow::buildMenuBar()
     auto* trainMenu = menuBar->addMenu(
         IS_EN ? QStringLiteral("🧠 Training") : QStringLiteral("🧠 Обучение"));
 
-    auto* actTrainCount = trainMenu->addAction(
-        IS_EN ? QStringLiteral("Dataset info") : QStringLiteral("Статистика датасета"));
-    connect(actTrainCount, &QAction::triggered, this, [this]() {
+    // --- Статистика (одна кнопка вместо двух) ---
+    auto* actTrainStats = trainMenu->addAction(
+        IS_EN ? QStringLiteral("📊 Dataset Statistics")
+              : QStringLiteral("📊 Статистика датасета"));
+    connect(actTrainStats, &QAction::triggered, this, [this]() {
         auto& db = DatabaseManager::instance();
-        int count = db.trainingLogCount(1);
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("📊 Training dataset: %1 liked responses saved.\n"
-                                   "Export when you have 500+ for best results.").arg(count)
-                  : QStringLiteral("📊 Датасет обучения: сохранено %1 лайкнутых ответов.\n"
-                                   "Экспортируйте при 500+ записях для лучших результатов.").arg(count),
-            Theme::LogColors::system);
+        int total     = db.trainingLogCount(1);
+        int liked     = db.trainingLogCount(1);  // rated=1
+        int jTotal    = db.voiceJournalCount(1, false);
+        int jDone     = db.voiceJournalCount(1, true);
+
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("Training Statistics")
+                                  : QStringLiteral("Статистика обучения"));
+        dlg->setMinimumWidth(420);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog{background:#0a1018;color:#c8e0f0;}"
+            "QLabel{color:#c8e0f0;font-size:12px;}"
+            "QPushButton{background:#0f2438;color:#00d4ff;border:1px solid #1a5070;"
+            "padding:5px 20px;border-radius:4px;}"
+            "QPushButton:hover{background:#1a3a5c;}"));
+        auto* lay = new QVBoxLayout(dlg);
+        lay->setContentsMargins(20,16,20,16);
+        lay->setSpacing(8);
+
+        auto addRow = [&](const QString& icon, const QString& label, const QString& val) {
+            auto* row = new QHBoxLayout();
+            auto* lbl = new QLabel(icon + QStringLiteral(" ") + label, dlg);
+            auto* v   = new QLabel(QStringLiteral("<b style='color:#00d4ff;'>") + val + QStringLiteral("</b>"), dlg);
+            v->setTextFormat(Qt::RichText);
+            row->addWidget(lbl);
+            row->addStretch();
+            row->addWidget(v);
+            lay->addLayout(row);
+        };
+
+        lay->addWidget(new QLabel(
+            QStringLiteral("<b style='color:#00d4ff;font-size:13px;'>")
+            + (IS_EN ? QStringLiteral("Training Dataset") : QStringLiteral("Датасет обучения"))
+            + QStringLiteral("</b>"), dlg));
+
+        addRow("💬", IS_EN ? "Total pairs saved" : "Всего пар сохранено",
+               QString::number(total));
+        addRow("👍", IS_EN ? "Goal (export ready)" : "Цель (готово к экспорту)",
+               QStringLiteral("500+"));
+        addRow("📈", IS_EN ? "Progress" : "Прогресс",
+               QString::number(qMin(total * 100 / qMax(500, 1), 100)) + QStringLiteral("%"));
+
+        auto* line = new QFrame(dlg);
+        line->setFrameShape(QFrame::HLine);
+        line->setStyleSheet(QStringLiteral("color:#1a3050;"));
+        lay->addWidget(line);
+
+        lay->addWidget(new QLabel(
+            QStringLiteral("<b style='color:#44aaff;font-size:13px;'>")
+            + (IS_EN ? QStringLiteral("Voice Journal") : QStringLiteral("Голосовой журнал"))
+            + QStringLiteral("</b>"), dlg));
+
+        addRow("🎙️", IS_EN ? "Total recorded phrases" : "Записано фраз", QString::number(jTotal));
+        addRow("✅", IS_EN ? "Processed → training" : "Обработано → обучение", QString::number(jDone));
+        addRow("⏳", IS_EN ? "Pending processing" : "Ожидает обработки",
+               QString::number(qMax(0, jTotal - jDone)));
+
+        bool passive = m_passiveListener && m_passiveListener->isListening();
+        addRow("🔴", IS_EN ? "Recording status" : "Статус записи",
+               passive ? (IS_EN ? QStringLiteral("Active") : QStringLiteral("Активна"))
+                       : (IS_EN ? QStringLiteral("Stopped") : QStringLiteral("Остановлена")));
+
+        auto* btnOk = new QPushButton(QStringLiteral("OK"), dlg);
+        btnOk->setFixedWidth(100);
+        connect(btnOk, &QPushButton::clicked, dlg, &QDialog::accept);
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch(); btnRow->addWidget(btnOk); btnRow->addStretch();
+        lay->addLayout(btnRow);
+        dlg->exec();
     });
 
     trainMenu->addSeparator();
 
+    // --- Экспорт ---
     auto* actExport = trainMenu->addAction(
         IS_EN ? QStringLiteral("📤 Export .jsonl for Fine-Tuning...")
               : QStringLiteral("📤 Экспорт .jsonl для обучения..."));
     connect(actExport, &QAction::triggered, this, &MainWindow::onExportTrainingData);
 
-    auto* actCleanup = trainMenu->addAction(
-        IS_EN ? QStringLiteral("🧹 Clean up dataset (remove noise)")
-              : QStringLiteral("🧹 Очистить датасет (убрать мусор)"));
-    connect(actCleanup, &QAction::triggered, this, [this]() {
-        int removed = DatabaseManager::instance().cleanupTrainingLogs(1);
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("🧹 Cleanup done. Removed %1 noisy entries.").arg(removed)
-                  : QStringLiteral("🧹 Очистка завершена. Удалено %1 мусорных записей.").arg(removed),
-            Theme::LogColors::system);
+    // --- Поиск по истории чатов ---
+    auto* actSearch = trainMenu->addAction(
+        IS_EN ? QStringLiteral("🔍 Search chat history...")
+              : QStringLiteral("🔍 Поиск по истории чатов..."));
+    connect(actSearch, &QAction::triggered, this, [this]() {
+        bool ok;
+        QString query = QInputDialog::getText(this,
+            IS_EN ? QStringLiteral("Search History") : QStringLiteral("Поиск по истории"),
+            IS_EN ? QStringLiteral("Enter search term:")
+                  : QStringLiteral("Введите поисковый запрос:"),
+            QLineEdit::Normal, QString(), &ok);
+        if (!ok || query.trimmed().isEmpty()) return;
+
+        auto& db = DatabaseManager::instance();
+        auto logs = db.getTrainingLogs(1, 10000);
+        QStringList results;
+        QString lower = query.toLower();
+        for (const DbTrainingLog& log : logs) {
+            if (log.userMessage.toLower().contains(lower)
+             || log.aiResponse.toLower().contains(lower)) {
+                results.append(QStringLiteral("▶ ") + log.userMessage.left(60)
+                    + QStringLiteral("\n  -> ") + log.aiResponse.left(80));
+            }
+            if (results.size() >= 20) break;
+        }
+
+        if (results.isEmpty()) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("🔍 No results for: \"%1\"").arg(query)
+                      : QStringLiteral("🔍 Ничего не найдено: \"%1\"").arg(query),
+                Theme::LogColors::system);
+            return;
+        }
+
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("Search Results: \"%1\"").arg(query)
+                                  : QStringLiteral("Результаты: \"%1\"").arg(query));
+        dlg->setMinimumSize(640, 480);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog{background:#0a1018;color:#c8e0f0;}"
+            "QTextBrowser{background:#0d1a28;color:#c8e0f0;border:1px solid #1a3050;"
+            "font-size:12px;border-radius:4px;}"
+            "QPushButton{background:#0f2438;color:#00d4ff;border:1px solid #1a5070;"
+            "padding:5px 20px;border-radius:4px;}"));
+        auto* lay = new QVBoxLayout(dlg);
+        lay->setContentsMargins(16,14,16,14);
+
+        auto* titleLbl = new QLabel(
+            IS_EN ? QStringLiteral("<b style='color:#00d4ff;'>Found %1 results for \"%2\"</b>")
+                        .arg(results.size()).arg(query)
+                  : QStringLiteral("<b style='color:#00d4ff;'>Найдено %1 результатов для \"%2\"</b>")
+                        .arg(results.size()).arg(query), dlg);
+        titleLbl->setTextFormat(Qt::RichText);
+        lay->addWidget(titleLbl);
+
+        auto* browser = new QTextBrowser(dlg);
+        QString html;
+        for (const QString& r : results) {
+            QString highlighted = r;
+            highlighted.replace(query, QStringLiteral("<b style='color:#ffdd44;'>") + query + QStringLiteral("</b>"),
+                               Qt::CaseInsensitive);
+            html += QStringLiteral("<p style='border-bottom:1px solid #1a3050;padding:6px 0;'>")
+                 + highlighted.toHtmlEscaped()
+                     .replace(QStringLiteral("&lt;b style=&#39;color:#ffdd44;&#39;&gt;"), QStringLiteral("<b style='color:#ffdd44;'>"))
+                     .replace(QStringLiteral("&lt;/b&gt;"), QStringLiteral("</b>"))
+                 + QStringLiteral("</p>");
+        }
+        browser->setHtml(html);
+        lay->addWidget(browser, 1);
+
+        auto* btn = new QPushButton(QStringLiteral("OK"), dlg);
+        btn->setFixedWidth(100);
+        connect(btn, &QPushButton::clicked, dlg, &QDialog::accept);
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch(); btnRow->addWidget(btn); btnRow->addStretch();
+        lay->addLayout(btnRow);
+        dlg->exec();
     });
 
     trainMenu->addSeparator();
 
+    // --- Скриншот с AI описанием ---
+    auto* actScreenshot = trainMenu->addAction(
+        IS_EN ? QStringLiteral("📸 Screenshot + AI Description")
+              : QStringLiteral("📸 Скриншот + описание AI"));
+    connect(actScreenshot, &QAction::triggered, this, [this]() {
+        if (!m_screenAgent) return;
+
+        // Берём API ключ — сначала Claude, потом Gemini
+        QString apiKey = m_jarvis->claudeApi()->apiKey();
+        if (apiKey.isEmpty()) apiKey = m_jarvis->geminiBackup() ? m_jarvis->geminiBackup()->apiKey() : QString();
+        if (apiKey.isEmpty()) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("📸 Need Claude or Gemini API key for screenshot analysis")
+                      : QStringLiteral("📸 Нужен ключ Claude или Gemini API для анализа скриншота"),
+                Theme::LogColors::error);
+            return;
+        }
+
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("📸 Taking screenshot and analyzing...")
+                  : QStringLiteral("📸 Делаю скриншот и анализирую..."),
+            Theme::LogColors::system);
+
+        m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
+            if (desc.isEmpty()) return;
+
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("📸 Screen: ") + desc
+                      : QStringLiteral("📸 Экран: ") + desc,
+                Theme::LogColors::jarvis);
+
+            // Сохраняем в training_logs как пара (контекст экрана → описание)
+            if (m_passiveListener) {
+                m_passiveListener->addVoiceCommandPair(
+                    QStringLiteral("[screenshot] what do you see on the screen?"),
+                    desc,
+                    QStringLiteral("en"));
+            }
+        });
+    });
+
+    // Автоскриншот каждые N минут (из настроек)
+    auto* actAutoScreen = trainMenu->addAction(
+        IS_EN ? QStringLiteral("⏱️ Auto-screenshot: OFF")
+              : QStringLiteral("⏱️ Авто-скриншот: ВЫКЛ"));
+    actAutoScreen->setCheckable(true);
+    actAutoScreen->setChecked(false);
+    connect(actAutoScreen, &QAction::triggered, this, [this, actAutoScreen](bool checked) {
+        if (checked) {
+            // Таймер каждые 5 минут
+            if (!m_screenshotTimer) {
+                m_screenshotTimer = new QTimer(this);
+                m_screenshotTimer->setInterval(5 * 60 * 1000);
+                connect(m_screenshotTimer, &QTimer::timeout, this, [this]() {
+                    if (!m_screenAgent) return;
+                    QString apiKey = m_jarvis->claudeApi()->apiKey();
+                    if (apiKey.isEmpty()) apiKey = m_jarvis->geminiBackup() ? m_jarvis->geminiBackup()->apiKey() : QString();
+                    if (apiKey.isEmpty()) return;
+                    m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
+                        if (desc.isEmpty() || !m_passiveListener) return;
+                        m_passiveListener->addVoiceCommandPair(
+                            QStringLiteral("[auto-screenshot] describe current screen context"),
+                            desc, QStringLiteral("en"));
+                        qDebug() << "[Training] Auto-screenshot saved to dataset";
+                    });
+                });
+            }
+            m_screenshotTimer->start();
+            actAutoScreen->setText(
+                IS_EN ? QStringLiteral("⏱️ Auto-screenshot: ON (5 min)")
+                      : QStringLiteral("⏱️ Авто-скриншот: ВКЛ (5 мин)"));
+        } else {
+            if (m_screenshotTimer) m_screenshotTimer->stop();
+            actAutoScreen->setText(
+                IS_EN ? QStringLiteral("⏱️ Auto-screenshot: OFF")
+                      : QStringLiteral("⏱️ Авто-скриншот: ВЫКЛ"));
+        }
+    });
+
     trainMenu->addSeparator();
 
-    // Пассивная запись
+    // --- Пассивная запись (тумблер) ---
     m_passiveAction = trainMenu->addAction(
         IS_EN ? QStringLiteral("🎙️ Passive Recording: OFF")
               : QStringLiteral("🎙️ Пассивная запись: ВЫКЛ"));
@@ -637,32 +962,12 @@ void MainWindow::buildMenuBar()
         }
     });
 
-    auto* actProcessJournal = trainMenu->addAction(
-        IS_EN ? QStringLiteral("⚡ Process voice journal now")
-              : QStringLiteral("⚡ Обработать голосовой журнал сейчас"));
-    connect(actProcessJournal, &QAction::triggered, this, [this]() {
-        if (m_passiveListener) m_passiveListener->processJournal();
-    });
+    trainMenu->addSeparator();
 
-    auto* actJournalStats = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📊 Voice journal stats")
-              : QStringLiteral("📊 Статистика голосового журнала"));
-    connect(actJournalStats, &QAction::triggered, this, [this]() {
-        auto& db = DatabaseManager::instance();
-        int total     = db.voiceJournalCount(1, false);
-        int processed = db.voiceJournalCount(1, true);
-        int trainLogs = db.trainingLogCount(1);
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("🎙️ Voice journal: %1 total, %2 processed → %3 training pairs")
-                        .arg(total).arg(processed).arg(trainLogs)
-                  : QStringLiteral("🎙️ Голосовой журнал: %1 записей, %2 обработано → %3 пар для обучения")
-                        .arg(total).arg(processed).arg(trainLogs),
-            Theme::LogColors::system);
-    });
-
+    // --- Папка датасета ---
     auto* actSetDatasetPath = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📁 Set dataset folder...")
-              : QStringLiteral("📁 Папка для датасета..."));
+        IS_EN ? QStringLiteral("📁 Dataset folder...")
+              : QStringLiteral("📁 Папка датасета..."));
     connect(actSetDatasetPath, &QAction::triggered, this, [this]() {
         QString current = DatabaseManager::instance().getConfig(
             QStringLiteral("voice_dataset_path"),
@@ -677,17 +982,11 @@ void MainWindow::buildMenuBar()
         if (!path.isEmpty()) {
             DatabaseManager::instance().setConfig(
                 QStringLiteral("voice_dataset_path"), path);
-
             if (m_passiveListener) {
                 auto cfg = m_passiveListener->config();
                 cfg.datasetPath = path;
                 m_passiveListener->setConfig(cfg);
             }
-
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("📁 Dataset folder set to: %1").arg(path)
-                      : QStringLiteral("📁 Папка датасета: %1").arg(path),
-                Theme::LogColors::system);
         }
     });
 
@@ -931,10 +1230,11 @@ R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</
         // Левая колонка
         const QString col1 = IS_EN ? QStringLiteral(
 R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
-• Real microphone, no internet needed<br>
+• Model selection dialog on first launch<br>
+• 6 languages: EN fast/full, RU, DE, FR, ZH<br>
+• Download/delete models: Settings → Voice Models<br>
 • Wake word "Jarvis" — hands-free<br>
 • Auto RU/EN, whisper detection<br>
-• Auto-installs on first launch<br>
 <br>
 <b>🗄️ SQLite Database</b><br>
 • Chat history, commands, memory<br>
@@ -953,11 +1253,12 @@ R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
 • "Play music" → YouTube Music/Spotify<br>
 • 30+ sites mapped automatically)")
         : QStringLiteral(
-R"(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
-• Реальный микрофон, без интернета<br>
+            R"(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
+• Диалог выбора моделей при первом запуске<br>
+• 6 языков: EN быстрый/полный, RU, DE, FR, ZH<br>
+• Докачать/удалить модели: Настройки → Голосовые модели<br>
 • Wake word "Джарвис" — без рук<br>
 • Авто RU/EN, шёпот детектируется<br>
-• Автоустановка при первом запуске<br>
 <br>
 <b>🗄️ База данных SQLite</b><br>
 • История, команды, память в jarvis.db<br>
@@ -1229,49 +1530,65 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
             "🎤", "Голосовой ввод", "Voice Input",
             R"(<h3 style='color:#00d4ff;'>🎤 Голосовой ввод (Vosk)</h3>
 <p>Работает полностью офлайн — никакого облака и API ключей.</p>
-<h4 style='color:#44aaff;'>Как использовать:</h4>
+<h4 style='color:#44aaff;'>Доступные языки:</h4>
+<table border='0' cellpadding='3'>
+<tr><td style='color:#44ff44;'><b>EN Fast</b></td><td>~40 MB · Команды, wake word ✅ рекомендуется</td></tr>
+<tr><td><b>EN Full</b></td><td>~1.8 GB · Диктовка высокого качества</td></tr>
+<tr><td><b>RU</b></td><td>~1.8 GB · Русский язык</td></tr>
+<tr><td><b>DE / FR</b></td><td>~1.0 GB · Немецкий / Французский</td></tr>
+<tr><td><b>ZH</b></td><td>~500 MB · Китайский</td></tr>
+</table>
+<h4 style='color:#44aaff;'>Первый запуск:</h4>
 <ol>
-<li>Нажми кнопку <b>🎤</b> в правом нижнем углу</li>
-<li>Скажи <b>"Джарвис"</b> (wake word) — кнопка станет зелёной</li>
-<li>Произнеси команду — она отправится автоматически</li>
-<li>Нажми 🎤 снова чтобы остановить</li>
+<li>При старте откроется диалог <b>«Настройка голосового ввода»</b></li>
+<li>Выбери нужные языки и нажми «Установить»</li>
+<li>После загрузки скажи <b>«Джарвис»</b> — wake word активирует</li>
+<li>Или нажми кнопку <b>🎤</b> в строке ввода</li>
 </ol>
+<h4 style='color:#44aaff;'>Добавить язык позже:</h4>
+<p><b>Настройки → 🎤 Голосовые модели...</b> — скачать или удалить любую модель</p>
 <h4 style='color:#44aaff;'>Особенности:</h4>
 <ul>
 <li>🤫 Распознаёт шёпот (порог -45 dB)</li>
-<li>🌍 Автоопределение русского и английского</li>
+<li>🌍 Автоопределение языка (если загружено несколько)</li>
 <li>💻 Работает на CPU без GPU</li>
-<li>📦 Модели скачиваются автоматически при первом запуске<br>
-    <span style='color:#aaa;font-size:11px;'>EN модель ~40 МБ (быстро), RU модель ~1.8 ГБ (в фоне)</span></li>
+<li>🔒 Аудио не покидает компьютер, тишина не записывается</li>
 </ul>
 <h4 style='color:#44aaff;'>Если голос не работает:</h4>
 <ul>
-<li>Убедись что микрофон разрешён в Windows</li>
-<li>Папка <b>redist/vosk/model-ru/</b> должна существовать</li>
-<li>Кнопка 🎤 → показывает уровень звука в тултипе</li>
+<li>Убедись что микрофон разрешён в <b>Windows → Настройки → Конфиденциальность</b></li>
+<li>Переоткрой диалог моделей: <b>Настройки → Голосовые модели</b></li>
 </ul>)",
             R"(<h3 style='color:#00d4ff;'>🎤 Voice Input (Vosk)</h3>
 <p>Fully offline — no cloud, no API keys needed.</p>
-<h4 style='color:#44aaff;'>How to use:</h4>
+<h4 style='color:#44aaff;'>Available languages:</h4>
+<table border='0' cellpadding='3'>
+<tr><td style='color:#44ff44;'><b>EN Fast</b></td><td>~40 MB · Commands &amp; wake word ✅ recommended</td></tr>
+<tr><td><b>EN Full</b></td><td>~1.8 GB · High-quality dictation</td></tr>
+<tr><td><b>RU</b></td><td>~1.8 GB · Russian language</td></tr>
+<tr><td><b>DE / FR</b></td><td>~1.0 GB · German / French</td></tr>
+<tr><td><b>ZH</b></td><td>~500 MB · Chinese (small model)</td></tr>
+</table>
+<h4 style='color:#44aaff;'>First launch:</h4>
 <ol>
-<li>Click <b>🎤</b> button in bottom right</li>
-<li>Say <b>"Jarvis"</b> (wake word) — button turns green</li>
-<li>Speak your command — sent automatically</li>
-<li>Click 🎤 again to stop</li>
+<li>A <b>"Voice Setup"</b> dialog opens on first run</li>
+<li>Select your languages and click "Install"</li>
+<li>After download, say <b>"Jarvis"</b> — wake word activates</li>
+<li>Or click the <b>🎤</b> button in the input bar</li>
 </ol>
+<h4 style='color:#44aaff;'>Add more languages later:</h4>
+<p><b>Settings → 🎤 Voice Models...</b> — download or remove any model</p>
 <h4 style='color:#44aaff;'>Features:</h4>
 <ul>
 <li>🤫 Detects whisper level speech (-45 dB)</li>
-<li>🌍 Auto-detects Russian and English</li>
+<li>🌍 Auto-detects language (if multiple loaded)</li>
 <li>💻 Runs on CPU, no GPU needed</li>
-<li>📦 Models auto-download on first use<br>
-    <span style='color:#aaa;font-size:11px;'>EN ~40 MB (fast), RU ~1.8 GB (background)</span></li>
+<li>🔒 Audio never leaves the PC, silence is not recorded</li>
 </ul>
 <h4 style='color:#44aaff;'>If voice doesn't work:</h4>
 <ul>
-<li>Check microphone permission in Windows</li>
-<li>Folder <b>redist/vosk/model-ru/</b> must exist</li>
-<li>🎤 tooltip shows current dB level</li>
+<li>Check microphone permission: <b>Windows Settings → Privacy → Microphone</b></li>
+<li>Reopen model manager: <b>Settings → Voice Models</b></li>
 </ul>)"
         },
         {
@@ -1440,8 +1757,8 @@ code & analysis → Claude API</p>
 <h4 style='color:#ffaa44;'>Голосовой ввод не работает:</h4>
 <ul>
 <li>Проверь разрешение микрофона в Windows (Настройки → Конфиденциальность)</li>
-<li>Папка redist/vosk/model-ru/ должна существовать</li>
-<li>Модели скачиваются только при первом нажатии 🎤</li>
+<li>Открой <b>Настройки → Голосовые модели</b> и скачай модель</li>
+<li>Кнопка 🎤 становится активной только после загрузки модели</li>
 </ul>
 <h4 style='color:#ffaa44;'>Антивирус блокирует:</h4>
 <p>Добавь папку JARVIS в исключения антивируса.<br>
@@ -1463,8 +1780,8 @@ JARVIS использует SendInput и ShellExecuteW — это нормаль
 <h4 style='color:#ffaa44;'>Voice input not working:</h4>
 <ul>
 <li>Check microphone permission in Windows Settings → Privacy</li>
-<li>Folder redist/vosk/model-ru/ must exist</li>
-<li>Models download only on first 🎤 click</li>
+<li>Open <b>Settings → Voice Models</b> and download a model</li>
+<li>The 🎤 button only becomes active after a model is loaded</li>
 </ul>
 <h4 style='color:#ffaa44;'>Antivirus blocking:</h4>
 <p>Add JARVIS folder to antivirus exclusions.<br>
@@ -1918,7 +2235,8 @@ void MainWindow::onSend()
     }
 
     // ── 6. Всё остальное → Jarvis/Claude ─────────────────
-    m_lastUserInput = text;  // сохраняем для самообучения
+    m_lastUserInput      = text;  // сохраняем для самообучения
+    m_lastInputWasVoice  = false; // сбрасываем — текстовый ввод
     QString response = m_jarvis->processCommand(
         text, attachmentBlock, m_langDetector.systemInstruction());
 
@@ -2078,8 +2396,14 @@ void MainWindow::onAsyncResponse(const QString& response)
         autoLog.aiResponse  = response;
         autoLog.model       = m_lastAiModel;
         autoLog.sessionId   = m_lastSessionId;
-        autoLog.rating      = 0;  // 0 = автосохранён, 1 = лайкнут пользователем
+        autoLog.rating      = 0;
         DatabaseManager::instance().addTrainingLog(autoLog);
+
+        // Если команда пришла от голосового ввода — сохраняем в voice_journal тоже
+        if (m_lastInputWasVoice && m_passiveListener) {
+            m_passiveListener->addVoiceCommandPair(
+                m_lastUserInput, response, m_lastVoiceLanguage);
+        }
     }
 
     // Активируем кнопку 👍
@@ -2726,20 +3050,28 @@ void MainWindow::buildUI()
         appendLog(Str::logSystem(), QStringLiteral("🎤 ") + err, Theme::LogColors::error);
     });
 
-    // Vosk автоустановка — прогресс
+    // Vosk: показываем диалог выбора моделей при первом запуске
+    // или когда DLL есть но модели не установлены
     connect(m_voiceInput, &VoiceInput::setupRequired, this, [this]() {
         m_micBtn->setEnabled(false);
         m_micBtn->setText(QStringLiteral("⬇"));
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral(
-                "🔧 Vosk not installed. Starting automatic setup...\n"
-                "   This will download ~2GB (EN model ~40MB first, RU model ~1.8GB).\n"
-                "   Voice input will be available after download completes.")
-                  : QStringLiteral(
-                "🔧 Vosk не установлен. Запускаю автоматическую установку...\n"
-                "   Будет скачано ~2GB (EN модель ~40MB сначала, RU модель ~1.8GB).\n"
-                "   Голосовой ввод будет доступен после завершения загрузки."),
-            Theme::LogColors::system);
+
+        // Используем стековый диалог — безопасно, exec() блокирует до закрытия
+        VoskSetupDialog dlg(m_voiceInput, this);
+
+        connect(&dlg, &VoskSetupDialog::setupStarted, this, [this](const QStringList& ids) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("🔧 Downloading voice models: %1").arg(ids.join(QStringLiteral(", ")))
+                      : QStringLiteral("🔧 Скачиваем голосовые модели: %1").arg(ids.join(QStringLiteral(", "))),
+                Theme::LogColors::system);
+        });
+
+        if (dlg.exec() == QDialog::Rejected) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("ℹ️ Voice setup skipped. Configure later: Settings → Voice Models.")
+                      : QStringLiteral("ℹ️ Настройка голоса пропущена. Откройте позже: Настройки → Голосовые модели."),
+                Theme::LogColors::system);
+        }
     });
 
     connect(m_voiceInput, &VoiceInput::setupProgress, this,
@@ -2797,7 +3129,40 @@ void MainWindow::buildUI()
         appendLog(Str::logError(), err, Theme::LogColors::error);
     });
 
-    // Инициализируем Vosk (автоскачивает если нужно)
+    connect(m_voiceInput, &VoiceInput::modelDownloadStarted, this,
+            [this](const QString& modelId) {
+        auto info = VoskModels::findById(modelId);
+        appendLog(Str::logSystem(),
+            QStringLiteral("⬇ %1")
+                .arg(info.id.isEmpty() ? modelId : info.displayName),
+            Theme::LogColors::system);
+    });
+
+    connect(m_voiceInput, &VoiceInput::modelDownloadProgress, this,
+            [this](const QString& /*modelId*/, int pct, qint64 total) {
+        QString totalStr = total > 0
+            ? QStringLiteral(" / %1 MB").arg(total / 1024 / 1024)
+            : QString();
+        m_status->setText(QStringLiteral("⬇ %1%%2").arg(pct).arg(totalStr));
+    });
+
+    connect(m_voiceInput, &VoiceInput::modelDownloadFinished, this,
+            [this](const QString& modelId, bool success) {
+        m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+        auto info = VoskModels::findById(modelId);
+        const QString name = info.id.isEmpty() ? modelId : info.displayName;
+        if (success) {
+            appendLog(Str::logSystem(),
+                QStringLiteral("✅ ") + (IS_EN ? QStringLiteral("Model ready: ") : QStringLiteral("Модель готова: ")) + name,
+                Theme::LogColors::system);
+        } else {
+            appendLog(Str::logError(),
+                QStringLiteral("❌ ") + (IS_EN ? QStringLiteral("Download failed: ") : QStringLiteral("Ошибка загрузки: ")) + name,
+                Theme::LogColors::error);
+        }
+    });
+
+    // Инициализируем Vosk (показывает диалог выбора или загружает готовые модели)
     m_voiceInput->initialize();
 
     // ── Инициализация пассивного слушателя ───────────────────
@@ -2810,19 +3175,15 @@ void MainWindow::buildUI()
     });
     connect(m_passiveListener, &PassiveListener::journalProcessed, this,
             [this](int pairs) {
-        if (pairs > 0) {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("⚡ Voice journal processed: %1 new training pairs").arg(pairs)
-                      : QStringLiteral("⚡ Журнал обработан: %1 новых пар для обучения").arg(pairs),
-                Theme::LogColors::system);
-        }
+        // Тихо — только если есть новые пары, и только в debug
+        if (pairs > 0)
+            qDebug() << "[Training] Voice journal:" << pairs << "new pairs";
     });
     connect(m_passiveListener, &PassiveListener::weeklyCleanupDone, this,
             [this](int deleted) {
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("🧹 Weekly cleanup: %1 voice journal entries deleted").arg(deleted)
-                  : QStringLiteral("🧹 Еженедельная очистка: удалено %1 записей журнала").arg(deleted),
-            Theme::LogColors::system);
+        // Тихо — еженедельная очистка не спамит в лог
+        if (deleted > 0)
+            qDebug() << "[Training] Weekly cleanup:" << deleted << "entries";
     });
 
     // Загружаем путь к датасету из настроек
@@ -2837,6 +3198,22 @@ void MainWindow::buildUI()
     passiveCfg.modelPathEn = m_voiceInput->config().modelPathEn;
 
     m_passiveListener->initialize(passiveCfg);
+
+    // Автостарт пассивной записи — начинаем сразу после загрузки моделей
+    // Пользователь может выключить через меню Training → Пассивная запись
+    connect(m_passiveListener, &PassiveListener::ready, this, [this]() {
+        m_passiveListener->startListening();
+        if (m_passiveAction) {
+            m_passiveAction->setChecked(true);
+            m_passiveAction->setText(
+                IS_EN ? QStringLiteral("🎙️ Passive Recording: ON")
+                      : QStringLiteral("🎙️ Пассивная запись: ВКЛ"));
+        }
+        appendLog(Str::logSystem(),
+            IS_EN ? QStringLiteral("🎙️ Passive voice recording started — every phrase saved to training dataset")
+                  : QStringLiteral("🎙️ Пассивная запись запущена — каждая фраза сохраняется в датасет"),
+            Theme::LogColors::system);
+    });
 
     connect(m_keyboard, &VirtualKeyboardWidget::charPressed, this, [this](const QString& ch) {
         m_input->insert(ch);
@@ -3045,6 +3422,11 @@ void MainWindow::onVoiceText(const QString& text, const QString& lang)
               QStringLiteral("#4a9a6a"));
 
     m_input->setText(text);
+
+    // Помечаем что ввод голосовой — onAsyncResponse сохранит пару в voice_journal
+    m_lastInputWasVoice = true;
+    m_lastVoiceLanguage = lang;
+
     // Автоматически отправляем голосовую команду
     onSend();
 }
@@ -3104,12 +3486,8 @@ void MainWindow::onLikeLastResponse()
             ? QStringLiteral("Saved! Total: %1 responses").arg(m_trainingCount)
             : QStringLiteral("Сохранено! Всего: %1 ответов").arg(m_trainingCount));
 
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("👍 Saved to training dataset (%1 total). "
-                                   "Export when you have 500+.").arg(m_trainingCount)
-                  : QStringLiteral("👍 Сохранено в датасет (%1 всего). "
-                                   "Экспортируйте при 500+ записях.").arg(m_trainingCount),
-            Theme::LogColors::system);
+        // Лайк — тихое подтверждение через tooltip кнопки, не спамим лог
+        qDebug() << "[Training] Liked response saved, total:" << m_trainingCount;
     } else {
         // Дубликат — уже был такой ответ
         appendLog(Str::logSystem(),

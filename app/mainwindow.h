@@ -36,6 +36,7 @@ class QDropEvent;
 #include "screen_agent.h"
 #include "voice_input.h"
 #include "passive_listener.h"
+#include "VoskSetupDialog.h"
 
 class MainWindow : public QMainWindow
 {
@@ -166,4 +167,11 @@ private:
     // Пассивная запись голоса → датасет
     PassiveListener*        m_passiveListener = nullptr;
     QAction*                m_passiveAction   = nullptr;  // пункт меню вкл/выкл
+
+    // Флаги для определения источника ввода (голос/текст)
+    bool                    m_lastInputWasVoice = false;
+    QString                 m_lastVoiceLanguage;
+
+    // Авто-скриншот для датасета
+    QTimer*                 m_screenshotTimer  = nullptr;
 };

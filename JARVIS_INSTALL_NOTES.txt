@@ -1,37 +1,114 @@
-J.A.R.V.I.S. — Personal AI Assistant v3.0
-===========================================
+═══════════════════════════════════════════════════════════════
+   J.A.R.V.I.S. — Just A Rather Very Intelligent System
+   Версия 3.1 · Руководство пользователя
+═══════════════════════════════════════════════════════════════
 
-Quick Start (30 seconds):
-  1. Launch JARVIS from Desktop or Start Menu
-  2. Say "hello" or type any question
-  3. That's it — no setup required for basic commands
+ЧТО НОВОГО В ВЕРСИИ 3.x
+────────────────────────
+• Диалог выбора голосовых моделей при первом запуске
+• Поддержка 6 языков: EN (быстрый/полный), RU, DE, FR, ZH
+• Докачка и удаление моделей из Settings → Голос
+• Все Vosk DLL включены в installer — интернет нужен только
+  для загрузки языковых моделей (по выбору)
+• Запись только при обнаружении голоса (VAD), тишина не пишется
 
-Voice Input (NEW in v3.0):
-  Click the 🎤 button, say "Jarvis", then speak your command.
-  Works offline, free, supports whisper-level speech.
-  Requires: redist/whisper/ggml-medium.bin (~1.5 GB, one-time download)
-  Download: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 
-Free commands (no internet):
-  • open Chrome / Steam / Notepad / Calculator / Discord...
-  • lock screen  •  what time  •  2+2
-  • "what can you do" — full command list inside the app
+ПЕРВЫЙ ЗАПУСК
+─────────────
+1. При первом старте откроется диалог «Настройка голосового ввода».
+2. Выберите нужные языки. Рекомендуется начать с «English — Fast» (40 MB).
+3. Нажмите «Установить» — JARVIS скачает и настроит модели автоматически.
+4. После завершения скажите «Джарвис» или «Jarvis» — готово!
 
-For AI answers (code, questions, analysis):
-  Settings → Claude API key...  (console.anthropic.com)
-  OR
-  Settings → Gemini API key...  (aistudio.google.com — FREE)
-  OR install Ollama (ollama.com) for fully offline AI
+Если вы пропустили диалог или хотите добавить языки позже:
+  Settings → Голос → Голосовые модели → [Скачать]
 
-What's stored on your PC:
-  %AppData%\Jarvis\jarvis.db     — chat history, memory, commands (SQLite)
-  %AppData%\Jarvis\config.json   — API keys (encrypted)
 
-Troubleshooting:
-  No response?  → Check your API key in Settings
-  App not found? → Try the full name: "open Google Chrome"
-  Antivirus?    → Add JARVIS folder to exclusions
-  Voice not working? → Check that ggml-medium.bin is in redist/whisper/
+ГОЛОСОВЫЕ МОДЕЛИ (характеристики)
+──────────────────────────────────
+  English Fast      ~40 MB  · Команды, wake word · Мгновенная загрузка
+  English Full    ~1.8 GB   · Диктовка, транскрипция · Высокое качество
+  Русский         ~1.8 GB   · Полная поддержка RU/EN переключения
+  Deutsch         ~1.0 GB   · Немецкий
+  Français        ~1.0 GB   · Французский
+  中文              ~500 MB   · Китайский (малая модель)
 
-Help & bug reports: Help → User Guide  /  Help → Report a Bug
-===========================================
+Модели хранятся в: %APPDATA%\Bohdan99py\JARVIS\vosk\
+Удалить модель: Settings → Голос → кнопка [Удалить] рядом с моделью.
+
+
+WAKE WORD (слово-активатор)
+────────────────────────────
+Скажите «Джарвис», «Jarvis» или «Джарви» чтобы активировать.
+Команду можно произносить сразу после wake word:
+  «Джарвис, открой браузер»
+  «Jarvis, what time is it?»
+
+
+УПРАВЛЕНИЕ ГОЛОСОМ
+──────────────────
+Примеры команд:
+  «Джарвис, открой Telegram»          — запуск приложения
+  «Джарвис, найди в Google [запрос]»  — поиск в браузере
+  «Джарвис, сделай скриншот»          — захват экрана
+  «Джарвис, покажи погоду»            — прогноз погоды
+  «Джарвис, напомни через 30 минут»   — таймер/напоминание
+  «Джарвис, что сейчас открыто?»      — список окон
+  «Джарвис, выключи компьютер»        — управление питанием
+
+
+НАСТРОЙКИ (Settings)
+─────────────────────
+  Голос → Голосовые модели   — управление моделями
+  Голос → Порог тишины       — чувствительность микрофона (-45 dB по умолчанию)
+  Голос → Язык               — авто / фиксированный язык
+  ИИ → API ключ              — ключ Claude API (для сложных запросов)
+  Общие → Автозапуск         — запуск с Windows
+
+
+ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ
+───────────────────────────
+• Голосовое распознавание работает ЛОКАЛЬНО — никаких облачных серверов.
+• Микрофон активируется только при превышении порога громкости (VAD -45 dB).
+  Тишина не записывается и не обрабатывается.
+• Аудио не сохраняется на диск — только в оперативной памяти во время распознавания.
+• Данные не покидают ваш компьютер (кроме запросов к Claude/Gemini API, если настроены).
+• API-ключи хранятся в зашифрованном виде.
+
+Подробнее: PRIVACY_POLICY.txt в папке установки.
+
+
+ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ
+───────────────────────
+  ОС:        Windows 10/11 x64
+  RAM:       4 GB минимум (8 GB рекомендуется при большой модели)
+  Диск:      200 MB для программы + место для моделей
+  Микрофон:  любой Windows-совместимый (USB, встроенный, Bluetooth)
+  Интернет:  нужен только для скачивания моделей и Claude/Gemini API
+
+
+УСТРАНЕНИЕ ПРОБЛЕМ
+───────────────────
+  Микрофон не слышит:
+    → Проверьте разрешения: Пуск → Настройки → Конфиденциальность → Микрофон
+    → Попробуйте другой микрофон или увеличьте громкость в Windows
+
+  Wake word не срабатывает:
+    → Settings → Голос → Порог тишины: сдвиньте в сторону -60 dB
+    → Убедитесь что модель загружена (зелёный индикатор в главном окне)
+
+  Ошибка «модели не загружены»:
+    → Settings → Голос → Голосовые модели → выберите и скачайте модель
+    → Проверьте папку: %APPDATA%\Bohdan99py\JARVIS\vosk\
+
+  Медленная загрузка модели при старте:
+    → Большие модели (RU, EN Full) грузятся 5–15 сек — это нормально.
+    → Используйте «English Fast» для мгновенного старта.
+
+
+ПОДДЕРЖКА
+──────────
+GitHub:  https://github.com/Bohdan99py/jarvis
+Issues:  https://github.com/Bohdan99py/jarvis/issues
+
+═══════════════════════════════════════════════════════════════

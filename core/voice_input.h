@@ -3,10 +3,20 @@
 // voice_input.h — J.A.R.V.I.S. голосовой ввод (Vosk)
 //
 // Vosk — офлайн ASR, работает без интернета и GPU.
-// При первом запуске автоматически скачивает всё необходимое:
-//   1. libvosk.dll  — runtime библиотека
-//   2. model-en/    — английская модель (~40MB, быстрый старт)
-//   3. model-ru/    — русская модель (~1.8GB, в фоне)
+// При первом запуске показывает диалог выбора моделей.
+// Поддерживаемые языки и модели:
+//   EN small  — ~40 MB   (быстрый старт, хватает для команд)
+//   EN large  — ~1.8 GB  (высокое качество, диктовка)
+//   RU        — ~1.8 GB  (русский, высокое качество)
+//   DE        — ~1.0 GB  (немецкий)
+//   FR        — ~1.0 GB  (французский)
+//   ZH        — ~0.5 GB  (китайский, малая модель)
+//
+// Политика записи:
+//   - Запись активируется ТОЛЬКО при обнаружении голосовой
+//     активности (VAD, порог -45 dB). Тишина не пишется.
+//   - Аудио не покидает устройство — всё обрабатывается локально.
+//   - Данные не сохраняются на диск (только оперативная память).
 // ============================================================
 
 #include <QObject>
@@ -18,11 +28,50 @@
 #include <QByteArray>
 #include <QString>
 #include <QStringList>
+#include <QVector>
+#include <QMap>
 #include <atomic>
+
+// ============================================================
+//  VoskModelInfo — описание одной модели
+// ============================================================
+
+struct VoskModelInfo {
+    QString id;           // "en-small", "en-large", "ru", "de", "fr", "zh"
+    QString language;     // "en", "ru", "de", "fr", "zh"
+    QString displayName;  // "English (Fast)" и т.п.
+    QString description;  // описание для UI
+    QString url;          // URL для скачивания ZIP
+    QString zipPrefix;    // имя верхней папки в ZIP
+    QString subdir;       // куда распаковать (относительно installDir)
+    QString checkFile;    // файл для проверки установки (relative to subdir)
+    qint64  sizeBytes;    // приблизительный размер ZIP
+    bool    recommended;  // выделить как рекомендованную
+
+    bool isInstalled(const QString& installDir) const;
+    QString fullPath(const QString& installDir) const;
+};
+
+// ============================================================
+//  Глобальный каталог доступных моделей
+// ============================================================
+
+namespace VoskModels {
+    const QVector<VoskModelInfo>& catalog();
+    VoskModelInfo findById(const QString& id);
+    QString formatSize(qint64 bytes);
+}
+
+// ============================================================
+//  Конфиг голосового ввода
+// ============================================================
 
 struct WhisperConfig {
     QString modelPathRu  = QString();
     QString modelPathEn  = QString();
+    // Список дополнительных моделей: язык → путь
+    QMap<QString, QString> extraModels;
+
     float   silenceDbThreshold  = -45.0f;
     int     silenceAfterSpeechMs = 800;
     int     maxRecordingMs       = 15000;
@@ -30,14 +79,23 @@ struct WhisperConfig {
     QString language    = QStringLiteral("auto");
     QStringList wakeWords = { "джарвис", "jarvis", "джарви" };
     int threads = 4;
+
+    // Список ID установленных моделей для загрузки
+    QStringList enabledModelIds;
 };
 using VoiceConfig = WhisperConfig;
 
+// ============================================================
+//  VoskSetupStatus
+// ============================================================
+
 struct VoskSetupStatus {
-    bool dllReady     = false;
-    bool modelRuReady = false;
-    bool modelEnReady = false;
-    bool anyModelReady() const { return modelRuReady || modelEnReady; }
+    bool dllReady        = false;
+    bool modelRuReady    = false;
+    bool modelEnReady    = false;
+    QStringList installedModelIds;  // все установленные модели
+
+    bool anyModelReady() const { return modelRuReady || modelEnReady || !installedModelIds.isEmpty(); }
     bool fullyReady()    const { return dllReady && anyModelReady(); }
 };
 
@@ -50,7 +108,17 @@ class VoskDownloader : public QObject
     Q_OBJECT
 public:
     explicit VoskDownloader(QObject* parent = nullptr);
-    void setupVosk(const QString& installDir);
+
+    // Полная установка: DLL + список моделей по ID
+    void setupVosk(const QString& installDir, const QStringList& modelIds = {});
+
+    // Скачать одну модель (для Settings → докачать)
+    void downloadModel(const QString& installDir, const QString& modelId);
+
+    // Удалить модель (для Settings → удалить)
+    static bool deleteModel(const QString& installDir, const QString& modelId);
+
+    // Проверить статус установки
     static VoskSetupStatus checkStatus(const QString& installDir);
 
 signals:
@@ -62,6 +130,7 @@ signals:
     void logMessage(const QString& message);
 
 private:
+    void ensureDll();
     void downloadAndExtract(const QString& name, const QString& url,
                             const QString& extractTo, const QString& stripPrefix);
     bool extractZipPowerShell(const QString& zipPath, const QString& targetDir,
@@ -97,6 +166,8 @@ private slots:
 private:
     float      computeRmsDb(const QByteArray& data) const;
     QByteArray downsample44to16(const QByteArray& src) const;
+    QByteArray downsampleTo16k(const QByteArray& src, int srcRate) const;
+
     QAudioSource*     m_audioSource  = nullptr;
     QIODevice*        m_audioDevice  = nullptr;
     QTimer*           m_silenceTimer = nullptr;
@@ -108,7 +179,7 @@ private:
 };
 
 // ============================================================
-//  VoskWorker
+//  VoskWorker — распознавание в отдельном потоке
 // ============================================================
 
 class VoskWorker : public QObject
@@ -119,8 +190,12 @@ public:
     ~VoskWorker() override;
 
 public slots:
-    void loadModels(const QString& modelPathRu, const QString& modelPathEn, int threads);
+    // Загрузить модели по путям из конфига
+    void loadModels(const WhisperConfig& config);
+    // Распознать буфер
     void recognize(QByteArray pcmData, QString preferredLang);
+    // Перезагрузить (после установки новой модели)
+    void reloadModels(const WhisperConfig& config);
 
 signals:
     void modelsLoaded(bool success, const QString& error);
@@ -128,12 +203,17 @@ signals:
     void error(const QString& message);
 
 private:
+    struct ModelPair {
+        void* model     = nullptr;
+        void* recognizer = nullptr;
+        QString lang;
+    };
+
+    void freeAll();
     QString tryRecognize(void* recognizer, const QByteArray& pcmData) const;
     bool    isWhisperLevel(const QByteArray& pcmData) const;
-    void* m_modelRu = nullptr;
-    void* m_modelEn = nullptr;
-    void* m_recoRu  = nullptr;
-    void* m_recoEn  = nullptr;
+
+    QVector<ModelPair> m_models;
     bool  m_loaded  = false;
 };
 
@@ -155,29 +235,55 @@ public:
     void setConfig(const WhisperConfig& config);
     const WhisperConfig& config() const { return m_config; }
 
+    // --- Управление моделями ---
+    // Скачать дополнительную модель (вызывать из Settings)
+    void downloadModel(const QString& modelId);
+    // Удалить модель
+    bool deleteModel(const QString& modelId);
+    // Список установленных моделей
+    QStringList installedModelIds() const;
+    // Перезагрузить Vosk после изменения набора моделей
+    void reloadModels();
+
+    // --- Статус установки ---
     static VoskSetupStatus checkSetupStatus();
     static QString voskInstallDir();
+
+    // Был ли показан диалог выбора моделей
+    static bool isFirstRun();
+    static void markFirstRunComplete();
+
+    // Запустить установку с заданным набором моделей
+    // (вызывается из VoskSetupDialog после выбора пользователя)
+    void startSetup(const QStringList& modelIds);
 
 signals:
     void ready();
     void initError(const QString& message);
     void listeningStarted();
     void speechDetected();
-    void volumeLevel(float db);   // уровень микрофона -100..0 dB
+    void volumeLevel(float db);
     void textRecognized(const QString& text, const QString& language);
     void wakeWordDetected(const QString& word);
     void whisperModeDetected(bool isWhisper);
     void errorOccurred(const QString& message);
 
-    // Прогресс установки Vosk
-    void setupRequired();
+    // Установка / обновление моделей
+    void setupRequired();                      // нужно показать диалог выбора
     void setupProgress(const QString& component, int percent, qint64 bytesTotal);
     void setupComponentReady(const QString& component);
     void setupFinished(bool success, const QString& error);
     void setupLogMessage(const QString& message);
 
-    void requestLoadModels(const QString& pathRu, const QString& pathEn, int threads);
+    // Докачка модели из Settings
+    void modelDownloadStarted(const QString& modelId);
+    void modelDownloadProgress(const QString& modelId, int percent, qint64 total);
+    void modelDownloadFinished(const QString& modelId, bool success);
+
+    // Внутренние сигналы → worker
+    void requestLoadModels(WhisperConfig config);
     void requestRecognize(QByteArray pcmData, QString lang);
+    void requestReloadModels(WhisperConfig config);
 
 private slots:
     void onModelsLoaded(bool success, const QString& error);
@@ -185,11 +291,11 @@ private slots:
     void onRecognized(const QString& text, const QString& lang, bool isWhisper);
     void onRecorderError(const QString& message);
     void onSetupFinished(bool success, const QString& error);
+    void onModelDownloadFinished(bool success, const QString& error);
 
 private:
-    void startSetup();
     void loadModelsFromDisk();
-    static QString resolveModelPath(const QString& subdir);
+    void connectDownloader(VoskDownloader* dl);
 
     WhisperConfig   m_config;
     QThread*        m_thread         = nullptr;
@@ -200,4 +306,5 @@ private:
     bool m_initialized  = false;
     bool m_listening    = false;
     bool m_wakeWordMode = true;
+    QString m_pendingDownloadModelId; // ID модели в процессе скачивания
 };

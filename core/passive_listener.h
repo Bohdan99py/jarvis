@@ -162,6 +162,10 @@ public:
     // Запустить обработку накопленных записей через Brain → training_logs
     void processJournal();
 
+    // Сохранить голосовую команду + ответ как training pair
+    void addVoiceCommandPair(const QString& command, const QString& response,
+                             const QString& language = QString());
+
     // Статистика
     int journalEntriesCount() const;
     int processedEntriesCount() const;
@@ -203,4 +207,5 @@ private:
 
     bool                  m_initialized = false;
     bool                  m_listening   = false;
+    bool                  m_autoStart   = false;  // автостарт после загрузки моделей
 };

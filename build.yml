@@ -195,6 +195,15 @@ jobs:
             Write-Host "Qt Audio plugins copied"
           }
 
+          # Копируем документацию в пакет
+          $docs = @("PRIVACY_POLICY.txt", "JARVIS_INSTALL_NOTES.txt", "EULA_JARVIS.txt", "JARVIS_EULA_EN.txt", "README.md")
+          foreach ($doc in $docs) {
+            if (Test-Path $doc) {
+              Copy-Item -Force $doc release_package\
+              Write-Host "Copied doc: $doc"
+            }
+          }
+
           # Копируем Vosk DLL в release_package
           $voskDir = "redist\vosk"
           $voskDlls = @("libvosk.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")

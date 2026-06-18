@@ -3,6 +3,7 @@
 // ============================================================
 #include "passive_listener.h"
 #include "database_manager.h"
+#include <QDateTime>
 
 #ifdef JARVIS_VOSK_AVAILABLE
 #include "vosk_api.h"
@@ -349,8 +350,10 @@ void PassiveListener::setConfig(const PassiveListenerConfig& config)
 
 void PassiveListener::startListening()
 {
+    m_autoStart = true;  // запомним что хотели запустить
+
     if (!m_initialized) {
-        emit errorOccurred(QStringLiteral("Passive listener not initialized"));
+        qDebug() << "[Passive] Not ready yet, will auto-start when models load";
         return;
     }
     if (m_listening) return;
@@ -384,6 +387,12 @@ void PassiveListener::onModelLoaded(bool ok)
         emit ready();
         scheduleWeeklyCleanup();
         qDebug() << "[Passive] Ready";
+
+        // Автостарт если был включён до загрузки моделей
+        if (m_autoStart) {
+            qDebug() << "[Passive] Auto-starting listening";
+            startListening();
+        }
     }
 }
 
@@ -481,6 +490,33 @@ void PassiveListener::ensureDatasetDir()
             QStandardPaths::AppDataLocation) + QStringLiteral("/voice_dataset");
     }
     QDir().mkpath(m_config.datasetPath);
+}
+
+// Вызывается из MainWindow когда VoiceInput распознал команду
+// и получен ответ — сохраняем как training pair
+void PassiveListener::addVoiceCommandPair(const QString& command,
+                                           const QString& response,
+                                           const QString& language)
+{
+    if (command.trimmed().isEmpty() || response.trimmed().isEmpty()) return;
+
+    DbTrainingLog log;
+    log.userId      = 1;
+    log.userMessage = command.simplified();
+    log.aiResponse  = response.simplified();
+    log.model       = QStringLiteral("voice_command");
+    log.sessionId   = QStringLiteral("voice_%1")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd")));
+    log.rating      = 0;  // голосовая команда — без лайка, будет очищена если плохая
+
+    qint64 id = DatabaseManager::instance().addTrainingLog(log);
+    if (id > 0)
+        qDebug() << "[Passive] Voice command pair saved:" << command.left(40);
+
+    // Также сохраняем в voice_journal для статистики
+    DatabaseManager::instance().addVoiceJournalEntry(
+        command, language.isEmpty() ? QStringLiteral("auto") : language,
+        0.85f, QDateTime::currentDateTime());
 }
 
 int PassiveListener::journalEntriesCount() const
