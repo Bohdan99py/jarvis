@@ -8,6 +8,8 @@
 #include <QSqlError>
 #include <QSqlDatabase>
 #include <QCoreApplication>
+#include <QStandardPaths>
+#include <QDir>
 #include <QSettings>
 #include <QDebug>
 
@@ -44,7 +46,8 @@ ScreenshotLearner::ScreenshotLearner(QObject* parent)
     QSettings s(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
     m_enabled = s.value(QStringLiteral("learner/enabled"), true).toBool();
 
-    ensureTable();
+    // ensureTable() вызовется в start() — не в конструкторе,
+    // чтобы DatabaseManager успел инициализироваться
 }
 
 ScreenshotLearner::~ScreenshotLearner()
@@ -53,13 +56,40 @@ ScreenshotLearner::~ScreenshotLearner()
 }
 
 // ============================================================
+//  Собственная БД — отдельный файл, не конфликтует с DatabaseManager
+// ============================================================
+
+static const QString kLearnerDbConn = QStringLiteral("jarvis_learner");
+
+static QSqlDatabase learnerDb()
+{
+    if (QSqlDatabase::contains(kLearnerDbConn)) {
+        return QSqlDatabase::database(kLearnerDbConn);
+    }
+
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dir);
+    QString path = dir + QStringLiteral("/app_patterns.db");
+
+    QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kLearnerDbConn);
+    db.setDatabaseName(path);
+    if (!db.open()) {
+        qWarning() << "[Learner] Cannot open DB:" << path << db.lastError().text();
+    }
+    return db;
+}
+
+// ============================================================
 //  Таблица в SQLite
 // ============================================================
 
 void ScreenshotLearner::ensureTable()
 {
-    QSqlDatabase db = QSqlDatabase::database();
-    if (!db.isOpen()) return;
+    QSqlDatabase db = learnerDb();
+    if (!db.isOpen()) {
+        qWarning() << "[Learner] Database not available";
+        return;
+    }
 
     QSqlQuery q(db);
     q.exec(QStringLiteral(
@@ -91,13 +121,15 @@ void ScreenshotLearner::start(int intervalMinutes)
     if (m_running) return;
     if (!m_enabled) return;
 
+    // Создаём таблицу при первом запуске (БД уже инициализирована)
+    ensureTable();
+
     m_running = true;
     m_lastChangeTime = QDateTime::currentDateTime();
     m_lastAppName.clear();
 
-    // Первый захват сразу
-    onCapture();
-
+    // Первый захват — через интервал таймера (не сразу)
+    // Чтобы не нагружать стек при инициализации
     m_timer->start(intervalMinutes * 60 * 1000);
     qDebug() << "[Learner] Started, interval:" << intervalMinutes << "min";
 }
@@ -271,7 +303,7 @@ void ScreenshotLearner::recordCurrentApp()
     int hour = m_lastChangeTime.time().hour();
     int dow = m_lastChangeTime.date().dayOfWeek(); // 1=Mon
 
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return;
 
     QSqlQuery q(db);
@@ -311,7 +343,7 @@ QVector<AppSuggestion> ScreenshotLearner::suggestionsForNow(int topN) const
 {
     QVector<AppSuggestion> result;
 
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return result;
 
     QDateTime now = QDateTime::currentDateTime();
@@ -383,7 +415,7 @@ bool ScreenshotLearner::hasSuggestion(float threshold) const
 QVector<AppUsageStat> ScreenshotLearner::todayStats() const
 {
     QVector<AppUsageStat> result;
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return result;
 
     QSqlQuery q(db);
@@ -409,7 +441,7 @@ QVector<AppUsageStat> ScreenshotLearner::todayStats() const
 QVector<AppUsageStat> ScreenshotLearner::weekStats() const
 {
     QVector<AppUsageStat> result;
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return result;
 
     QSqlQuery q(db);
@@ -434,7 +466,7 @@ QVector<AppUsageStat> ScreenshotLearner::weekStats() const
 
 int ScreenshotLearner::totalRecords() const
 {
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return 0;
     QSqlQuery q(db);
     q.exec(QStringLiteral("SELECT COUNT(*) FROM app_usage_log"));
@@ -447,7 +479,7 @@ int ScreenshotLearner::totalRecords() const
 
 void ScreenshotLearner::clearAllData()
 {
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return;
     QSqlQuery q(db);
     q.exec(QStringLiteral("DELETE FROM app_usage_log"));
@@ -456,7 +488,7 @@ void ScreenshotLearner::clearAllData()
 
 void ScreenshotLearner::cleanupOlderThan(int days)
 {
-    QSqlDatabase db = QSqlDatabase::database();
+    QSqlDatabase db = learnerDb();
     if (!db.isOpen()) return;
     QSqlQuery q(db);
     q.prepare(QStringLiteral(

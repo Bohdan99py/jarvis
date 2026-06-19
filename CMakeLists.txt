@@ -305,6 +305,8 @@ if(MSVC)
     )
     target_compile_options(jarvis PRIVATE $<$<CONFIG:Release>:/O2 /GL>)
     target_link_options(jarvis PRIVATE $<$<CONFIG:Release>:/LTCG>)
+    # Увеличиваем стек до 4 МБ (дефолт 1 МБ — мало при 1700+ строк в buildMenuBar)
+    target_link_options(jarvis PRIVATE /STACK:4194304)
 endif()
 
 # --- Упаковка Qt-зависимостей рядом с exe (Windows) ---

@@ -273,7 +273,10 @@ MainWindow::MainWindow(QWidget* parent)
             onSuggestion(desc, s.appName);
         }
     });
-    m_appLearner->start(2); // каждые 2 минуты
+    // Запускаем ПОСЛЕ полной инициализации окна
+    QTimer::singleShot(3000, this, [this]() {
+        if (m_appLearner) m_appLearner->start(2);
+    });
     connect(m_screenAgent, &ScreenAgent::actionCompleted,
             this, [this](const QString& desc) {
         appendLog(Str::logJarvis(), desc, Theme::LogColors::system);
@@ -2549,13 +2552,44 @@ void MainWindow::onSend()
 
     // ── 6. Всё остальное → Jarvis/Claude ─────────────────
     m_lastUserInput      = text;  // сохраняем для самообучения
-    m_lastInputWasVoice  = false; // сбрасываем — текстовый ввод
+    // НЕ сбрасываем m_lastInputWasVoice здесь — он нужен в onAsyncResponse
+    // для записи в voice_journal. Сбросится там после использования.
     QString response = m_jarvis->processCommand(
         text, attachmentBlock, m_langDetector.systemInstruction());
 
     if (!response.isEmpty()) {
         appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
         m_jarvis->speakAsync(response);
+
+        // ── Сохраняем синхронный ответ в датасет (rating=0) ──
+        m_lastAiResponse = response;
+        m_lastAiModel    = QStringLiteral("local");
+        if (m_lastSessionId.isEmpty())
+            m_lastSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+        DbTrainingLog syncLog;
+        syncLog.userId      = 1;
+        syncLog.userMessage = text;
+        syncLog.aiResponse  = response;
+        syncLog.model       = m_lastAiModel;
+        syncLog.sessionId   = m_lastSessionId;
+        syncLog.rating      = 0;
+        DatabaseManager::instance().addTrainingLog(syncLog);
+
+        // Если это был голосовой ввод — сохраняем в voice_journal
+        if (m_lastInputWasVoice && m_passiveListener) {
+            m_passiveListener->addVoiceCommandPair(
+                text, response, m_lastVoiceLanguage);
+            m_lastInputWasVoice = false;
+        }
+
+        // Активируем кнопку 👍
+        if (m_likeBtn) {
+            m_likeBtn->setEnabled(true);
+            m_likeBtn->setProperty("liked", false);
+            m_likeBtn->setText(QStringLiteral("👍"));
+            ++m_trainingCount;
+        }
     }
 
     m_input->setFocus();
@@ -2717,6 +2751,8 @@ void MainWindow::onAsyncResponse(const QString& response)
             m_passiveListener->addVoiceCommandPair(
                 m_lastUserInput, response, m_lastVoiceLanguage);
         }
+        // Сбрасываем voice flag после использования
+        m_lastInputWasVoice = false;
     }
 
     // Активируем кнопку 👍
@@ -3254,7 +3290,9 @@ void MainWindow::buildUI()
     m_micBtn = new QPushButton(QStringLiteral("🎤"), this);
     m_micBtn->setObjectName(QStringLiteral("micBtn"));
     m_micBtn->setFixedWidth(44);
-    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)") : QStringLiteral("Голосовой ввод (Vosk)"));
+    m_micBtn->setEnabled(false); // выключена до загрузки моделей Vosk
+    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input — loading models...")
+                               : QStringLiteral("Голосовой ввод — загрузка моделей..."));
     m_micBtn->setStyleSheet(
         QStringLiteral("QPushButton#micBtn { background-color: #0d1f2d; color: #4a7a9b; "
                        "border: 1px solid #1a3050; border-radius: 4px; font-size: 16px; } "
@@ -3710,6 +3748,8 @@ void MainWindow::onMicButtonClicked()
 void MainWindow::onVoiceReady()
 {
     m_micBtn->setEnabled(true);
+    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)")
+                               : QStringLiteral("Голосовой ввод (Vosk)"));
     appendLog(Str::logSystem(),
               IS_EN ? QStringLiteral("🎤 Vosk models loaded. Voice input ready.")
                     : QStringLiteral("🎤 Модели Vosk загружены. Голосовой ввод готов."),
