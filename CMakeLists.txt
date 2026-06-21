@@ -129,6 +129,14 @@ add_library(JarvisCore STATIC
         core/virtual_keyboard.h
         core/virtual_keyboard.cpp
 
+        # --- Full PC Voice Control (мышь/клавиатура/окна/система голосом) ---
+        core/pc_controller.h
+        core/pc_controller.cpp
+        core/pc_command_registry.h
+        core/pc_command_registry.cpp
+        core/macro_recorder.h
+        core/macro_recorder.cpp
+
         # Claude API
         core/claude_api.h
         core/claude_api.cpp
@@ -241,6 +249,7 @@ target_link_libraries(JarvisCore PRIVATE
         user32
         advapi32
         psapi
+        PowrProf
 )
 
 # Vosk — линкуем если нашли
