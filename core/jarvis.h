@@ -30,6 +30,7 @@ class AutoUpdater;
 class ProjectIndexer;
 class CodeActions;
 class AttachmentsManager;
+class PcCommandRegistry;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -75,6 +76,7 @@ public:
     CodeActions*        codeActions()        const { return m_codeActions; }
     AttachmentsManager* attachments()        const { return m_attachments; }
     UserProfile*        userProfile()        const { return m_profile; }
+    PcCommandRegistry*  pcCommands()         const { return m_pcCommands; }
 
     // Мультиагентный режим: true = Claude для кода, Gemini для бесед
     void setMultiAgentMode(bool enabled);
@@ -175,6 +177,7 @@ private:
     AttachmentsManager* m_attachments  = nullptr;
     AppLauncher         m_appLauncher;             // запуск приложений/IDE
     UserProfile*        m_profile      = nullptr;  // обучение паттернов/сценариев
+    PcCommandRegistry*  m_pcCommands   = nullptr;  // голосовое управление ПК (мышь/окна/система/макросы)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 
     bool              m_multiAgentMode    = false;

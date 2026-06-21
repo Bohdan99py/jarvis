@@ -3,21 +3,35 @@
 // pc_command_registry.h — Голосовые команды управления ПК
 // J.A.R.V.I.S. Full PC Voice Control
 //
+// ВАЖНО: клавиатура (печать текста/нажатие клавиш/комбо) у тебя
+// УЖЕ реализована через KeyEmulator + cmdTypeText/cmdPressKey/cmdCombo
+// в jarvis.cpp ("напечатай "/"нажми "/"комбо "). Этот модуль их
+// НЕ дублирует и НЕ трогает — добавляет только то, чего не было:
+//
+//   • Мышь        — клик/двойной клик/правый клик/скролл/позиционирование
+//   • Окна        — переключение по имени, свернуть/развернуть/закрыть/
+//                   поверх всех, фокус приложений
+//   • Система     — запуск приложений, блокировка, сон, выключение,
+//                   громкость (WASAPI), диспетчер задач
+//   • Браузер     — назад/вперёд/обновить/адресная строка/открыть сайт
+//   • Файлы       — поиск файла по имени
+//   • Макросы     — запись/воспроизведение голосом (мышь+клавиатура),
+//                   готовые сценарии (утро/ночь/режим разработки)
+//
 // НЕ заменяет CommandRegistry и не лезет в его структуру.
-// Это фабрика: строит готовый PcController + регистрирует
-// ~80 команд (мышь/клавиатура/окна/система/медиа/браузер/
-// макросы) в ТВОЙ существующий CommandRegistry через его
-// штатный registerCommand(keywords, handler, description, prefixMatch).
+// Регистрирует команды через штатный
+//     registry.registerCommand(keywords, handler, description, prefixMatch)
 //
-// Использование в Jarvis (или где у тебя CommandRegistry создаётся):
+// Использование в Jarvis (поле, не указатель — как остальные
+// контроллеры в jarvis.h):
 //
-//     m_registry = new CommandRegistry();
-//     m_pcCommands = new PcCommandRegistry(this);
-//     m_pcCommands->registerInto(*m_registry);
-//     ... регистрируй остальные свои команды как обычно ...
+//     // jarvis.h:
+//     #include "pc_command_registry.h"
+//     PcCommandRegistry* m_pcCommands = nullptr;
 //
-// PcCommandRegistry владеет PcController и MacroRecorder —
-// живёт столько же, сколько Jarvis/MainWindow.
+//     // jarvis.cpp, конструктор, после m_keyEmulator = new KeyEmulator(this):
+//     m_pcCommands = new PcCommandRegistry(m_keyEmulator, this);
+//     m_pcCommands->registerInto(m_registry);   // m_registry — твой объект CommandRegistry
 // -------------------------------------------------------
 
 #include <QObject>
@@ -26,12 +40,16 @@
 class CommandRegistry;
 class PcController;
 class MacroRecorder;
+class KeyEmulator;
 
 class PcCommandRegistry : public QObject
 {
     Q_OBJECT
 public:
-    explicit PcCommandRegistry(QObject* parent = nullptr);
+    // keyEmulator может быть nullptr — тогда печать текста в макросах
+    // (TypeText-события) будет недоступна, но мышь/окна/система всё
+    // равно зарегистрируются и будут работать.
+    explicit PcCommandRegistry(KeyEmulator* keyEmulator, QObject* parent = nullptr);
     ~PcCommandRegistry() override;
 
     // Регистрирует все PC-control команды в переданный реестр.
@@ -40,33 +58,24 @@ public:
 
     // Доступ к контроллеру — пригодится для голосового вайбкодинга,
     // ScreenAgent и т.п. (см. screen_agent.h/.cpp)
-    PcController* controller() const { return m_pc; }
-    MacroRecorder* macros()    const { return m_macros; }
-
-    // Режим диктовки — когда включён, текст не парсится как команда,
-    // а печатается как есть в активное окно. Переключается командой
-    // "начать диктовку" / "остановить диктовку", но снаружи (например
-    // из Jarvis::processCommand) тоже можно проверить/выставить.
-    bool isDictationMode() const { return m_dictationMode; }
-    void setDictationMode(bool on);
+    PcController*  controller() const { return m_pc; }
+    MacroRecorder* macros()     const { return m_macros; }
 
 signals:
     // Голосовая обратная связь для TTS — подключи к своему
-    // voice_input / TTS слою.
+    // Jarvis::speakAsync через connect снаружи.
     void feedbackReady(const QString& text);
 
 private:
     void registerMouseCommands(CommandRegistry& r);
-    void registerKeyboardCommands(CommandRegistry& r);
     void registerWindowCommands(CommandRegistry& r);
     void registerSystemCommands(CommandRegistry& r);
     void registerMediaCommands(CommandRegistry& r);
-    void registerTextCommands(CommandRegistry& r);
     void registerBrowserCommands(CommandRegistry& r);
     void registerFileCommands(CommandRegistry& r);
     void registerMacroVoiceCommands(CommandRegistry& r);
 
-    PcController*  m_pc     = nullptr;
-    MacroRecorder* m_macros = nullptr;
-    bool m_dictationMode = false;
+    PcController*  m_pc          = nullptr;
+    MacroRecorder* m_macros      = nullptr;
+    KeyEmulator*   m_keyEmulator = nullptr; // не владеем, используем для макросов
 };

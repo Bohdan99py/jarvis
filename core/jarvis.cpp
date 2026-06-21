@@ -14,6 +14,7 @@
 #include "code_actions.h"
 #include "attachments_manager.h"
 #include "brain.h"
+#include "pc_command_registry.h"
 
 #include <sapi.h>
 #include <shellapi.h>
@@ -51,6 +52,7 @@ Jarvis::Jarvis(QObject* parent)
     m_geminiBackup = new GeminiApi(m_memory, this); // Gemini — fallback если Ollama недоступна
     m_predictor    = new ActionPredictor(m_memory, this);
     m_keyEmulator  = new KeyEmulator(this);
+    m_pcCommands   = new PcCommandRegistry(m_keyEmulator, this);
     m_indexer      = new ProjectIndexer(this);
     m_codeActions  = new CodeActions(this);
     m_attachments  = new AttachmentsManager(this);
@@ -65,6 +67,17 @@ Jarvis::Jarvis(QObject* parent)
     );
 
     registerCommands();
+
+    // Голосовое управление ПК (мышь/окна/система/медиа/браузер/макросы) —
+    // регистрируется ПОСЛЕ registerCommands(), чтобы системные префиксы
+    // ("напечатай ", "нажми ", "комбо ", "apikey " и т.д.) сохраняли
+    // приоритет совпадения в CommandRegistry::tryExecute.
+    m_pcCommands->registerInto(m_registry);
+
+    // Голосовая обратная связь PC-команд идёт тем же путём TTS,
+    // что и обычные ответы Jarvis.
+    connect(m_pcCommands, &PcCommandRegistry::feedbackReady,
+            this, &Jarvis::speakAsync);
 
     // Реакция на ошибки API
     connect(m_claudeApi, &ClaudeApi::apiError, this, [this](const QString& err) {
@@ -862,7 +875,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     }
 
     // Обогащение: автопоиск из индекса + прикрепления пользователя +
-    // журнал сессий (если запрос похож на "вспомни что было ..."). 
+    // журнал сессий (если запрос похож на "вспомни что было ...").
     // Контекст проекта нужен только тем запросам, что и так идут в Claude —
     // для простой болталки в Ollama/Gemini он только тратит токены впустую.
     QString enrichedMessage = s;
