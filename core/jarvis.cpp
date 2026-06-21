@@ -835,14 +835,18 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         return result.response;
     }
 
-    // 2. Claude API — код, анализ, файлы (или fallback если Ollama недоступна)
-    if (m_multiAgentMode) {
-        emit agentSelected(QStringLiteral("🤖 Claude"));
-    }
-    // Claude API — дефолт для всего остального.
-    //    Brain уже определил намерение и при необходимости обогатил
-    //    запрос суффиксом домена (например " в проекте").
-    //    Здесь просто отправляем в API.
+    // 2. Маршрутизация по типу запроса — РАБОТАЕТ ВСЕГДА,
+    //    независимо от m_multiAgentMode (см. routeToClaude()).
+    //    Раньше эта проверка срабатывала только при m_multiAgentMode==true,
+    //    из-за чего "привет"/"2+2"/любая болталка тоже улетала в Claude API
+    //    и расходовала платные токены. Теперь:
+    //      - Код/анализ/файлы/архитектура → Claude (платно, но по делу)
+    //      - Всё остальное (приветствия, простые вопросы, арифметика,
+    //        болталка) → Ollama (если поднята) → иначе Gemini (встроенный
+    //        бесплатный ключ) → и только если оба недоступны — Claude
+    //        как последний fallback, чтобы пользователь не остался без ответа.
+    const bool needsClaude = routeToClaude(s, attachmentBlock);
+
     if (!m_indexer->projectRoot().isEmpty()) {
         m_codeActions->setProjectRoot(m_indexer->projectRoot());
     }
@@ -850,7 +854,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // 2b. Вайбкодинг: похоже на запрос новой фичи/изменения кода и
     //     проект открыт — открываем его в CLion (один раз за сессию),
     //     чтобы пользователь видел, как JARVIS пишет файлы вживую.
-    if (!m_indexer->projectRoot().isEmpty() && isCodingIntent(s)) {
+    if (needsClaude && !m_indexer->projectRoot().isEmpty() && isCodingIntent(s)) {
         const QString ideMsg = openProjectInIDE();
         if (!ideMsg.isEmpty()) {
             emit ideOpened(ideMsg);
@@ -858,16 +862,15 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     }
 
     // Обогащение: автопоиск из индекса + прикрепления пользователя +
-    // журнал сессий (если запрос похож на "вспомни что было ...")
-    const QString projectContext = buildProjectContext(s);
-    const QString historyContext = m_memory->buildHistoryContext(s);
-
+    // журнал сессий (если запрос похож на "вспомни что было ..."). 
+    // Контекст проекта нужен только тем запросам, что и так идут в Claude —
+    // для простой болталки в Ollama/Gemini он только тратит токены впустую.
     QString enrichedMessage = s;
-    if (!projectContext.isEmpty()) {
-        enrichedMessage += projectContext;
-    }
-    if (!historyContext.isEmpty()) {
-        enrichedMessage += historyContext;
+    if (needsClaude) {
+        const QString projectContext = buildProjectContext(s);
+        const QString historyContext = m_memory->buildHistoryContext(s);
+        if (!projectContext.isEmpty()) enrichedMessage += projectContext;
+        if (!historyContext.isEmpty()) enrichedMessage += historyContext;
     }
     if (!attachmentBlock.isEmpty()) {
         enrichedMessage += attachmentBlock;
@@ -875,12 +878,11 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     const bool hadAttachments = !attachmentBlock.isEmpty();
 
-    // Языковая инструкция + характер JARVIS
-    // Claude читает их и отвечает на нужном языке с нужной личностью
+    // Языковая инструкция + характер JARVIS — общие для всех бэкендов,
+    // чтобы Ollama/Gemini тоже отвечали в характере, а не сухим текстом.
     {
         QString prefix;
 
-        // Характер JARVIS — саркастичный, умный, живой ИИ-ассистент
         prefix += QStringLiteral(
             "[JARVIS_PERSONALITY: "
             "You are JARVIS — a sarcastic, witty, highly intelligent AI assistant. "
@@ -906,68 +908,82 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         }
     }
 
-    // Мультиагентный роутинг
-    if (m_multiAgentMode && !routeToClaude(s, attachmentBlock)) {
-        // Простой чат/вопрос → Ollama
+    // --- Ветка Claude: код, анализ, файлы, архитектура ---
+    if (needsClaude) {
+        emit agentSelected(QStringLiteral("🤖 Claude"));
+        m_claudeApi->sendMessage(enrichedMessage,
+                                 [this, s, hadAttachments](bool success, const QString& response) {
+            if (success) {
+                handleClaudeCodeResponse(s, response, hadAttachments);
+            } else {
+                emit asyncResponseError(response);
+            }
+        });
+        return QString();
+    }
+
+    // --- Ветка "болталка": Ollama → Gemini (встроенный ключ) → Claude (last resort) ---
+    auto tryGeminiThenClaude = [this, s, enrichedMessage, hadAttachments]() {
+        if (m_geminiBackup && m_geminiBackup->hasApiKey()) {
+            emit agentSelected(QStringLiteral("♊ Gemini"));
+            m_geminiBackup->sendMessage(enrichedMessage,
+                [this, s, enrichedMessage, hadAttachments](bool ok2, const QString& resp2) {
+                if (ok2) {
+                    m_memory->addMessage(QStringLiteral("assistant"), resp2);
+                    m_memory->updateContext(s, resp2);
+                    m_predictor->recordSequence(s);
+                    emit asyncResponseReady(resp2);
+                } else {
+                    // Gemini тоже недоступна → Claude как последний fallback
+                    emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
+                    m_claudeApi->sendMessage(enrichedMessage,
+                        [this, s, hadAttachments](bool ok3, const QString& resp3) {
+                        if (ok3) {
+                            handleClaudeCodeResponse(s, resp3, hadAttachments);
+                        } else {
+                            emit asyncResponseError(resp3);
+                        }
+                    });
+                }
+            });
+        } else {
+            // Нет Gemini ключа → сразу Claude
+            emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
+            m_claudeApi->sendMessage(enrichedMessage,
+                [this, s, hadAttachments](bool ok, const QString& resp) {
+                if (ok) {
+                    handleClaudeCodeResponse(s, resp, hadAttachments);
+                } else {
+                    emit asyncResponseError(resp);
+                }
+            });
+        }
+    };
+
+    if (m_multiAgentMode) {
+        // Ollama явно включена пользователем и доступна — приоритет ей
+        // (полностью бесплатно, локально, без сети).
         emit agentSelected(QStringLiteral("🦙 ") + m_geminiApi->model());
         m_geminiApi->sendMessage(enrichedMessage,
-                                 [this, s, enrichedMessage, hadAttachments](bool success, const QString& response) {
+                                 [this, s, enrichedMessage, hadAttachments,
+                                  tryGeminiThenClaude](bool success, const QString& response) {
             if (success) {
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
                 m_predictor->recordSequence(s);
                 emit asyncResponseReady(response);
             } else {
-                // Ollama недоступна → пробуем Gemini (встроенный ключ)
-                if (m_geminiBackup && m_geminiBackup->hasApiKey()) {
-                    emit agentSelected(QStringLiteral("♊ Gemini (fallback)"));
-                    m_geminiBackup->sendMessage(enrichedMessage,
-                        [this, s, enrichedMessage, hadAttachments](bool ok2, const QString& resp2) {
-                        if (ok2) {
-                            m_memory->addMessage(QStringLiteral("assistant"), resp2);
-                            m_memory->updateContext(s, resp2);
-                            m_predictor->recordSequence(s);
-                            emit asyncResponseReady(resp2);
-                        } else {
-                            // Gemini тоже не работает → Claude
-                            emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
-                            m_claudeApi->sendMessage(enrichedMessage,
-                                [this, s, hadAttachments](bool ok3, const QString& resp3) {
-                                if (ok3) {
-                                    handleClaudeCodeResponse(s, resp3, hadAttachments);
-                                } else {
-                                    emit asyncResponseError(resp3);
-                                }
-                            });
-                        }
-                    });
-                } else {
-                    // Нет Gemini ключа → сразу Claude
-                    emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
-                    m_claudeApi->sendMessage(enrichedMessage,
-                        [this, s, hadAttachments](bool ok, const QString& resp) {
-                        if (ok) {
-                            handleClaudeCodeResponse(s, resp, hadAttachments);
-                        } else {
-                            emit asyncResponseError(resp);
-                        }
-                    });
-                }
+                // Ollama перестала отвечать посреди сессии → Gemini → Claude
+                tryGeminiThenClaude();
             }
         });
         return QString();
     }
 
-    emit agentSelected(QStringLiteral("🤖 Claude"));
-    m_claudeApi->sendMessage(enrichedMessage,
-                             [this, s, hadAttachments](bool success, const QString& response) {
-        if (success) {
-            handleClaudeCodeResponse(s, response, hadAttachments);
-        } else {
-            emit asyncResponseError(response);
-        }
-    });
-
+    // Ollama не включена/не проверена — идём сразу в Gemini (бесплатно,
+    // встроенный ключ, без необходимости поднимать локальный сервер),
+    // и только если её тоже нет — в Claude.
+    tryGeminiThenClaude();
     return QString();
 }
 
@@ -1443,18 +1459,39 @@ void Jarvis::setMultiAgentMode(bool enabled)
 bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock) const
 {
     // Возвращает true  → запрос идёт в Claude (код, файлы, сложные задачи)
-    // Возвращает false → запрос идёт в Ollama (болталка, простые вопросы)
+    // Возвращает false → запрос идёт в Ollama/Gemini (болталка, простые вопросы)
     //
-    // Принцип: по умолчанию → Ollama.
+    // Принцип: по умолчанию → лёгкая модель.
     // В Claude только если явно нужен код/анализ/файлы.
 
     // Прикреплены файлы → Claude (умеет читать/анализировать)
     if (!attachmentBlock.isEmpty()) return true;
 
-    // Явный код-запрос → Claude
-    if (isCodingIntent(input))      return true;
+    const QString trimmed = input.trimmed();
+    const QString lower   = trimmed.toLower();
 
-    const QString lower = input.toLower();
+    // Короткая чистая арифметика ("2+2", "15 * 3", "100/4") — точно не Claude.
+    static const QRegularExpression arithmeticRe(
+        R"(^\s*\d+(?:[.,]\d+)?\s*[+\-*/xх×÷]\s*\d+(?:[.,]\d+)?\s*=?\s*\??\s*$)");
+    if (arithmeticRe.match(trimmed).hasMatch()) return false;
+
+    // Короткие приветствия/реплики "точное совпадение" — никогда не Claude,
+    // даже если где-то совпадут по подстроке с кодовым сигналом.
+    static const QSet<QString> trivialExact = {
+        QStringLiteral("привет"), QStringLiteral("здравствуй"), QStringLiteral("здравствуйте"),
+        QStringLiteral("хай"),    QStringLiteral("йо"),
+        QStringLiteral("hi"),     QStringLiteral("hello"),     QStringLiteral("hey"),
+        QStringLiteral("как дела"), QStringLiteral("как ты"),  QStringLiteral("что нового"),
+        QStringLiteral("how are you"), QStringLiteral("whats up"), QStringLiteral("what's up"),
+        QStringLiteral("спасибо"), QStringLiteral("благодарю"), QStringLiteral("thanks"),
+        QStringLiteral("thank you"), QStringLiteral("ок"), QStringLiteral("окей"),
+        QStringLiteral("ok"), QStringLiteral("okay"), QStringLiteral("да"), QStringLiteral("нет"),
+        QStringLiteral("пока"), QStringLiteral("bye"), QStringLiteral("goodbye"),
+    };
+    if (trivialExact.contains(lower)) return false;
+
+    // Явный код-запрос → Claude
+    if (isCodingIntent(input)) return true;
 
     // Явные сигналы что нужен Claude (код, архитектура, анализ)
     static const QStringList claudeSignals = {
@@ -1467,19 +1504,27 @@ bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock)
         QStringLiteral("вайбкод"),       QStringLiteral("напиши класс"),
         QStringLiteral("напиши метод"),  QStringLiteral("дай полный файл"),
         QStringLiteral("прочитай файл"), QStringLiteral("посмотри файл"),
+        QStringLiteral("сгенерируй код"),QStringLiteral("исправь код"),
+        QStringLiteral("проверь код"),   QStringLiteral("ревью кода"),
         // English
         QStringLiteral("write code"),    QStringLiteral("write a function"),
         QStringLiteral("debug"),         QStringLiteral("refactor"),
         QStringLiteral("implement"),     QStringLiteral("analyze"),
         QStringLiteral("architecture"),  QStringLiteral("optimize"),
         QStringLiteral("write a class"), QStringLiteral("read the file"),
-        QStringLiteral("vibecod"),
+        QStringLiteral("vibecod"),       QStringLiteral("code review"),
+        QStringLiteral("generate code"), QStringLiteral("fix the code"),
     };
     for (const auto& sig : claudeSignals) {
         if (lower.contains(sig)) return true;
     }
 
-    // Всё остальное (приветствия, вопросы, беседа) → Ollama
+    // Длинные содержательные сообщения (>120 символов) часто требуют
+    // более сильной модели — отдаём Claude, чтобы не разочаровать
+    // пользователя слабым ответом от Ollama на сложный вопрос.
+    if (trimmed.length() > 120) return true;
+
+    // Всё остальное (короткие приветствия, простые вопросы, беседа) → Ollama/Gemini
     return false;
 }
 

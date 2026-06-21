@@ -720,7 +720,7 @@ void MainWindow::buildMenuBar()
     connect(actTrainStats, &QAction::triggered, this, [this]() {
         auto& db = DatabaseManager::instance();
         int total     = db.trainingLogCount(1);
-        int liked     = db.trainingLogCount(1);  // rated=1
+        int liked     = db.trainingLogCount(1, 1);  // rating>=1 — реально лайкнутые
         int jTotal    = db.voiceJournalCount(1, false);
         int jDone     = db.voiceJournalCount(1, true);
 
@@ -757,7 +757,9 @@ void MainWindow::buildMenuBar()
 
         addRow("💬", IS_EN ? "Total pairs saved" : "Всего пар сохранено",
                QString::number(total));
-        addRow("👍", IS_EN ? "Goal (export ready)" : "Цель (готово к экспорту)",
+        addRow("👍", IS_EN ? "Liked (priority)" : "Лайкнуто (приоритет)",
+               QString::number(liked));
+        addRow("🎯", IS_EN ? "Goal (export ready)" : "Цель (готово к экспорту)",
                QStringLiteral("500+"));
         addRow("📈", IS_EN ? "Progress" : "Прогресс",
                QString::number(qMin(total * 100 / qMax(500, 1), 100)) + QStringLiteral("%"));
@@ -3820,16 +3822,28 @@ void MainWindow::onLikeLastResponse()
     log.sessionId   = m_lastSessionId;
     log.rating      = 1;
 
-    // Сначала пробуем обновить существующую запись (автосохранённую)
-    // Если нет — добавляем новую
     auto& db = DatabaseManager::instance();
-    // UPDATE rating где уже есть эта пара
-    db.updateTrainingLogRating(m_lastUserInput, m_lastAiResponse, 1);
-    qint64 id = db.addTrainingLog(log);  // INSERT OR IGNORE если не было
 
-    if (id > 0 || true) {  // true — лайк засчитываем в любом случае
+    // Запись уже могла быть автосохранена с rating=0 (см. onAsyncResponse /
+    // синхронную ветку в onSendClicked) — сначала пробуем поднять её
+    // рейтинг до 1. Если такой пары ещё нет в БД (например, автосохранение
+    // не сработало из-за дублирования текста), updateTrainingLogRating
+    // вернёт false и мы добавляем запись напрямую через addTrainingLog.
+    const bool updated = db.updateTrainingLogRating(m_lastUserInput, m_lastAiResponse, 1);
+    qint64 insertedId = -1;
+    if (!updated) {
+        insertedId = db.addTrainingLog(log);
+    }
+
+    // Реальный успех — это либо успешный UPDATE существующей пары,
+    // либо успешный INSERT новой. Раньше здесь стояло "|| true", из-за
+    // чего кнопка ВСЕГДА показывала "сохранено", даже если SQL-запрос
+    // упал или INSERT OR IGNORE отбросил дубликат — то есть в БД на
+    // самом деле ничего не попадало, а пользователь не мог об этом узнать.
+    const bool actuallySaved = updated || insertedId > 0;
+
+    if (actuallySaved) {
         ++m_trainingCount;
-        // Меняем вид кнопки — уже лайкнуто
         m_likeBtn->setProperty("liked", true);
         m_likeBtn->setText(QStringLiteral("✅"));
         m_likeBtn->setEnabled(false);
@@ -3839,13 +3853,21 @@ void MainWindow::onLikeLastResponse()
             ? QStringLiteral("Saved! Total: %1 responses").arg(m_trainingCount)
             : QStringLiteral("Сохранено! Всего: %1 ответов").arg(m_trainingCount));
 
-        // Лайк — тихое подтверждение через tooltip кнопки, не спамим лог
         qDebug() << "[Training] Liked response saved, total:" << m_trainingCount;
     } else {
-        // Дубликат — уже был такой ответ
+        // INSERT OR IGNORE отбросил вставку и UPDATE не нашёл строку —
+        // значит эта именно пара уже была лайкнута ранее как дубликат,
+        // либо случилась ошибка БД (см. DatabaseManager::lastError()
+        // и qDebug-лог logError("addTrainingLog", ...) в консоли).
+        m_likeBtn->setToolTip(IS_EN
+            ? QStringLiteral("Already saved or DB error — check log: %1").arg(db.lastError())
+            : QStringLiteral("Уже сохранено или ошибка БД — см. лог: %1").arg(db.lastError()));
+
         appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("ℹ️ Already in dataset (duplicate skipped).")
-                  : QStringLiteral("ℹ️ Уже в датасете (дубликат пропущен)."),
+            IS_EN ? QStringLiteral("ℹ️ Could not save like — already in dataset or DB error: %1")
+                        .arg(db.lastError())
+                  : QStringLiteral("ℹ️ Не удалось сохранить лайк — уже в датасете или ошибка БД: %1")
+                        .arg(db.lastError()),
             Theme::LogColors::system);
     }
 }

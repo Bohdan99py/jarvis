@@ -172,7 +172,7 @@ public:
     qint64                   addTrainingLog(const DbTrainingLog& log);
     bool                     deleteTrainingLog(qint64 id);
     QList<DbTrainingLog>     getTrainingLogs(qint64 userId, int limit = 10000);
-    int                      trainingLogCount(qint64 userId);
+    int                      trainingLogCount(qint64 userId, int minRating = -1);
     // Экспорт в .jsonl формат для Unsloth/LLaMA-Factory
     bool                     exportToJsonl(qint64 userId, const QString& filePath);
     // Очистка мусора — дубли, короткие ответы, ошибки распознавания

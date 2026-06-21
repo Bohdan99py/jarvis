@@ -209,9 +209,22 @@ private:
         QString lang;
     };
 
+    // Результат распознавания одной моделью + средняя уверенность по словам.
+    // Vosk почти никогда не возвращает пустой text — модель всегда выдаёт
+    // "наилучшее" совпадение из своего словаря, даже если реальная речь
+    // была на другом языке (например, русское "стим" англ. модель
+    // распознает как "steam" с низким, но ненулевым conf). Поэтому
+    // выбор по одному наличию текста некорректен — нужно сравнивать
+    // именно уверенность между моделями.
+    struct RecognitionResult {
+        QString text;
+        float   avgConfidence = 0.0f; // 0..1, среднее по словам из Vosk "result"
+        int     wordCount     = 0;
+    };
+
     void freeAll();
-    QString tryRecognize(void* recognizer, const QByteArray& pcmData) const;
-    bool    isWhisperLevel(const QByteArray& pcmData) const;
+    RecognitionResult tryRecognize(void* recognizer, const QByteArray& pcmData) const;
+    bool isWhisperLevel(const QByteArray& pcmData) const;
 
     QVector<ModelPair> m_models;
     bool  m_loaded  = false;

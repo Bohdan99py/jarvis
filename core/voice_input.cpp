@@ -24,6 +24,7 @@
 #include <QProcess>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QDebug>
 #include <cmath>
 
@@ -731,31 +732,57 @@ void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
 
     bool whisper = isWhisperLevel(pcmData);
 
-    // Собираем результаты всех распознавателей
-    struct Candidate { QString text; QString lang; };
+    // Прогоняем буфер через ВСЕ загруженные модели и сравниваем их
+    // по реальной средней уверенности распознавания (per-word confidence
+    // из Vosk JSON), а не по факту "текст не пустой" — Vosk почти всегда
+    // возвращает какой-то текст, даже когда язык не совпадает, потому
+    // что модель ищет ближайшее по фонетике слово в своём словаре.
+    struct Candidate { QString text; QString lang; float conf; int words; };
     QVector<Candidate> candidates;
     candidates.reserve(m_models.size());
 
     for (auto& mp : m_models) {
-        QString t = tryRecognize(mp.recognizer, pcmData);
-        if (!t.isEmpty()) candidates.push_back({t, mp.lang});
+        RecognitionResult r = tryRecognize(mp.recognizer, pcmData);
+        if (!r.text.isEmpty()) {
+            candidates.push_back({r.text, mp.lang, r.avgConfidence, r.wordCount});
+        }
     }
 
     if (candidates.isEmpty()) return;
 
-    // Выбираем по предпочтению языка
-    QString text, lang;
+    // Скоринг: уверенность — главный критерий. Если preferredLang задан
+    // явно (не "auto") и его confidence не сильно хуже лучшей альтернативы
+    // (в пределах 0.08), отдаём предпочтение ему — пользователь явно
+    // выбрал язык интерфейса/диктовки. При "auto" побеждает чистый максимум
+    // средней уверенности; при равенстве — больше распознанных слов
+    // (длиннее/увереннее результат, меньше шанс случайного фонетического
+    // совпадения на коротком обрывке).
+    const Candidate* best = &candidates.front();
     for (const auto& c : candidates) {
-        if (preferredLang == QStringLiteral("auto") || c.lang == preferredLang) {
-            text = c.text; lang = c.lang; break;
+        if (c.conf > best->conf ||
+            (qFuzzyCompare(c.conf + 1.0f, best->conf + 1.0f) && c.words > best->words)) {
+            best = &c;
         }
     }
-    if (text.isEmpty()) { text = candidates.first().text; lang = candidates.first().lang; }
 
-    text = text.simplified().trimmed();
+    if (preferredLang != QStringLiteral("auto")) {
+        const Candidate* preferred = nullptr;
+        for (const auto& c : candidates) {
+            if (c.lang == preferredLang) { preferred = &c; break; }
+        }
+        if (preferred && preferred != best &&
+            (best->conf - preferred->conf) <= 0.08f) {
+            best = preferred;
+        }
+    }
+
+    QString text = best->text.simplified().trimmed();
+    QString lang = best->lang;
     if (text.isEmpty()) return;
 
-    qDebug() << "[Vosk] [" << lang << "]:" << text << (whisper ? "[WHISPER]" : "");
+    qDebug() << "[Vosk] [" << lang << "] conf=" << best->conf
+             << "words=" << best->words << ":" << text
+             << (whisper ? "[WHISPER]" : "");
     emit recognized(text, lang, whisper);
 #else
     Q_UNUSED(pcmData) Q_UNUSED(preferredLang)
@@ -763,22 +790,57 @@ void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
 #endif
 }
 
-QString VoskWorker::tryRecognize(void* recognizer, const QByteArray& pcmData) const
+VoskWorker::RecognitionResult VoskWorker::tryRecognize(void* recognizer, const QByteArray& pcmData) const
 {
 #ifdef JARVIS_VOSK_AVAILABLE
+    RecognitionResult out;
+
     auto* r = static_cast<VoskRecognizer*>(recognizer);
     vosk_recognizer_reset(r);
     vosk_recognizer_accept_waveform_s(r,
         reinterpret_cast<const int16_t*>(pcmData.constData()),
         pcmData.size() / 2);
     const char* j = vosk_recognizer_final_result(r);
-    if (!j) return {};
+    if (!j) return out;
+
     QJsonDocument d = QJsonDocument::fromJson(QByteArray(j));
-    return d.isObject()
-        ? d.object().value(QStringLiteral("text")).toString().trimmed()
-        : QString();
+    if (!d.isObject()) return out;
+
+    const QJsonObject obj = d.object();
+    out.text = obj.value(QStringLiteral("text")).toString().trimmed();
+
+    // vosk_recognizer_set_words(reco, 1) уже включён при загрузке моделей
+    // (см. reloadModels), поэтому JSON содержит массив "result" с полями
+    // {word, conf, start, end} для каждого распознанного слова.
+    // Это и есть настоящая метрика уверенности, которую раньше код
+    // полностью игнорировал — отсюда систематический перекос в пользу
+    // английской модели (она просто шла первой в алфавитно
+    // отсортированном QMap<QString,QString>).
+    const QJsonArray words = obj.value(QStringLiteral("result")).toArray();
+    if (!words.isEmpty()) {
+        double sum = 0.0;
+        int count = 0;
+        for (const QJsonValue& wv : words) {
+            if (!wv.isObject()) continue;
+            sum += wv.toObject().value(QStringLiteral("conf")).toDouble(0.0);
+            ++count;
+        }
+        if (count > 0) {
+            out.avgConfidence = static_cast<float>(sum / count);
+            out.wordCount = count;
+        }
+    } else if (!out.text.isEmpty()) {
+        // Модель без per-word conf (старые модели/иной формат вывода) —
+        // используем длину текста как грубую прокси-меру уверенности,
+        // чтобы не отбрасывать корректно распознанную короткую фразу.
+        out.avgConfidence = 0.5f;
+        out.wordCount = out.text.split(QChar(' '), Qt::SkipEmptyParts).size();
+    }
+
+    return out;
 #else
-    Q_UNUSED(recognizer) Q_UNUSED(pcmData) return {};
+    Q_UNUSED(recognizer) Q_UNUSED(pcmData)
+    return {};
 #endif
 }
 

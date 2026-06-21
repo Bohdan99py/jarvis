@@ -47,9 +47,20 @@ QSqlDatabase DatabaseManager::connection()
 
     auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
     db.setDatabaseName(m_dbPath);
+    // QSQLITE_BUSY_TIMEOUT — передаём в драйвер ДО open(), иначе таймаут
+    // на первое открытие соединения не применяется.
+    db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
     if (!db.open()) logError("connection(thread)", db.lastError());
 
     QSqlQuery q(db);
+    // busy_timeout=5000 — если БД на секунду-другую заблокирована другим
+    // процессом/потоком (второй запущенный экземпляр JARVIS, параллельная
+    // запись из BackgroundLearner и т.п.), запрос ЖДЁТ до 5 секунд вместо
+    // немедленного SQLITE_BUSY. Без этого q.exec() в trainingLogCount()/
+    // voiceJournalCount() молча проваливался при конкурентном доступе и
+    // функция тихо возвращала 0 — выглядело так, будто данных нет вообще,
+    // хотя они благополучно лежали в файле.
+    q.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
     q.exec("PRAGMA journal_mode=WAL");
     q.exec("PRAGMA foreign_keys=ON");
     q.exec("PRAGMA synchronous=NORMAL");
@@ -78,10 +89,12 @@ bool DatabaseManager::open(const QString& dbPath)
     m_db = QSqlDatabase::addDatabase(
         QStringLiteral("QSQLITE"), QStringLiteral("jarvis_main"));
     m_db.setDatabaseName(m_dbPath);
+    m_db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
 
     if (!m_db.open()) { logError("open", m_db.lastError()); return false; }
 
     QSqlQuery q(m_db);
+    q.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
     q.exec("PRAGMA journal_mode=WAL");
     q.exec("PRAGMA foreign_keys=ON");
     q.exec("PRAGMA synchronous=NORMAL");
@@ -951,13 +964,24 @@ QList<DbTrainingLog> DatabaseManager::getTrainingLogs(qint64 userId, int limit)
     return res;
 }
 
-int DatabaseManager::trainingLogCount(qint64 userId)
+int DatabaseManager::trainingLogCount(qint64 userId, int minRating)
 {
     auto db = connection();
     QSqlQuery q(db);
-    q.prepare("SELECT COUNT(*) FROM training_logs WHERE user_id=:uid");
-    q.bindValue(":uid", userId);
+    // minRating < 0 (значение по умолчанию) — считаем ВСЕ пары, как раньше.
+    // minRating >= 0 — считаем только пары с rating >= minRating, например
+    // trainingLogCount(1, 1) даёт реальное число лайкнутых ответов вместо
+    // дублирования общего total (см. фикс диалога Training Statistics).
+    if (minRating < 0) {
+        q.prepare("SELECT COUNT(*) FROM training_logs WHERE user_id=:uid");
+        q.bindValue(":uid", userId);
+    } else {
+        q.prepare("SELECT COUNT(*) FROM training_logs WHERE user_id=:uid AND rating>=:minr");
+        q.bindValue(":uid", userId);
+        q.bindValue(":minr", minRating);
+    }
     if (q.exec() && q.next()) return q.value(0).toInt();
+    logError("trainingLogCount", q.lastError());
     return 0;
 }
 
@@ -1100,6 +1124,7 @@ int DatabaseManager::voiceJournalCount(qint64 userId, bool processedOnly)
     }
     q.bindValue(":uid", userId);
     if (q.exec() && q.next()) return q.value(0).toInt();
+    logError("voiceJournalCount", q.lastError());
     return 0;
 }
 
