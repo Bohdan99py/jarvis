@@ -2,6 +2,7 @@
 // database_manager.cpp — J.A.R.V.I.S. SQLite storage
 // ============================================================
 #include "database_manager.h"
+#include "jarvis_paths.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -78,10 +79,13 @@ bool DatabaseManager::open(const QString& dbPath)
     if (m_db.isOpen()) return true;
 
     if (dbPath.isEmpty()) {
-        QString appData = QStandardPaths::writableLocation(
-            QStandardPaths::AppDataLocation);
-        QDir().mkpath(appData);
-        m_dbPath = appData + QStringLiteral("/jarvis.db");
+        // Раньше: скрытая папка AppData, разная видимость в зависимости
+        // от сборки/конкуренции процессов. Теперь: один предсказуемый
+        // путь в "Документах" пользователя — виден глазами, легко
+        // бэкапится, легко стирается вручную чтобы начать обучение
+        // с нуля, и одинаков для debug-сборки из CLion и установленного
+        // релиза (оба используют один и тот же JarvisPaths::subPath).
+        m_dbPath = JarvisPaths::subPath(QStringLiteral("jarvis.db"));
     } else {
         m_dbPath = dbPath;
     }

@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "learned_commands.h"
+#include "jarvis_paths.h"
 
 #include <QStandardPaths>
 #include <QDir>
@@ -31,10 +32,7 @@ LearnedCommands::LearnedCommands(QObject* parent)
 // ---------------------------------------------------------------------------
 QString LearnedCommands::persistPath() const
 {
-    const QString dir = QStandardPaths::writableLocation(
-        QStandardPaths::AppDataLocation) + QStringLiteral("/Jarvis");
-    QDir().mkpath(dir);
-    return dir + QStringLiteral("/learned_commands.json");
+    return JarvisPaths::subPath(QStringLiteral("learned_commands.json"));
 }
 
 // ---------------------------------------------------------------------------

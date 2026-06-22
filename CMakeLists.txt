@@ -118,6 +118,10 @@ add_library(JarvisCore STATIC
         # Строки интерфейса (RU/EN) — только заголовок, cpp не нужен
         core/lang.h
 
+        # Единая точка правды для путей хранения данных на диске —
+        # только заголовок, cpp не нужен (см. комментарий в файле)
+        core/jarvis_paths.h
+
         # Ядро
         core/jarvis.h
         core/jarvis.cpp
@@ -128,14 +132,6 @@ add_library(JarvisCore STATIC
         core/theme.h
         core/virtual_keyboard.h
         core/virtual_keyboard.cpp
-
-        # --- Full PC Voice Control (мышь/клавиатура/окна/система голосом) ---
-        core/pc_controller.h
-        core/pc_controller.cpp
-        core/pc_command_registry.h
-        core/pc_command_registry.cpp
-        core/macro_recorder.h
-        core/macro_recorder.cpp
 
         # Claude API
         core/claude_api.h
@@ -249,7 +245,6 @@ target_link_libraries(JarvisCore PRIVATE
         user32
         advapi32
         psapi
-        PowrProf
 )
 
 # Vosk — линкуем если нашли

@@ -3,6 +3,7 @@
 // -------------------------------------------------------
 
 #include "session_memory.h"
+#include "jarvis_paths.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -314,9 +315,7 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
 
 QString SessionMemory::persistentFilePath() const
 {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dir);
-    return dir + QStringLiteral("/jarvis_memory.json");
+    return JarvisPaths::subPath(QStringLiteral("jarvis_memory.json"));
 }
 
 void SessionMemory::loadPersistent()

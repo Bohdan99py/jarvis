@@ -3,6 +3,7 @@
 // ============================================================
 #include "passive_listener.h"
 #include "database_manager.h"
+#include "jarvis_paths.h"
 #include <QDateTime>
 
 #ifdef JARVIS_VOSK_AVAILABLE
@@ -486,8 +487,7 @@ void PassiveListener::onWeeklyCleanupTimer()
 void PassiveListener::ensureDatasetDir()
 {
     if (m_config.datasetPath.isEmpty()) {
-        m_config.datasetPath = QStandardPaths::writableLocation(
-            QStandardPaths::AppDataLocation) + QStringLiteral("/voice_dataset");
+        m_config.datasetPath = JarvisPaths::subPath(QStringLiteral("voice_dataset"));
     }
     QDir().mkpath(m_config.datasetPath);
 }

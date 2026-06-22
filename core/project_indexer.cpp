@@ -3,6 +3,7 @@
 // -------------------------------------------------------
 
 #include "project_indexer.h"
+#include "jarvis_paths.h"
 
 #include <QDir>
 #include <QDirIterator>
@@ -686,12 +687,10 @@ QString ProjectIndexer::detailedMap() const
 
 QString ProjectIndexer::indexFilePath() const
 {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dir);
-
     // Используем хэш пути проекта для уникального имени
     QString hash = QString::number(qHash(m_projectRoot));
-    return dir + QStringLiteral("/project_index_") + hash + QStringLiteral(".json");
+    return JarvisPaths::subPath(
+        QStringLiteral("project_index_") + hash + QStringLiteral(".json"));
 }
 
 void ProjectIndexer::saveIndex() const

@@ -96,6 +96,16 @@ Source: "{#MyAppBuildDir}\generic\*"; \
   DestDir: "{app}\generic"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
+; ---- Qt SQL (КРИТИЧНО: без этого jarvis.db не открывается!) ----
+; qsqlite.dll — SQLite-драйвер Qt. Без него DatabaseManager::open()
+; падает с "driver not loaded", все счётчики Training = 0, лайки
+; не сохраняются, история не пишется. windeployqt иногда пропускает
+; его если не видит явного QSqlDatabase в main.cpp, поэтому
+; копируем явно и в CI (build.yml), и здесь в инсталляторе.
+Source: "{#MyAppBuildDir}\sqldrivers\*"; \
+  DestDir: "{app}\sqldrivers"; \
+  Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+
 ; ---- Qt Multimedia (голосовой ввод) ----
 Source: "{#MyAppBuildDir}\multimedia\*"; \
   DestDir: "{app}\multimedia"; \

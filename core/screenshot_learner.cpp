@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "screenshot_learner.h"
+#include "jarvis_paths.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
@@ -67,9 +68,7 @@ static QSqlDatabase learnerDb()
         return QSqlDatabase::database(kLearnerDbConn);
     }
 
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dir);
-    QString path = dir + QStringLiteral("/app_patterns.db");
+    QString path = JarvisPaths::subPath(QStringLiteral("app_patterns.db"));
 
     QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kLearnerDbConn);
     db.setDatabaseName(path);

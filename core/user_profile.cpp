@@ -3,6 +3,7 @@
 // -------------------------------------------------------
 
 #include "user_profile.h"
+#include "jarvis_paths.h"
 
 #include <QFile>
 #include <QDir>
@@ -326,9 +327,7 @@ void UserProfile::applyDecayIfNeeded()
 
 QString UserProfile::filePath() const
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dir);
-    return dir + QStringLiteral("/jarvis_profile.json");
+    return JarvisPaths::subPath(QStringLiteral("jarvis_profile.json"));
 }
 
 void UserProfile::load()

@@ -4,6 +4,7 @@
 
 #include "action_predictor.h"
 #include "session_memory.h"
+#include "jarvis_paths.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -197,9 +198,7 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
 
 static QString patternsFilePath()
 {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dir);
-    return dir + QStringLiteral("/jarvis_patterns.json");
+    return JarvisPaths::subPath(QStringLiteral("jarvis_patterns.json"));
 }
 
 void ActionPredictor::loadPatterns()

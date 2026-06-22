@@ -4,6 +4,7 @@
 
 #include "mainwindow.h"
 #include "jarvis.h"
+#include "jarvis_paths.h"
 #include "theme.h"
 #include "virtual_keyboard.h"
 #include "claude_api.h"
@@ -228,6 +229,28 @@ MainWindow::MainWindow(QWidget* parent)
         appendLog(Str::logJarvis(), Str::apiClaudeConnected(), Theme::LogColors::system);
     } else {
         appendLog(Str::logJarvis(), Str::apiNoKey(), Theme::LogColors::jarvis);
+    }
+
+    // ── Статус базы данных ────────────────────────────────
+    // Показываем реальный путь к БД при каждом старте — это сразу
+    // видно если debug/release-сборки вдруг разошлись по путям.
+    {
+        auto& db = DatabaseManager::instance();
+        const QString dbPath = db.dbPath();
+        const bool dbOk      = db.isOpen();
+        if (dbOk) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("💾 Database: %1").arg(dbPath)
+                      : QStringLiteral("💾 База данных: %1").arg(dbPath),
+                Theme::LogColors::system);
+        } else {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("❌ Database FAILED to open: %1\nPath: %2")
+                            .arg(db.lastError(), dbPath)
+                      : QStringLiteral("❌ База данных НЕ открылась: %1\nПуть: %2")
+                            .arg(db.lastError(), dbPath),
+                QStringLiteral("#ff4444"));
+        }
     }
 
     // Статус Gemini (встроенный fallback-ключ)
@@ -1289,8 +1312,7 @@ void MainWindow::buildMenuBar()
     connect(actSetDatasetPath, &QAction::triggered, this, [this]() {
         QString current = DatabaseManager::instance().getConfig(
             QStringLiteral("voice_dataset_path"),
-            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                + QStringLiteral("/voice_dataset")).toString();
+            JarvisPaths::subPath(QStringLiteral("voice_dataset"))).toString();
 
         QString path = QFileDialog::getExistingDirectory(this,
             IS_EN ? QStringLiteral("Select dataset folder")
@@ -1547,15 +1569,7 @@ R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</
     connect(actWhatsNew, &QAction::triggered, this, [this]() {
         // Левая колонка
         const QString col1 = IS_EN ? QStringLiteral(
-R"(<b>🖱️ Full PC Voice Control</b><br>
-• Mouse: click, double-click, scroll, move<br>
-• Windows: switch, minimize, maximize, close<br>
-• System: launch apps, lock, sleep, shutdown<br>
-• Volume via WASAPI, browser navigation<br>
-• Macros: record &amp; replay mouse+keyboard<br>
-• Presets: morning / night / dev mode<br>
-<br>
-<b>🎤 Voice Input (Vosk — offline)</b><br>
+R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
 • Model selection dialog on first launch<br>
 • 6 languages: EN fast/full, RU, DE, FR, ZH<br>
 • Download/delete models: Settings → Voice Models<br>
@@ -1571,17 +1585,15 @@ R"(<b>🖱️ Full PC Voice Control</b><br>
 • 👍 Like → saves to training dataset<br>
 • All AI responses auto-saved (rating=0)<br>
 • Export .jsonl for Unsloth/LLaMA-Factory<br>
-• Auto-cleanup of noise entries)")
-        : QStringLiteral(
-            R"(<b>🖱️ Полное управление ПК голосом</b><br>
-• Мышь: клик, двойной клик, скролл, перемещение<br>
-• Окна: переключение, свернуть, развернуть, закрыть<br>
-• Система: запуск приложений, блокировка, сон, выключение<br>
-• Громкость через WASAPI, навигация в браузере<br>
-• Макросы: запись и воспроизведение мыши+клавиатуры<br>
-• Готовые сценарии: утро / ночь / режим разработки<br>
+• Auto-cleanup of noise entries<br>
 <br>
-<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
+<b>🌐 Smart Browser Routing</b><br>
+• "Open YouTube" → browser, not app<br>
+• "I want to watch" → suggests YouTube<br>
+• "Play music" → YouTube Music/Spotify<br>
+• 30+ sites mapped automatically)")
+        : QStringLiteral(
+            R"(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
 • Диалог выбора моделей при первом запуске<br>
 • 6 языков: EN быстрый/полный, RU, DE, FR, ZH<br>
 • Докачать/удалить модели: Настройки → Голосовые модели<br>
@@ -1597,17 +1609,17 @@ R"(<b>🖱️ Full PC Voice Control</b><br>
 • 👍 Лайк → сохраняет в датасет<br>
 • Все ответы AI автосохраняются (rating=0)<br>
 • Экспорт .jsonl для Unsloth/LLaMA-Factory<br>
-• Автоочистка мусорных записей)");
+• Автоочистка мусорных записей<br>
+<br>
+<b>🌐 Умный браузерный routing</b><br>
+• "Открой YouTube" → браузер, не поиск<br>
+• "Хочу посмотреть" → предлагает YouTube<br>
+• "Включи музыку" → YouTube Music/Spotify<br>
+• 30+ сайтов в маппинге автоматически)");
 
         // Правая колонка
         const QString col2 = IS_EN ? QStringLiteral(
-R"(<b>🌐 Smart Browser Routing</b><br>
-• "Open YouTube" → browser, not app<br>
-• "I want to watch" → suggests YouTube<br>
-• "Play music" → YouTube Music/Spotify<br>
-• 30+ sites mapped automatically<br>
-<br>
-<b>🎙️ Passive Voice Recording</b><br>
+R"(<b>🎙️ Passive Voice Recording</b><br>
 • Listens via tray → saves to journal<br>
 • Brain creates training pairs auto<br>
 • Weekly cleanup after 7 days<br>
@@ -1633,13 +1645,7 @@ R"(<b>🌐 Smart Browser Routing</b><br>
 • Vosk DLL auto-copied in release<br>
 • Most Vexing Parse in QNetworkRequest)")
         : QStringLiteral(
-R"(<b>🌐 Умный браузерный routing</b><br>
-• "Открой YouTube" → браузер, не поиск<br>
-• "Хочу посмотреть" → предлагает YouTube<br>
-• "Включи музыку" → YouTube Music/Spotify<br>
-• 30+ сайтов в маппинге автоматически<br>
-<br>
-<b>🎙️ Пассивная запись голоса</b><br>
+R"(<b>🎙️ Пассивная запись голоса</b><br>
 • Слушает через трей → журнал<br>
 • Brain создаёт пары для обучения<br>
 • Еженедельная очистка через 7 дней<br>
@@ -1666,8 +1672,8 @@ R"(<b>🌐 Умный браузерный routing</b><br>
 • Most Vexing Parse в QNetworkRequest)");
 
         auto* dlg = new QDialog(this);
-        dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S. v3.3")
-                                  : QStringLiteral("Что нового в J.A.R.V.I.S. v3.3"));
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S. v3.2")
+                                  : QStringLiteral("Что нового в J.A.R.V.I.S. v3.2"));
         dlg->setMinimumSize(820, 560);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setStyleSheet(QStringLiteral(
@@ -1683,8 +1689,8 @@ R"(<b>🌐 Умный браузерный routing</b><br>
 
         // Заголовок
         auto* title = new QLabel(
-            IS_EN ? QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.3 — What's New</b>")
-                  : QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.3 — Что нового</b>"),
+            IS_EN ? QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.2 — What's New</b>")
+                  : QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.2 — Что нового</b>"),
             dlg);
         title->setTextFormat(Qt::RichText);
         title->setAlignment(Qt::AlignCenter);
@@ -1842,23 +1848,6 @@ R"(<b>🌐 Умный браузерный routing</b><br>
 <tr><td>хочу послушать музыку</td><td>Предлагает Spotify/YouTube Music</td></tr>
 <tr><td>что ты умеешь</td><td>Полный список команд</td></tr>
 </table>
-<h4 style='color:#44aaff;'>🖱️ Управление ПК голосом</h4>
-<table border='0' cellpadding='4'>
-<tr><td>кликни / двойной клик / правый клик</td><td>Мышь в текущей позиции</td></tr>
-<tr><td>прокрути вверх / вниз</td><td>Скролл колесом</td></tr>
-<tr><td>мышь в центр / мышь верхний левый</td><td>Курсор по сетке экрана</td></tr>
-<tr><td>переключись на discord / clion / telegram</td><td>Фокус на окно приложения</td></tr>
-<tr><td>сверни / разверни / закрой окно</td><td>Управление активным окном</td></tr>
-<tr><td>закрепи окно поверх</td><td>Always on top</td></tr>
-<tr><td>запусти notepad</td><td>Запуск любого приложения по имени</td></tr>
-<tr><td>спящий режим / диспетчер задач</td><td>Системные действия</td></tr>
-<tr><td>установи громкость 50</td><td>Точная громкость через WASAPI</td></tr>
-<tr><td>обнови страницу / открой сайт github.com</td><td>Управление браузером</td></tr>
-<tr><td>найди файл report.pdf</td><td>Поиск файла на диске</td></tr>
-<tr><td>запиши макрос утро ... останови запись макроса</td><td>Запись своей последовательности действий</td></tr>
-<tr><td>запусти макрос утро</td><td>Воспроизведение макроса</td></tr>
-<tr><td>утренний режим / ночной режим / режим разработки</td><td>Готовые сценарии запуска</td></tr>
-</table>
 <p style='color:#aaa;font-size:11px;'>Работает на русском и английском без переключения.</p>)",
             R"(<h3 style='color:#00d4ff;'>💬 Offline Commands</h3>
 <table border='0' cellpadding='4'>
@@ -1874,23 +1863,6 @@ R"(<b>🌐 Умный браузерный routing</b><br>
 <tr><td>open youtube</td><td>Opens YouTube in browser</td></tr>
 <tr><td>play some music</td><td>Suggests Spotify/YouTube Music</td></tr>
 <tr><td>what can you do</td><td>Full command list</td></tr>
-</table>
-<h4 style='color:#44aaff;'>🖱️ Full PC Voice Control</h4>
-<table border='0' cellpadding='4'>
-<tr><td>click / double click / right click</td><td>Mouse at current position</td></tr>
-<tr><td>scroll up / scroll down</td><td>Mouse wheel</td></tr>
-<tr><td>mouse center / mouse top left</td><td>Cursor on screen grid</td></tr>
-<tr><td>switch to discord / clion / telegram</td><td>Focus app window</td></tr>
-<tr><td>minimize / maximize / close window</td><td>Active window control</td></tr>
-<tr><td>always on top</td><td>Pin window above others</td></tr>
-<tr><td>launch notepad</td><td>Start any app by name</td></tr>
-<tr><td>sleep mode / task manager</td><td>System actions</td></tr>
-<tr><td>set volume 50</td><td>Precise volume via WASAPI</td></tr>
-<tr><td>refresh page / open site github.com</td><td>Browser control</td></tr>
-<tr><td>find file report.pdf</td><td>Search a file on disk</td></tr>
-<tr><td>record macro morning ... stop recording macro</td><td>Record your own action sequence</td></tr>
-<tr><td>run macro morning</td><td>Replay a saved macro</td></tr>
-<tr><td>morning mode / night mode / dev mode</td><td>Built-in launch presets</td></tr>
 </table>
 <p style='color:#aaa;font-size:11px;'>Works in Russian and English without switching.</p>)"
         },
