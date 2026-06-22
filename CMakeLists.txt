@@ -212,6 +212,14 @@ add_library(JarvisCore STATIC
         # Пассивная запись голоса для датасета fine-tuning
         core/passive_listener.h
         core/passive_listener.cpp
+
+        # --- Full PC Voice Control (мышь/клавиатура/окна/система голосом) ---
+        core/pc_controller.h
+        core/pc_controller.cpp
+        core/pc_command_registry.h
+        core/pc_command_registry.cpp
+        core/macro_recorder.h
+        core/macro_recorder.cpp
 )
 
 target_compile_definitions(JarvisCore PRIVATE
@@ -245,6 +253,7 @@ target_link_libraries(JarvisCore PRIVATE
         user32
         advapi32
         psapi
+        PowrProf
 )
 
 # Vosk — линкуем если нашли
