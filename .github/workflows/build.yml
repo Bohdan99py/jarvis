@@ -226,6 +226,23 @@ jobs:
             Write-Host "Qt Audio plugins copied"
           }
 
+          # Явно копируем sqldrivers — windeployqt иногда их пропускает,
+          # если линковщик не видит явного использования QSql в main.cpp,
+          # но они нужны для DatabaseManager (QSQLITE плагин = jarvis.db).
+          # Без qsqlite.dll БД не открывается, все счётчики Training = 0.
+          $sqlSrc = "$qt\plugins\sqldrivers"
+          if (Test-Path $sqlSrc) {
+            New-Item -ItemType Directory -Force -Path "release_package\sqldrivers" | Out-Null
+            Copy-Item -Force "$sqlSrc\qsqlite.dll" "release_package\sqldrivers\" -ErrorAction SilentlyContinue
+            Write-Host "sqldrivers\qsqlite.dll copied"
+          } else {
+            Write-Warning "MISSING sqldrivers at: $sqlSrc"
+          }
+          # Проверяем что qsqlite реально попал (критичная зависимость)
+          if (-not (Test-Path "release_package\sqldrivers\qsqlite.dll")) {
+            Write-Error "CRITICAL: qsqlite.dll missing from release package — database will not work!"
+          }
+
           # Копируем документацию в пакет
           $docs = @("PRIVACY_POLICY.txt", "JARVIS_INSTALL_NOTES.txt", "EULA_JARVIS.txt", "JARVIS_EULA_EN.txt", "README.md")
           foreach ($doc in $docs) {
