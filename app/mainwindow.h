@@ -100,6 +100,7 @@ private:
     void hideUpdateBar();
 
     void applyLanguage(bool english);
+    void applyTheme(int index);
 
     bool tryOpenApp(const QString& userText, const Intent& intent);
     bool trySystemControl(const QString& userText);
@@ -176,4 +177,7 @@ private:
 
     // Авто-скриншот для датасета
     QTimer*                 m_screenshotTimer  = nullptr;
+
+    // Тема интерфейса: 0=dark, 1=glass, 2=light
+    int                     m_themeIndex = 0;
 };

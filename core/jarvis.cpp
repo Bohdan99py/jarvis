@@ -1391,7 +1391,15 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                         cached.confidence = 0.7f;
                         DatabaseManager::instance().upsertPattern(cached);
                     }
-                    emit asyncResponseReady(resp2);
+                    // Smart framing for conversational responses
+                    QString framedResp2 = resp2;
+                    if (resp2.length() > 300) {
+                        framedResp2 = QStringLiteral("💬 ")
+                            + (m_uiEnglish ? QStringLiteral("Here's what I think:\n\n")
+                                           : QStringLiteral("Вот что я думаю:\n\n"))
+                            + resp2;
+                    }
+                    emit asyncResponseReady(framedResp2);
                 } else {
                     // Диагностика: причина видна в консоли CLion и в UI
                     qDebug() << "[Gemini] Error → Claude fallback:" << resp2;
@@ -1442,7 +1450,15 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                     cached.confidence = 0.7f;
                     DatabaseManager::instance().upsertPattern(cached);
                 }
-                emit asyncResponseReady(response);
+                // Smart framing for conversational responses
+                QString framedResponse = response;
+                if (response.length() > 300) {
+                    framedResponse = QStringLiteral("💬 ")
+                        + (m_uiEnglish ? QStringLiteral("Here's what I think:\n\n")
+                                       : QStringLiteral("Вот что я думаю:\n\n"))
+                        + response;
+                }
+                emit asyncResponseReady(framedResponse);
             } else {
                 // Ollama перестала отвечать посреди сессии → Gemini → Claude
                 tryGeminiThenClaude();
@@ -1636,6 +1652,24 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
     if (!fileReport.isEmpty()) {
         fullResponse += QStringLiteral("\n\n") + fileReport;
     }
+
+    // Smart response: add a human-like summary for long/complex responses
+    if (displayResponse.length() > 500 && !displayResponse.contains(QStringLiteral("[FILE:"))) {
+        QString summary;
+        if (displayResponse.contains(QStringLiteral("```"))) {
+            summary = m_uiEnglish ? QStringLiteral("Here's what I found — code example included below.")
+                                  : QStringLiteral("Вот что нашёл — пример кода ниже.");
+        } else if (fileReport.contains(QStringLiteral("✅"))) {
+            int fileCount = fileReport.count(QStringLiteral("✅"));
+            summary = m_uiEnglish ? QStringLiteral("Done. Applied changes to %1 file(s).").arg(fileCount)
+                                  : QStringLiteral("Готово. Изменения применены к %1 файл(ам).").arg(fileCount);
+        } else {
+            summary = m_uiEnglish ? QStringLiteral("Here's a detailed answer to your question.")
+                                  : QStringLiteral("Вот подробный ответ на твой вопрос.");
+        }
+        fullResponse = QStringLiteral("💡 ") + summary + QStringLiteral("\n\n") + fullResponse;
+    }
+
     emit asyncResponseReady(fullResponse);
 
     if (hadAttachments) {

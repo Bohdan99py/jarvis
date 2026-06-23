@@ -409,6 +409,58 @@ void MainWindow::applyLanguage(bool english)
 }
 
 // ============================================================
+// applyTheme — переключение темы интерфейса
+// ============================================================
+
+void MainWindow::applyTheme(int index)
+{
+    QString base;
+    switch (index) {
+    case 1: // Glass
+        base = QStringLiteral(
+            "QMainWindow { background-color: rgba(15, 20, 35, 220); }"
+            "QWidget { background-color: transparent; color: #c8dce8; }"
+            "#logArea { background-color: rgba(10, 15, 28, 180); border: 1px solid rgba(0,180,255,0.15); }"
+            "#inputField { background-color: rgba(15, 22, 40, 180); }"
+            "#inputField:focus { border-color: #7c4dff; }");
+        break;
+    case 2: // Light
+        base = QStringLiteral(
+            "QMainWindow { background-color: #f0f2f5; }"
+            "QWidget { background-color: transparent; color: #1a1a2e; font-family: 'Segoe UI', sans-serif; }"
+            "#titleLabel { color: #0066cc; }"
+            "#statusText { color: #0066cc; }"
+            "#logArea { background-color: #ffffff; color: #1a1a2e; border: 1px solid #d0d5dd; }"
+            "#inputField { background-color: #ffffff; color: #1a1a2e; border: 1px solid #d0d5dd; }"
+            "#inputField:focus { border-color: #0066cc; }"
+            "#sendBtn { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0066cc, stop:1 #7c4dff); color: white; border: none; }"
+            "#sendBtn:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #0080ff, stop:1 #9966ff); }"
+            "QMenuBar { background: #f0f2f5; color: #1a1a2e; }"
+            "QMenuBar::item:selected { background: #e0e5eb; }"
+            "QMenu { background: #ffffff; color: #1a1a2e; border: 1px solid #d0d5dd; }"
+            "QMenu::item:selected { background: #e8f0fe; color: #0066cc; }"
+            "QScrollBar:vertical { background: #f0f2f5; width: 6px; }"
+            "QScrollBar::handle:vertical { background: #c0c5cc; border-radius: 3px; }"
+            "#separator { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 transparent, stop:0.5 #0066cc, stop:1 transparent); }");
+        break;
+    default: // Dark (0) — use the built-in theme from theme.h
+        break;
+    }
+
+    if (index == 0) {
+        qApp->setStyleSheet(Theme::globalStyleSheet());
+    } else {
+        qApp->setStyleSheet(Theme::globalStyleSheet() + base);
+    }
+
+    appendLog(Str::logSystem(),
+        index == 0 ? (IS_EN ? QStringLiteral("Theme: Dark") : QStringLiteral("Тема: Тёмная"))
+        : index == 1 ? (IS_EN ? QStringLiteral("Theme: Glass") : QStringLiteral("Тема: Стекло"))
+        : (IS_EN ? QStringLiteral("Theme: Light") : QStringLiteral("Тема: Светлая")),
+        Theme::LogColors::system);
+}
+
+// ============================================================
 // Drag-n-drop
 // ============================================================
 
@@ -3102,6 +3154,136 @@ void MainWindow::buildUI()
     sep->setObjectName(QStringLiteral("separator"));
     sep->setFixedHeight(1);
     vbox->addWidget(sep);
+
+    // === Quick-access toolbar ===
+    auto* toolbar = new QHBoxLayout();
+    toolbar->setSpacing(4);
+    toolbar->setContentsMargins(0, 2, 0, 2);
+
+    auto makeToolBtn = [this](const QString& icon, const QString& tip) -> QPushButton* {
+        auto* btn = new QPushButton(icon, this);
+        btn->setFixedSize(36, 30);
+        btn->setToolTip(tip);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(
+            QStringLiteral("QPushButton { background: transparent; color: #607888; "
+                           "border: 1px solid transparent; border-radius: 6px; font-size: 15px; } "
+                           "QPushButton:hover { background: rgba(0,212,255,0.08); color: #00d4ff; "
+                           "border-color: rgba(0,212,255,0.2); }"));
+        return btn;
+    };
+
+    auto* tbSearch = makeToolBtn(QStringLiteral("🔍"),
+        IS_EN ? QStringLiteral("Search chat history") : QStringLiteral("Поиск по чату"));
+    auto* tbAttach = makeToolBtn(QStringLiteral("📎"),
+        IS_EN ? QStringLiteral("Attach files") : QStringLiteral("Прикрепить файлы"));
+    auto* tbProject = makeToolBtn(QStringLiteral("📂"),
+        IS_EN ? QStringLiteral("Open project") : QStringLiteral("Открыть проект"));
+    auto* tbVoiceModels = makeToolBtn(QStringLiteral("🎤"),
+        IS_EN ? QStringLiteral("Voice models") : QStringLiteral("Модели голоса"));
+    auto* tbTraining = makeToolBtn(QStringLiteral("🧠"),
+        IS_EN ? QStringLiteral("Training stats") : QStringLiteral("Статистика обучения"));
+    auto* tbScreenshot = makeToolBtn(QStringLiteral("📸"),
+        IS_EN ? QStringLiteral("Screenshot + AI") : QStringLiteral("Скриншот + AI"));
+    auto* tbTheme = makeToolBtn(QStringLiteral("🎨"),
+        IS_EN ? QStringLiteral("Switch theme") : QStringLiteral("Сменить тему"));
+    auto* tbClear = makeToolBtn(QStringLiteral("🗑"),
+        IS_EN ? QStringLiteral("Clear chat") : QStringLiteral("Очистить чат"));
+
+    toolbar->addWidget(tbSearch);
+    toolbar->addWidget(tbAttach);
+    toolbar->addWidget(tbProject);
+    toolbar->addWidget(tbVoiceModels);
+    toolbar->addWidget(tbTraining);
+    toolbar->addWidget(tbScreenshot);
+    toolbar->addWidget(tbTheme);
+    toolbar->addStretch();
+    toolbar->addWidget(tbClear);
+    vbox->addLayout(toolbar);
+
+    // Connect toolbar buttons
+    connect(tbSearch, &QPushButton::clicked, this, [this]() {
+        bool ok;
+        QString query = QInputDialog::getText(this,
+            IS_EN ? QStringLiteral("Search") : QStringLiteral("Поиск"),
+            IS_EN ? QStringLiteral("Search chat history:") : QStringLiteral("Поиск по истории:"),
+            QLineEdit::Normal, QString(), &ok);
+        if (ok && !query.trimmed().isEmpty()) {
+            m_input->setText(QStringLiteral("вспомни ") + query.trimmed());
+            onSend();
+        }
+    });
+    connect(tbAttach, &QPushButton::clicked, this, &MainWindow::onAttachClicked);
+    connect(tbProject, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this,
+            Str::dlgChooseFolder(),
+            m_jarvis->projectIndexer()->projectRoot().isEmpty()
+                ? QDir::homePath() : m_jarvis->projectIndexer()->projectRoot(),
+            QFileDialog::ShowDirsOnly);
+        if (dir.isEmpty()) return;
+        m_jarvis->projectIndexer()->setProjectRoot(dir);
+        m_jarvis->projectIndexer()->indexProject();
+        m_jarvis->projectIndexer()->enableFileWatcher(true);
+        m_jarvis->syncProjectInfoToMemory();
+        appendLog(Str::logJarvis(),
+            Str::projIndexed() + QString::number(m_jarvis->projectIndexer()->fileCount())
+            + Str::projSymbols() + QString::number(m_jarvis->projectIndexer()->symbolCount()),
+            Theme::LogColors::jarvis);
+    });
+    connect(tbClear, &QPushButton::clicked, this, [this]() { m_log->clear(); });
+
+    connect(tbVoiceModels, &QPushButton::clicked, this, [this]() {
+        for (auto* action : menuBar()->actions()) {
+            auto* menu = action->menu();
+            if (!menu) continue;
+            for (auto* sub : menu->actions()) {
+                if (sub->text().contains(QStringLiteral("🎤"))) {
+                    sub->trigger();
+                    return;
+                }
+            }
+        }
+    });
+    connect(tbTraining, &QPushButton::clicked, this, [this]() {
+        for (auto* action : menuBar()->actions()) {
+            auto* menu = action->menu();
+            if (!menu) continue;
+            for (auto* sub : menu->actions()) {
+                if (sub->text().contains(QStringLiteral("📊")) && sub->text().contains(QStringLiteral("Stat"))) {
+                    sub->trigger();
+                    return;
+                }
+            }
+        }
+    });
+    connect(tbScreenshot, &QPushButton::clicked, this, [this]() {
+        for (auto* action : menuBar()->actions()) {
+            auto* menu = action->menu();
+            if (!menu) continue;
+            for (auto* sub : menu->actions()) {
+                if (sub->text().contains(QStringLiteral("📸"))) {
+                    sub->trigger();
+                    return;
+                }
+            }
+        }
+    });
+
+    // === Theme switcher ===
+    m_themeIndex = QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
+                       .value(QStringLiteral("ui/theme"), 0).toInt();
+
+    connect(tbTheme, &QPushButton::clicked, this, [this]() {
+        m_themeIndex = (m_themeIndex + 1) % 3;
+        QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
+            .setValue(QStringLiteral("ui/theme"), m_themeIndex);
+        applyTheme(m_themeIndex);
+    });
+
+    // Apply initial theme after a short delay (after stylesheet is set)
+    if (m_themeIndex != 0) {
+        QTimer::singleShot(100, this, [this]() { applyTheme(m_themeIndex); });
+    }
 
     // === Панель обновления ===
     m_updateBar = new QWidget(this);
