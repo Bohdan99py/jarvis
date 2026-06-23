@@ -188,8 +188,6 @@ add_library(JarvisCore STATIC
         core/plugin_manager.cpp
 
         # Автообновление
-        core/updater.h
-        core/updater.cpp
         core/auto_updater.h
         core/auto_updater.cpp
         core/bug_reporter.h

@@ -140,4 +140,7 @@ private:
     int m_symbolCount = 0;
 
     static const QStringList s_sourceExtensions;
+
+    static constexpr int MAX_INDEXED_FILES = 500;
+    static constexpr int MAX_SYMBOLS_PER_FILE = 200;
 };

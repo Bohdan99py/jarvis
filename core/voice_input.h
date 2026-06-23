@@ -197,6 +197,14 @@ public slots:
     // Перезагрузить (после установки новой модели)
     void reloadModels(const WhisperConfig& config);
 
+public:
+    // Expose loaded models for sharing with PassiveTranscriber.
+    // Возвращает VoskModel* (как void*) для уже загруженной модели языка,
+    // или nullptr если модель данного языка сейчас не в памяти.
+    void* modelForLang(const QString& lang) const;
+    // Языки моделей, загруженных в память в данный момент.
+    QStringList loadedLanguages() const;
+
 signals:
     void modelsLoaded(bool success, const QString& error);
     void recognized(const QString& text, const QString& detectedLanguage, bool isWhisper);
@@ -226,8 +234,24 @@ private:
     RecognitionResult tryRecognize(void* recognizer, const QByteArray& pcmData) const;
     bool isWhisperLevel(const QByteArray& pcmData) const;
 
+    // --- Ленивая загрузка / выгрузка тяжёлых моделей ---
+    // EN-small (~40 MB) держим в памяти постоянно (нужна для wake word).
+    // Тяжёлые модели (en-large, ru, …) грузим по запросу и выгружаем
+    // после MODEL_UNLOAD_TIMEOUT_MS простоя, экономя ~3.6 GB RAM.
+    bool isSmallModel(const QString& modelId) const;
+    bool isModelLoaded(const QString& lang) const;
+    void ensureHeavyModelsLoaded();    // догрузить все модели из m_lastConfig
+    void unloadHeavyModels();          // слот таймера: освободить всё кроме small
+    void startUnloadTimer();           // создать/перезапустить таймер (в потоке worker'а)
+    bool loadOne(const QString& lang, const QString& path); // загрузить одну модель
+
     QVector<ModelPair> m_models;
     bool  m_loaded  = false;
+
+    QTimer*       m_unloadTimer    = nullptr;
+    WhisperConfig m_lastConfig;        // сохранённый конфиг для ленивой дозагрузки
+    bool          m_lazyLoadEnabled = true;
+    static constexpr int MODEL_UNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 минут
 };
 
 // ============================================================
@@ -247,6 +271,12 @@ public:
     bool isListening() const;
     void setConfig(const WhisperConfig& config);
     const WhisperConfig& config() const { return m_config; }
+
+    // Доступ к worker'у — нужен PassiveTranscriber для шеринга загруженных
+    // моделей Vosk (см. modelForLang / loadedLanguages), чтобы не грузить
+    // дубликаты на ~3.6 GB. Worker живёт в отдельном потоке: вызывать его
+    // методы извне можно только для чтения указателей моделей.
+    VoskWorker* worker() const { return m_worker; }
 
     // --- Управление моделями ---
     // Скачать дополнительную модель (вызывать из Settings)

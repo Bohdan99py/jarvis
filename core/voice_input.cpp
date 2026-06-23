@@ -638,6 +638,58 @@ VoskWorker::~VoskWorker()
     freeAll();
 }
 
+// EN-small (~40 MB) — единственная модель, которую держим постоянно
+// (нужна для распознавания wake word без задержки). Всё остальное —
+// тяжёлые модели (en-large, ru, de, …), грузятся по запросу.
+bool VoskWorker::isSmallModel(const QString& modelId) const
+{
+    // Эвристика: путь содержит "small" → лёгкая модель.
+    // (vosk-model-small-en-us-…, vosk-model-small-cn-… и т.п.)
+    return modelId.contains(QStringLiteral("small"), Qt::CaseInsensitive);
+}
+
+bool VoskWorker::isModelLoaded(const QString& lang) const
+{
+    for (const auto& mp : m_models) {
+        if (mp.lang == lang) return true;
+    }
+    return false;
+}
+
+void* VoskWorker::modelForLang(const QString& lang) const
+{
+    for (const auto& mp : m_models) {
+        if (mp.lang == lang) return mp.model;
+    }
+    return nullptr;
+}
+
+QStringList VoskWorker::loadedLanguages() const
+{
+    QStringList result;
+    result.reserve(m_models.size());
+    for (const auto& mp : m_models) {
+        result.append(mp.lang);
+    }
+    return result;
+}
+
+// Таймер создаётся ЛЕНИВО внутри потока worker'а (этот метод вызывается
+// только из recognize()/reloadModels(), которые исполняются в потоке
+// worker'а через QueuedConnection). QTimer нельзя создавать в конструкторе,
+// потому что объект ещё живёт в главном потоке до moveToThread().
+void VoskWorker::startUnloadTimer()
+{
+    if (!m_lazyLoadEnabled) return;
+    if (!m_unloadTimer) {
+        m_unloadTimer = new QTimer(this);
+        m_unloadTimer->setSingleShot(true);
+        connect(m_unloadTimer, &QTimer::timeout,
+                this, &VoskWorker::unloadHeavyModels);
+    }
+    m_unloadTimer->start(MODEL_UNLOAD_TIMEOUT_MS);
+}
+
 void VoskWorker::freeAll()
 {
 #ifdef JARVIS_VOSK_AVAILABLE
@@ -648,6 +700,9 @@ void VoskWorker::freeAll()
 #endif
     m_models.clear();
     m_loaded = false;
+    // Останавливаем таймер выгрузки, чтобы он не сработал по уже
+    // освобождённым моделям после reloadModels()/уничтожения.
+    if (m_unloadTimer) m_unloadTimer->stop();
 }
 
 void VoskWorker::loadModels(const WhisperConfig& config)
@@ -656,14 +711,11 @@ void VoskWorker::loadModels(const WhisperConfig& config)
     reloadModels(config);
 }
 
-void VoskWorker::reloadModels(const WhisperConfig& config)
+// Собрать карту "язык → путь" из конфига. Вынесено отдельно, т.к. нужно
+// и при первичной загрузке (reloadModels), и при ленивой дозагрузке
+// (ensureHeavyModelsLoaded).
+static QMap<QString, QString> collectModelPaths(const WhisperConfig& config)
 {
-    freeAll();
-
-#ifdef JARVIS_VOSK_AVAILABLE
-    vosk_set_log_level(-1);
-
-    // Собираем пути: стандартные + extra
     QMap<QString, QString> paths;
     if (!config.modelPathRu.isEmpty()) paths[QStringLiteral("ru")] = config.modelPathRu;
     if (!config.modelPathEn.isEmpty()) paths[QStringLiteral("en")] = config.modelPathEn;
@@ -682,35 +734,78 @@ void VoskWorker::reloadModels(const WhisperConfig& config)
             }
         }
     }
+    return paths;
+}
+
+// Загрузить одну модель Vosk по пути и зарегистрировать её в m_models.
+// Возвращает true при успехе. Дубликаты по языку не загружаются.
+bool VoskWorker::loadOne(const QString& lang, const QString& path)
+{
+#ifdef JARVIS_VOSK_AVAILABLE
+    if (isModelLoaded(lang)) return true;
+    if (!QDir(path).exists()) {
+        qWarning() << "[Vosk] Путь не существует:" << path;
+        return false;
+    }
+
+    VoskModel* mdl = vosk_model_new(path.toUtf8().constData());
+    if (!mdl) { qWarning() << "[Vosk] Не удалось загрузить модель:" << path; return false; }
+
+    VoskRecognizer* reco = vosk_recognizer_new(mdl, 16000.0f);
+    if (!reco) {
+        vosk_model_free(mdl);
+        qWarning() << "[Vosk] Не удалось создать распознаватель для:" << lang;
+        return false;
+    }
+
+    vosk_recognizer_set_words(reco, 1);
+
+    ModelPair mp;
+    mp.model      = mdl;
+    mp.recognizer = reco;
+    mp.lang       = lang;
+    m_models.push_back(mp);
+    qDebug() << "[Vosk] Загружена модель:" << lang << "←" << path;
+    return true;
+#else
+    Q_UNUSED(lang) Q_UNUSED(path)
+    return false;
+#endif
+}
+
+void VoskWorker::reloadModels(const WhisperConfig& config)
+{
+    freeAll();
+    m_lastConfig = config; // сохраняем для ленивой дозагрузки тяжёлых моделей
+
+#ifdef JARVIS_VOSK_AVAILABLE
+    vosk_set_log_level(-1);
+
+    QMap<QString, QString> paths = collectModelPaths(config);
 
     bool any = false;
     for (auto it = paths.constBegin(); it != paths.constEnd(); ++it) {
         const QString& lang = it.key();
         const QString& path = it.value();
-        if (!QDir(path).exists()) {
-            qWarning() << "[Vosk] Путь не существует:" << path;
+
+        // Ленивая загрузка: постоянно держим только лёгкие (small) модели —
+        // их достаточно для wake word. Тяжёлые грузим on-demand в recognize().
+        if (m_lazyLoadEnabled && !isSmallModel(path)) {
+            qDebug() << "[Vosk] Отложена тяжёлая модель:" << lang << "←" << path;
             continue;
         }
 
-        VoskModel* mdl = vosk_model_new(path.toUtf8().constData());
-        if (!mdl) { qWarning() << "[Vosk] Не удалось загрузить модель:" << path; continue; }
+        if (loadOne(lang, path)) any = true;
+    }
 
-        VoskRecognizer* reco = vosk_recognizer_new(mdl, 16000.0f);
-        if (!reco) {
-            vosk_model_free(mdl);
-            qWarning() << "[Vosk] Не удалось создать распознаватель для:" << lang;
-            continue;
+    // Если ни одной small-модели нет (например, установлена только en-large),
+    // всё равно нужно что-то загрузить — иначе wake word работать не будет.
+    // Грузим всё из конфига, отключив ленивый режим для этого набора.
+    if (!any && !paths.isEmpty()) {
+        qDebug() << "[Vosk] Лёгких моделей нет — грузим все доступные";
+        for (auto it = paths.constBegin(); it != paths.constEnd(); ++it) {
+            if (loadOne(it.key(), it.value())) any = true;
         }
-
-        vosk_recognizer_set_words(reco, 1);
-
-        ModelPair mp;
-        mp.model      = mdl;
-        mp.recognizer = reco;
-        mp.lang       = lang;
-        m_models.push_back(mp);
-        any = true;
-        qDebug() << "[Vosk] Загружена модель:" << lang << "←" << path;
     }
 
     m_loaded = any;
@@ -722,10 +817,70 @@ void VoskWorker::reloadModels(const WhisperConfig& config)
 #endif
 }
 
+// Догрузить все модели из сохранённого конфига, которых ещё нет в памяти.
+// Вызывается из recognize() перед прогоном буфера, чтобы тяжёлые модели
+// поднимались по запросу.
+void VoskWorker::ensureHeavyModelsLoaded()
+{
+#ifdef JARVIS_VOSK_AVAILABLE
+    if (!m_lazyLoadEnabled) return;
+
+    QMap<QString, QString> paths = collectModelPaths(m_lastConfig);
+    for (auto it = paths.constBegin(); it != paths.constEnd(); ++it) {
+        if (!isModelLoaded(it.key())) {
+            loadOne(it.key(), it.value());
+        }
+    }
+    if (!m_models.isEmpty()) m_loaded = true;
+#endif
+}
+
+// Слот таймера: освободить все модели кроме лёгких (small). Экономит ~3.6 GB
+// RAM после 5 минут простоя. Лёгкая модель остаётся для wake word.
+void VoskWorker::unloadHeavyModels()
+{
+#ifdef JARVIS_VOSK_AVAILABLE
+    QVector<ModelPair> kept;
+    kept.reserve(m_models.size());
+
+    QMap<QString, QString> paths = collectModelPaths(m_lastConfig);
+    int freed = 0;
+
+    for (auto& mp : m_models) {
+        // Лёгкой считаем модель, путь которой содержит "small".
+        const QString path = paths.value(mp.lang);
+        const bool small = !path.isEmpty() && isSmallModel(path);
+        if (small) {
+            kept.push_back(mp);
+            continue;
+        }
+        if (mp.recognizer) vosk_recognizer_free(static_cast<VoskRecognizer*>(mp.recognizer));
+        if (mp.model)      vosk_model_free(static_cast<VoskModel*>(mp.model));
+        ++freed;
+        qDebug() << "[Vosk] Выгружена тяжёлая модель (idle):" << mp.lang;
+    }
+
+    m_models = kept;
+    if (freed > 0)
+        qDebug() << "[Vosk] Освобождено тяжёлых моделей:" << freed
+                 << "— осталось в памяти:" << m_models.size();
+#endif
+}
+
 void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
 {
 #ifdef JARVIS_VOSK_AVAILABLE
-    if (!m_loaded || m_models.isEmpty()) {
+    if (!m_loaded) {
+        emit error(QStringLiteral("Модели не загружены"));
+        return;
+    }
+
+    // Ленивая дозагрузка тяжёлых моделей по запросу + сброс таймера выгрузки:
+    // каждое распознавание продлевает жизнь моделей на MODEL_UNLOAD_TIMEOUT_MS.
+    ensureHeavyModelsLoaded();
+    startUnloadTimer();
+
+    if (m_models.isEmpty()) {
         emit error(QStringLiteral("Модели не загружены"));
         return;
     }

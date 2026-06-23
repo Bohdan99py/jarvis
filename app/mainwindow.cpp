@@ -3568,11 +3568,18 @@ void MainWindow::buildUI()
     PassiveListenerConfig passiveCfg;
     if (!datasetPath.isEmpty()) passiveCfg.datasetPath = datasetPath;
 
-    // Пути к Vosk моделям — те же что у VoiceInput
+    // Пути к Vosk моделям — те же что у VoiceInput (для совместимости конфига)
     passiveCfg.modelPathRu = m_voiceInput->config().modelPathRu;
     passiveCfg.modelPathEn = m_voiceInput->config().modelPathEn;
 
-    m_passiveListener->initialize(passiveCfg);
+    // Шерим уже загруженные модели Vosk из VoiceInput вместо загрузки дубликатов
+    // (~3.6 GB экономии). Инициализируем пассивный слушатель когда модели готовы.
+    connect(m_voiceInput, &VoiceInput::ready, this, [this, passiveCfg]() {
+        VoskWorker* w = m_voiceInput->worker();
+        void* modelRu = w ? w->modelForLang(QStringLiteral("ru")) : nullptr;
+        void* modelEn = w ? w->modelForLang(QStringLiteral("en")) : nullptr;
+        m_passiveListener->initializeWithSharedModels(modelRu, modelEn, passiveCfg);
+    });
 
     // Автостарт пассивной записи — начинаем сразу после загрузки моделей
     // Пользователь может выключить через меню Training → Пассивная запись
