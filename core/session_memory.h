@@ -139,9 +139,9 @@ private:
     int         m_currentSessionIndex = -1; // индекс записи текущей сессии в m_pastSessions
 
     static constexpr int MAX_SESSION_MESSAGES = 100;
-    // 200 записей по ~0.5-1 КБ ≈ до 200 КБ — недели/месяцы истории для
-    // команды "вспомни что было на прошлой неделе / по теме X".
-    static constexpr int MAX_PAST_SESSIONS    = 200;
+    // 50 записей — достаточно для нескольких недель истории.
+    // Старые сессии автоматически удаляются.
+    static constexpr int MAX_PAST_SESSIONS    = 50;
     static constexpr int MAX_SESSION_TOPICS   = 20;
     static constexpr int MAX_SESSION_FILES    = 20;
 };

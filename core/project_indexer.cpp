@@ -15,6 +15,7 @@
 #include <QJsonArray>
 #include <QStandardPaths>
 #include <QSet>
+#include <QDebug>
 
 // Расширения для индексации
 const QStringList ProjectIndexer::s_sourceExtensions = {
@@ -162,12 +163,20 @@ void ProjectIndexer::indexProject()
 
     m_indexing = true;
     const QStringList files = collectSourceFiles(m_projectRoot);
+
+    // Limit total files to avoid excessive memory usage
+    QStringList filesToIndex = files;
+    if (filesToIndex.size() > MAX_INDEXED_FILES) {
+        qDebug() << "[Indexer] Capping at" << MAX_INDEXED_FILES << "files (total:" << files.size() << ")";
+        filesToIndex = filesToIndex.mid(0, MAX_INDEXED_FILES);
+    }
+
     QMap<QString, IndexedFile> newFiles;
 
-    emit indexingStarted(files.size());
+    emit indexingStarted(filesToIndex.size());
 
-    for (int i = 0; i < files.size(); ++i) {
-        const QString& filePath = files[i];
+    for (int i = 0; i < filesToIndex.size(); ++i) {
+        const QString& filePath = filesToIndex[i];
         const QFileInfo currentInfo(filePath);
 
         auto existing = m_files.constFind(filePath);
@@ -179,7 +188,7 @@ void ProjectIndexer::indexProject()
             newFiles.insert(filePath, parseFile(filePath));
         }
 
-        emit indexingProgress(i + 1, files.size());
+        emit indexingProgress(i + 1, filesToIndex.size());
     }
 
     m_files = std::move(newFiles);
@@ -287,7 +296,11 @@ void ProjectIndexer::parseSymbols(IndexedFile& file, const QStringList& lines) c
     QString prevComment;
     bool inBlockComment = false;
 
+    file.symbols.reserve(64);
+
     for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
         const QString& line = lines[i];
         int lineNum = i + 1;
 

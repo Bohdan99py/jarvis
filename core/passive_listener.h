@@ -100,6 +100,9 @@ private slots:
 private:
     float    computeRmsDb(const QByteArray& data) const;
 
+    // Жёсткий лимит буфера: 30 сек @ 16kHz mono 16-bit = 960000 байт
+    static constexpr int MAX_BUFFER_BYTES = 30 * 16000 * 2;
+
     QAudioSource*     m_audioSource  = nullptr;
     QIODevice*        m_audioDevice  = nullptr;
     QTimer*           m_silenceTimer = nullptr;
@@ -122,8 +125,10 @@ public:
     ~PassiveTranscriber() override;
 
 public slots:
-    void loadModel(const QString& modelPath);   // совместимость
-    void loadModels(const QString& modelPathRu, const QString& modelPathEn);
+    void loadModel(const QString& modelPath);   // legacy compat — no-op
+    void loadModels(const QString& modelPathRu, const QString& modelPathEn); // legacy compat — no-op
+    // NEW: use shared VoskModel* from VoskWorker (no duplicate loading)
+    void setSharedModels(void* modelRu, void* modelEn);
     void transcribe(QByteArray pcmData, QDateTime capturedAt, QString language);
 
 signals:
@@ -132,12 +137,14 @@ signals:
     void error(const QString& message);
 
 private:
-    // Vosk модели и распознаватели (те же что в VoskWorker)
+    // Shared VoskModel pointers — NOT owned, do NOT free
     void* m_modelRu = nullptr;
     void* m_modelEn = nullptr;
+    // Own recognizers (cheap, ~few KB each)
     void* m_recoRu  = nullptr;
     void* m_recoEn  = nullptr;
     bool  m_loaded  = false;
+    bool  m_ownsModels = false;  // false when using shared models
 };
 
 // ============================================================
@@ -152,6 +159,8 @@ public:
     ~PassiveListener() override;
 
     void initialize(const PassiveListenerConfig& config);
+    void initializeWithSharedModels(void* modelRu, void* modelEn,
+                                    const PassiveListenerConfig& config);
     void setConfig(const PassiveListenerConfig& config);
     const PassiveListenerConfig& config() const { return m_config; }
 
@@ -184,8 +193,8 @@ signals:
     void statusChanged(const QString& status);        // для иконки трея
 
     // внутренние
-    void requestLoadModel(const QString& path);   // совместимость
-    void requestLoadModels(const QString& pathRu, const QString& pathEn);
+    void requestLoadModel(const QString& path);   // совместимость (no-op)
+    void requestSetSharedModels(void* modelRu, void* modelEn);
     void requestTranscribe(QByteArray pcmData, QDateTime capturedAt, QString lang);
 
 private slots:

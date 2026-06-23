@@ -130,7 +130,10 @@ void PassiveRecorder::onAudioDataReady()
             m_speaking = true;
             m_buffer.clear();
         }
-        m_buffer.append(pcm16);
+        // Hard cap: 30 seconds maximum
+        if (m_buffer.size() + pcm16.size() <= MAX_BUFFER_BYTES) {
+            m_buffer.append(pcm16);
+        }
         m_silenceTimer->start(m_config.silenceAfterSpeechMs);
 
         // Защита от слишком длинной записи
@@ -139,7 +142,10 @@ void PassiveRecorder::onAudioDataReady()
             onSilenceTimeout();
         }
     } else if (m_speaking) {
-        m_buffer.append(pcm16); // добавляем хвост тишины
+        // добавляем хвост тишины (с тем же жёстким лимитом)
+        if (m_buffer.size() + pcm16.size() <= MAX_BUFFER_BYTES) {
+            m_buffer.append(pcm16);
+        }
     }
 }
 
@@ -187,8 +193,10 @@ PassiveTranscriber::~PassiveTranscriber()
 #ifdef JARVIS_VOSK_AVAILABLE
     if (m_recoRu) vosk_recognizer_free(static_cast<VoskRecognizer*>(m_recoRu));
     if (m_recoEn) vosk_recognizer_free(static_cast<VoskRecognizer*>(m_recoEn));
-    if (m_modelRu) vosk_model_free(static_cast<VoskModel*>(m_modelRu));
-    if (m_modelEn) vosk_model_free(static_cast<VoskModel*>(m_modelEn));
+    if (m_ownsModels) {
+        if (m_modelRu) vosk_model_free(static_cast<VoskModel*>(m_modelRu));
+        if (m_modelEn) vosk_model_free(static_cast<VoskModel*>(m_modelEn));
+    }
 #endif
 }
 
@@ -198,36 +206,46 @@ void PassiveTranscriber::loadModel(const QString& modelPath)
     // Вызывается из PassiveListener::initialize → там передаём оба пути
 }
 
-void PassiveTranscriber::loadModels(const QString& modelPathRu, const QString& modelPathEn)
+void PassiveTranscriber::loadModels(const QString&, const QString&)
+{
+    // Legacy compat — use setSharedModels() instead
+    qDebug() << "[Passive] loadModels() is deprecated, use setSharedModels()";
+}
+
+void PassiveTranscriber::setSharedModels(void* modelRu, void* modelEn)
 {
     if (m_loaded) { emit modelLoaded(true); return; }
 
 #ifdef JARVIS_VOSK_AVAILABLE
-    vosk_set_log_level(-1);
-    bool anyLoaded = false;
-
-    if (QDir(modelPathRu).exists()) {
-        m_modelRu = vosk_model_new(modelPathRu.toUtf8().constData());
-        if (m_modelRu) {
-            m_recoRu = vosk_recognizer_new(
-                static_cast<VoskModel*>(m_modelRu), 16000.0f);
-            if (m_recoRu) anyLoaded = true;
-        }
+    // Free old recognizers if any
+    if (m_recoRu) { vosk_recognizer_free(static_cast<VoskRecognizer*>(m_recoRu)); m_recoRu = nullptr; }
+    if (m_recoEn) { vosk_recognizer_free(static_cast<VoskRecognizer*>(m_recoEn)); m_recoEn = nullptr; }
+    if (m_ownsModels) {
+        if (m_modelRu) vosk_model_free(static_cast<VoskModel*>(m_modelRu));
+        if (m_modelEn) vosk_model_free(static_cast<VoskModel*>(m_modelEn));
     }
 
-    if (QDir(modelPathEn).exists()) {
-        m_modelEn = vosk_model_new(modelPathEn.toUtf8().constData());
-        if (m_modelEn) {
-            m_recoEn = vosk_recognizer_new(
-                static_cast<VoskModel*>(m_modelEn), 16000.0f);
-            if (m_recoEn) anyLoaded = true;
-        }
+    m_modelRu = modelRu;
+    m_modelEn = modelEn;
+    m_ownsModels = false;  // shared, do not free
+
+    bool anyLoaded = false;
+
+    if (m_modelRu) {
+        m_recoRu = vosk_recognizer_new(static_cast<VoskModel*>(m_modelRu), 16000.0f);
+        if (m_recoRu) anyLoaded = true;
+    }
+
+    if (m_modelEn) {
+        m_recoEn = vosk_recognizer_new(static_cast<VoskModel*>(m_modelEn), 16000.0f);
+        if (m_recoEn) anyLoaded = true;
     }
 
     m_loaded = anyLoaded;
     emit modelLoaded(anyLoaded);
-    qDebug() << "[Passive] Vosk models loaded:" << anyLoaded;
+    qDebug() << "[Passive] Shared Vosk models set:" << anyLoaded;
 #else
+    Q_UNUSED(modelRu) Q_UNUSED(modelEn)
     emit modelLoaded(false);
 #endif
 }
@@ -312,6 +330,9 @@ PassiveListener::PassiveListener(QObject* parent) : QObject(parent)
     connect(this,          &PassiveListener::requestLoadModel,
             m_transcriber, &PassiveTranscriber::loadModel,
             Qt::QueuedConnection);
+    connect(this,          &PassiveListener::requestSetSharedModels,
+            m_transcriber, &PassiveTranscriber::setSharedModels,
+            Qt::QueuedConnection);
     connect(this,          &PassiveListener::requestTranscribe,
             m_transcriber, &PassiveTranscriber::transcribe,
             Qt::QueuedConnection);
@@ -343,13 +364,14 @@ void PassiveListener::initialize(const PassiveListenerConfig& config)
 {
     m_config = config;
     ensureDatasetDir();
+}
 
-    // Подключаем loadModels вместо loadModel
-    connect(this,          &PassiveListener::requestLoadModels,
-            m_transcriber, &PassiveTranscriber::loadModels,
-            Qt::QueuedConnection);
-
-    emit requestLoadModels(config.modelPathRu, config.modelPathEn);
+void PassiveListener::initializeWithSharedModels(void* modelRu, void* modelEn,
+                                                 const PassiveListenerConfig& config)
+{
+    m_config = config;
+    ensureDatasetDir();
+    emit requestSetSharedModels(modelRu, modelEn);
 }
 
 void PassiveListener::setConfig(const PassiveListenerConfig& config)
