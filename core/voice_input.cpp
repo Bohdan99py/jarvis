@@ -638,14 +638,16 @@ VoskWorker::~VoskWorker()
     freeAll();
 }
 
-// EN-small (~40 MB) — единственная модель, которую держим постоянно
-// (нужна для распознавания wake word без задержки). Всё остальное —
-// тяжёлые модели (en-large, ru, de, …), грузятся по запросу.
-bool VoskWorker::isSmallModel(const QString& modelId) const
+// EN-small (~40 MB) — единственная модель, которую держим постоянно.
+// Определяем по каталогу: модель считается "лёгкой" если < 200 MB.
+// Важно: пути НЕ содержат слово "small" (en-small ставится в "model-en").
+bool VoskWorker::isSmallModel(const QString& path) const
 {
-    // Эвристика: путь содержит "small" → лёгкая модель.
-    // (vosk-model-small-en-us-…, vosk-model-small-cn-… и т.п.)
-    return modelId.contains(QStringLiteral("small"), Qt::CaseInsensitive);
+    for (const auto& info : VoskModels::catalog()) {
+        if (path.endsWith(info.subdir) || path.endsWith(info.subdir + QStringLiteral("/")))
+            return info.sizeBytes < 200LL * 1024 * 1024;
+    }
+    return false;
 }
 
 bool VoskWorker::isModelLoaded(const QString& lang) const
