@@ -98,6 +98,10 @@ public:
     void setUserProfileSummary(const QString& summary) { m_userProfileSummary = summary; }
     QString userProfileSummary() const   { return m_userProfileSummary; }
 
+    // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
+    void setLearningStats(int totalInteractions, int likedResponses,
+                          int cachedResponses, int sessionsRecorded);
+
     void setProjectInfo(const QString& root,
                         const QString& projectMap,
                         int fileCount,
@@ -126,6 +130,12 @@ private:
     QJsonArray  m_pastSessions;
 
     QString m_userProfileSummary;
+
+    // Сознание: что JARVIS знает о себе
+    int m_totalInteractions = 0;
+    int m_likedResponses    = 0;
+    int m_cachedResponses   = 0;
+    int m_sessionsRecorded  = 0;
 
     QString m_projectRoot;
     QString m_projectMap;

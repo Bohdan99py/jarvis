@@ -833,6 +833,14 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         );
         m_profile->recordObservation(ctx, s);
         m_memory->setUserProfileSummary(m_profile->buildProfileSummary());
+
+        // Consciousness: learning stats for system prompt
+        m_memory->setLearningStats(
+            DatabaseManager::instance().trainingLogCount(1, -1),
+            DatabaseManager::instance().trainingLogCount(1, 1),
+            DatabaseManager::instance().responseCacheCount(),
+            m_memory->pastSessionSummaries().size()
+        );
     }
 
     // 1. Системные команды из реестра (только явные prefix-команды:
@@ -1263,6 +1271,27 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     } // конец блока локальных ответов
 
+    // ── 1c. Offline brain: cached behavior patterns ─────────────
+    // BackgroundLearner накапливает пары trigger→response из истории.
+    // Если видели похожий вопрос ≥3 раз — отвечаем локально без API.
+    {
+        auto& db = DatabaseManager::instance();
+        auto patterns = db.findPatterns(1, s.toLower());
+        if (!patterns.isEmpty()) {
+            const DbBehaviorPattern& best = patterns.first();
+            if (best.frequency >= 3 && best.confidence >= 0.6f
+                && !best.response.isEmpty() && best.response.length() > 10)
+            {
+                qDebug() << "[Brain] Offline answer from patterns:"
+                         << best.trigger.left(40) << "freq=" << best.frequency;
+                m_memory->addMessage(QStringLiteral("assistant"), best.response);
+                m_memory->updateContext(s, best.response);
+                emit asyncResponseReady(best.response);
+                return QString();
+            }
+        }
+    }
+
     // 2. Маршрутизация по типу запроса — РАБОТАЕТ ВСЕГДА,
     //    независимо от m_multiAgentMode (см. routeToClaude()).
     const bool needsClaude = routeToClaude(s, attachmentBlock);
@@ -1352,6 +1381,16 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                     m_memory->addMessage(QStringLiteral("assistant"), resp2);
                     m_memory->updateContext(s, resp2);
                     m_predictor->recordSequence(s);
+                    // Auto-cache conversational response for offline
+                    if (resp2.length() <= 1000 && !resp2.contains(QStringLiteral("```"))) {
+                        DbBehaviorPattern cached;
+                        cached.userId   = 1;
+                        cached.trigger  = s.toLower().simplified();
+                        cached.response = resp2.left(500);
+                        cached.context  = QStringLiteral("{}");
+                        cached.confidence = 0.7f;
+                        DatabaseManager::instance().upsertPattern(cached);
+                    }
                     emit asyncResponseReady(resp2);
                 } else {
                     // Диагностика: причина видна в консоли CLion и в UI
@@ -1393,6 +1432,16 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
                 m_predictor->recordSequence(s);
+                // Auto-cache conversational response for offline
+                if (response.length() <= 1000 && !response.contains(QStringLiteral("```"))) {
+                    DbBehaviorPattern cached;
+                    cached.userId   = 1;
+                    cached.trigger  = s.toLower().simplified();
+                    cached.response = response.left(500);
+                    cached.context  = QStringLiteral("{}");
+                    cached.confidence = 0.7f;
+                    DatabaseManager::instance().upsertPattern(cached);
+                }
                 emit asyncResponseReady(response);
             } else {
                 // Ollama перестала отвечать посреди сессии → Gemini → Claude
@@ -1561,6 +1610,25 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
 
     m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
     m_memory->updateContext(userInput, displayResponse);
+
+    // ── Auto-cache: сохраняем ответ в behavior_patterns для будущего
+    // офлайн-использования. Не кэшируем код-блоки (быстро устаревают)
+    // и слишком длинные ответы (>1000 символов — скорее всего развёрнутый анализ).
+    if (!displayResponse.isEmpty()
+        && displayResponse.length() <= 1000
+        && !displayResponse.contains(QStringLiteral("[FILE:"))
+        && !displayResponse.contains(QStringLiteral("[DIFF:"))
+        && !displayResponse.contains(QStringLiteral("```")))
+    {
+        DbBehaviorPattern cached;
+        cached.userId     = 1;
+        cached.trigger    = userInput.toLower().simplified();
+        cached.response   = displayResponse.left(500);
+        cached.context    = QStringLiteral("{}");
+        cached.confidence = 0.7f;
+        DatabaseManager::instance().upsertPattern(cached);
+    }
+
     handleClaudeResponse(finalResponse);
     m_predictor->recordSequence(userInput);
 

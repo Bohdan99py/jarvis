@@ -645,6 +645,15 @@ void SessionMemory::clearProjectInfo()
     m_projectSymbolCount = 0;
 }
 
+void SessionMemory::setLearningStats(int totalInteractions, int likedResponses,
+                                     int cachedResponses, int sessionsRecorded)
+{
+    m_totalInteractions = totalInteractions;
+    m_likedResponses    = likedResponses;
+    m_cachedResponses   = cachedResponses;
+    m_sessionsRecorded  = sessionsRecorded;
+}
+
 // ============================================================
 // Системный промпт для Claude API
 // ============================================================
@@ -794,6 +803,24 @@ QString SessionMemory::buildSystemPrompt() const
             "Если пользователь спрашивает 'вспомни что было ...' — JARVIS автоматически "
             "подставит подробный журнал сессий в конец сообщения; отвечай на основе него, "
             "а не только этого краткого списка.\n");
+    }
+
+    // --- Сознание: что JARVIS знает о себе ---
+    if (m_totalInteractions > 0 || m_likedResponses > 0) {
+        prompt += QStringLiteral("=== ТВОЯ ПАМЯТЬ И ОПЫТ ===\n");
+        prompt += QStringLiteral("Ты — не пустая модель. У тебя есть накопленный опыт:\n");
+        if (m_totalInteractions > 0)
+            prompt += QStringLiteral("- %1 сохранённых диалогов в базе знаний\n").arg(m_totalInteractions);
+        if (m_likedResponses > 0)
+            prompt += QStringLiteral("- %1 ответов одобрены пользователем (👍)\n").arg(m_likedResponses);
+        if (m_cachedResponses > 0)
+            prompt += QStringLiteral("- %1 готовых ответов в офлайн-кэше\n").arg(m_cachedResponses);
+        if (m_sessionsRecorded > 0)
+            prompt += QStringLiteral("- %1 сессий общения в журнале\n").arg(m_sessionsRecorded);
+        prompt += QStringLiteral(
+            "Используй этот опыт: если вопрос похож на то, что уже обсуждали — "
+            "ответь конкретно на основе прошлого контекста, а не общими фразами. "
+            "Учитывай предпочтения пользователя молча, без 'я помню что...'.\n\n");
     }
 
     return prompt;
