@@ -4,6 +4,7 @@
 // -------------------------------------------------------
 
 #include <QString>
+#include <QDateTime>
 
 // Глобальный язык (изменяется через Настройки/Settings → Language)
 enum class UiLanguage { Russian, English };
@@ -70,11 +71,25 @@ inline QString dlgRestartNeeded()   { return IS_EN ? "Language changed. Some UI 
                                                    : "Язык изменён. Часть элементов обновится при следующем запуске."; }
 
 // --- Приветствие ---
-inline QString greetNight()         { return IS_EN ? "Good night"      : "Доброй ночи"; }
-inline QString greetMorning()       { return IS_EN ? "Good morning"    : "Доброе утро"; }
-inline QString greetDay()           { return IS_EN ? "Good afternoon"  : "Добрый день"; }
-inline QString greetEvening()       { return IS_EN ? "Good evening"    : "Добрый вечер"; }
-inline QString greetReady()         { return IS_EN ? "System ready. v" : "Система готова. v"; }
+inline QString greetNight() {
+    return IS_EN ? "Still up? Respect. JARVIS online"
+                 : "Ещё не спишь? Уважаю. JARVIS в сети";
+}
+inline QString greetMorning() {
+    return IS_EN ? "Morning. Systems warmed up"
+                 : "Утро. Системы прогреты";
+}
+inline QString greetDay() {
+    return IS_EN ? "Afternoon. All systems nominal"
+                 : "День. Все системы в норме";
+}
+inline QString greetEvening() {
+    return IS_EN ? "Evening shift. Ready to work"
+                 : "Вечерняя смена. Готов к работе";
+}
+inline QString greetReady() {
+    return IS_EN ? "Online. v" : "В сети. v";
+}
 
 // --- Статусы ---
 inline QString statusThinking()     { return IS_EN ? "Thinking..."               : "Думаю..."; }
@@ -144,6 +159,49 @@ inline QString aboutText()          {
     return IS_EN
         ? "J.A.R.V.I.S. — Personal AI Assistant\n\nVersion: v%1\nEngines: Claude API + Gemini API\nAuthor: Bohdan99py"
         : "J.A.R.V.I.S. — Personal AI Assistant\n\nВерсия: v%1\nДвижки: Claude API + Gemini API\nАвтор: Bohdan99py";
+}
+
+// --- Что нового ---
+inline QString whatsNew() {
+    return IS_EN
+        ? "What's new in v%1:\n"
+          "• Offline Brain — answers from learned patterns without API\n"
+          "• Auto-caching — every response saved for future offline use\n"
+          "• Smart voice — only loads heavy models when needed (saves ~3 GB RAM)\n"
+          "• Consciousness — JARVIS knows what it has learned about you\n"
+          "• Modern UI — glassmorphism design with transparency\n"
+          "• Auto-updater fix — installer now launches correctly"
+        : "Что нового в v%1:\n"
+          "• Офлайн-мозг — ответы из выученных паттернов без API\n"
+          "• Авто-кэш — каждый ответ сохраняется для офлайн-режима\n"
+          "• Умный голос — тяжёлые модели грузятся только по запросу (экономия ~3 ГБ RAM)\n"
+          "• Сознание — JARVIS знает что выучил о пользователе\n"
+          "• Современный UI — полупрозрачный дизайн с glassmorphism\n"
+          "• Фикс обновления — установщик теперь запускается корректно";
+}
+
+// --- Советы при запуске ---
+inline QString startupTip() {
+    static const char* tipsRU[] = {
+        "Совет: нажми 👍 на ответы которые нравятся — JARVIS учится на них.",
+        "Совет: голосовые команды работают на русском и английском.",
+        "Совет: перетащи файлы в окно чтобы прикрепить к вопросу.",
+        "Совет: JARVIS запоминает паттерны и со временем отвечает быстрее.",
+        "Совет: скажи «Джарвис» чтобы активировать голосовой ввод.",
+        "Совет: команда «профиль» покажет что JARVIS выучил о тебе.",
+        "Совет: команда «память» покажет сохранённые факты.",
+    };
+    static const char* tipsEN[] = {
+        "Tip: click 👍 on responses you like — JARVIS learns from them.",
+        "Tip: voice commands work in Russian and English.",
+        "Tip: drag files into the window to attach them to your question.",
+        "Tip: JARVIS remembers patterns and responds faster over time.",
+        "Tip: say 'Jarvis' to activate voice input.",
+        "Tip: 'profile' command shows what JARVIS learned about you.",
+        "Tip: 'memory' command shows saved facts.",
+    };
+    int idx = static_cast<int>(QDateTime::currentMSecsSinceEpoch() / 1000) % 7;
+    return IS_EN ? QString::fromUtf8(tipsEN[idx]) : QString::fromUtf8(tipsRU[idx]);
 }
 
 // --- Fallback команды ---

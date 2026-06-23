@@ -231,6 +231,19 @@ MainWindow::MainWindow(QWidget* parent)
         appendLog(Str::logJarvis(), Str::apiNoKey(), Theme::LogColors::jarvis);
     }
 
+    // What's New — show once per version
+    {
+        QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
+        QString lastVer = cfg.value(QStringLiteral("ui/last_seen_version")).toString();
+        QString currentVer = QCoreApplication::applicationVersion();
+        if (lastVer != currentVer) {
+            appendLog(Str::logJarvis(),
+                      Str::whatsNew().arg(currentVer),
+                      Theme::LogColors::jarvis);
+            cfg.setValue(QStringLiteral("ui/last_seen_version"), currentVer);
+        }
+    }
+
     // ── Статус базы данных ────────────────────────────────
     // Показываем реальный путь к БД при каждом старте — это сразу
     // видно если debug/release-сборки вдруг разошлись по путям.
@@ -273,6 +286,9 @@ MainWindow::MainWindow(QWidget* parent)
                   Theme::LogColors::system);
         m_jarvis->syncProjectInfoToMemory();
     }
+
+    // Random startup tip
+    appendLog(Str::logJarvis(), Str::startupTip(), QStringLiteral("#7c4dff"));
 
     m_input->setFocus();
 
