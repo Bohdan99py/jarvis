@@ -1459,7 +1459,7 @@ void MainWindow::buildMenuBar()
               : QStringLiteral("🔒 Политика конфиденциальности"));
     connect(actPrivacy, &QAction::triggered, this, [this]() {
         const QString text = IS_EN ? QStringLiteral(
-R"(<h3>🔒 J.A.R.V.I.S. Privacy Policy</h3>
+R"w(<h3>🔒 J.A.R.V.I.S. Privacy Policy</h3>
 <p><i>Official and Completely Serious Privacy Policy v1.0</i></p>
 <hr>
 <h4>📻 What We Listen To</h4>
@@ -1487,9 +1487,9 @@ If you accidentally train JARVIS to order pizza at 3am — that's on you.</p>
 <p>In the unlikely event of world domination, your data will be treated
 with the utmost respect. You'll get a thank-you note. Probably.</p>
 
-<p><i>Last updated: when we remembered to update it.</i></p>)")
+<p><i>Last updated: when we remembered to update it.</i></p>)w")
         : QStringLiteral(
-R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</h3>
+R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</h3>
 <p><i>Официальная и Совершенно Серьёзная Политика Конфиденциальности v1.0</i></p>
 <hr>
 <h4>📻 Что мы слушаем</h4>
@@ -1517,7 +1517,7 @@ R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</
 <p>В маловероятном случае мирового господства, ваши данные будут обработаны
 с максимальным уважением. Вы получите благодарственное письмо. Наверное.</p>
 
-<p><i>Последнее обновление: когда мы вспомнили его обновить.</i></p>)");
+<p><i>Последнее обновление: когда мы вспомнили его обновить.</i></p>)w");
 
         auto* dlg = new QDialog(this);
         dlg->setWindowTitle(IS_EN ? QStringLiteral("Privacy Policy")
@@ -1569,7 +1569,7 @@ R"(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</
     connect(actWhatsNew, &QAction::triggered, this, [this]() {
         // Левая колонка
         const QString col1 = IS_EN ? QStringLiteral(
-R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
+R"w(<b>🎤 Voice Input (Vosk — offline)</b><br>
 • Model selection dialog on first launch<br>
 • 6 languages: EN fast/full, RU, DE, FR, ZH<br>
 • Download/delete models: Settings → Voice Models<br>
@@ -1591,9 +1591,9 @@ R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
 • "Open YouTube" → browser, not app<br>
 • "I want to watch" → suggests YouTube<br>
 • "Play music" → YouTube Music/Spotify<br>
-• 30+ sites mapped automatically)")
+• 30+ sites mapped automatically)w")
         : QStringLiteral(
-            R"(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
+            R"w(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
 • Диалог выбора моделей при первом запуске<br>
 • 6 языков: EN быстрый/полный, RU, DE, FR, ZH<br>
 • Докачать/удалить модели: Настройки → Голосовые модели<br>
@@ -1615,11 +1615,11 @@ R"(<b>🎤 Voice Input (Vosk — offline)</b><br>
 • "Открой YouTube" → браузер, не поиск<br>
 • "Хочу посмотреть" → предлагает YouTube<br>
 • "Включи музыку" → YouTube Music/Spotify<br>
-• 30+ сайтов в маппинге автоматически)");
+• 30+ сайтов в маппинге автоматически)w");
 
         // Правая колонка
         const QString col2 = IS_EN ? QStringLiteral(
-R"(<b>🎙️ Passive Voice Recording</b><br>
+R"w(<b>🎙️ Passive Voice Recording</b><br>
 • Listens via tray → saves to journal<br>
 • Brain creates training pairs auto<br>
 • Weekly cleanup after 7 days<br>
@@ -1643,9 +1643,9 @@ R"(<b>🎙️ Passive Voice Recording</b><br>
 <b>🐛 Fixed</b><br>
 • Qt 6.9.3 in CI (aqt limitation)<br>
 • Vosk DLL auto-copied in release<br>
-• Most Vexing Parse in QNetworkRequest)")
+• Most Vexing Parse in QNetworkRequest)w")
         : QStringLiteral(
-R"(<b>🎙️ Пассивная запись голоса</b><br>
+R"w(<b>🎙️ Пассивная запись голоса</b><br>
 • Слушает через трей → журнал<br>
 • Brain создаёт пары для обучения<br>
 • Еженедельная очистка через 7 дней<br>
@@ -1669,7 +1669,7 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <b>🐛 Исправлено</b><br>
 • Qt 6.9.3 в CI (ограничение aqt)<br>
 • Vosk DLL автокопируется в release<br>
-• Most Vexing Parse в QNetworkRequest)");
+• Most Vexing Parse в QNetworkRequest)w");
 
         auto* dlg = new QDialog(this);
         dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S. v3.2")
@@ -1800,7 +1800,7 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
         QVector<Section> sections = {
         {
             "🚀", "Быстрый старт", "Quick Start",
-            R"(<h3 style='color:#00d4ff;'>🚀 Быстрый старт</h3>
+            R"w(<h3 style='color:#00d4ff;'>🚀 Быстрый старт</h3>
 <p>Никакой настройки для базовых команд — просто запусти и пиши.</p>
 <h4 style='color:#44aaff;'>Первые шаги:</h4>
 <ol>
@@ -1814,8 +1814,8 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <li><b>Ollama</b> — полностью офлайн (ollama.com)</li>
 <li><b>Claude</b> — лучшее качество (~$1-3/мес)</li>
 </ul>
-<p style='color:#44ff44;'>✅ Приложение работает без интернета для локальных команд!</p>)",
-            R"(<h3 style='color:#00d4ff;'>🚀 Quick Start</h3>
+<p style='color:#44ff44;'>✅ Приложение работает без интернета для локальных команд!</p>)w",
+            R"w(<h3 style='color:#00d4ff;'>🚀 Quick Start</h3>
 <p>No setup needed for basic commands — just launch and type.</p>
 <h4 style='color:#44aaff;'>First steps:</h4>
 <ol>
@@ -1829,11 +1829,11 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <li><b>Ollama</b> — fully offline (ollama.com)</li>
 <li><b>Claude</b> — best quality (~$1-3/mo)</li>
 </ul>
-<p style='color:#44ff44;'>✅ Works without internet for local commands!</p>)"
+<p style='color:#44ff44;'>✅ Works without internet for local commands!</p>)w"
         },
         {
             "💬", "Команды", "Commands",
-            R"(<h3 style='color:#00d4ff;'>💬 Команды без интернета</h3>
+            R"w(<h3 style='color:#00d4ff;'>💬 Команды без интернета</h3>
 <table border='0' cellpadding='4'>
 <tr><td style='color:#44aaff;'><b>Команда</b></td><td style='color:#44aaff;'><b>Что делает</b></td></tr>
 <tr><td>открой Chrome / Steam</td><td>Запускает приложение</td></tr>
@@ -1848,8 +1848,8 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <tr><td>хочу послушать музыку</td><td>Предлагает Spotify/YouTube Music</td></tr>
 <tr><td>что ты умеешь</td><td>Полный список команд</td></tr>
 </table>
-<p style='color:#aaa;font-size:11px;'>Работает на русском и английском без переключения.</p>)",
-            R"(<h3 style='color:#00d4ff;'>💬 Offline Commands</h3>
+<p style='color:#aaa;font-size:11px;'>Работает на русском и английском без переключения.</p>)w",
+            R"w(<h3 style='color:#00d4ff;'>💬 Offline Commands</h3>
 <table border='0' cellpadding='4'>
 <tr><td style='color:#44aaff;'><b>Command</b></td><td style='color:#44aaff;'><b>Action</b></td></tr>
 <tr><td>open Chrome / Steam</td><td>Launches the app</td></tr>
@@ -1864,11 +1864,11 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <tr><td>play some music</td><td>Suggests Spotify/YouTube Music</td></tr>
 <tr><td>what can you do</td><td>Full command list</td></tr>
 </table>
-<p style='color:#aaa;font-size:11px;'>Works in Russian and English without switching.</p>)"
+<p style='color:#aaa;font-size:11px;'>Works in Russian and English without switching.</p>)w"
         },
         {
             "🎤", "Голосовой ввод", "Voice Input",
-            R"(<h3 style='color:#00d4ff;'>🎤 Голосовой ввод (Vosk)</h3>
+            R"w(<h3 style='color:#00d4ff;'>🎤 Голосовой ввод (Vosk)</h3>
 <p>Работает полностью офлайн — никакого облака и API ключей.</p>
 <h4 style='color:#44aaff;'>Доступные языки:</h4>
 <table border='0' cellpadding='3'>
@@ -1898,8 +1898,8 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <ul>
 <li>Убедись что микрофон разрешён в <b>Windows → Настройки → Конфиденциальность</b></li>
 <li>Переоткрой диалог моделей: <b>Настройки → Голосовые модели</b></li>
-</ul>)",
-            R"(<h3 style='color:#00d4ff;'>🎤 Voice Input (Vosk)</h3>
+</ul>)w",
+            R"w(<h3 style='color:#00d4ff;'>🎤 Voice Input (Vosk)</h3>
 <p>Fully offline — no cloud, no API keys needed.</p>
 <h4 style='color:#44aaff;'>Available languages:</h4>
 <table border='0' cellpadding='3'>
@@ -1929,11 +1929,11 @@ R"(<b>🎙️ Пассивная запись голоса</b><br>
 <ul>
 <li>Check microphone permission: <b>Windows Settings → Privacy → Microphone</b></li>
 <li>Reopen model manager: <b>Settings → Voice Models</b></li>
-</ul>)"
+</ul>)w"
         },
         {
             "🧠", "Обучение ИИ", "AI Training",
-            R"(<h3 style='color:#00d4ff;'>🧠 Как JARVIS обучается на тебе</h3>
+            R"w(<h3 style='color:#00d4ff;'>🧠 Как JARVIS обучается на тебе</h3>
 <p>JARVIS накапливает твои диалоги и учится отвечать в твоём стиле.</p>
 
 <h4 style='color:#44aaff;'>📊 Шаг 1 — Сбор данных (автоматически)</h4>
@@ -1962,8 +1962,8 @@ Brain автоматически создаёт пары диалогов.<br>
 
 <p style='color:#44ff44;background:#0d2a0d;padding:8px;border-radius:4px;'>
 💡 Чем больше лайков — тем качественнее будущая модель.<br>
-Цель: собрать 500-1000 👍 ответов, потом дообучить через Unsloth/LLaMA-Factory.</p>)",
-            R"(<h3 style='color:#00d4ff;'>🧠 How JARVIS Learns From You</h3>
+Цель: собрать 500-1000 👍 ответов, потом дообучить через Unsloth/LLaMA-Factory.</p>)w",
+            R"w(<h3 style='color:#00d4ff;'>🧠 How JARVIS Learns From You</h3>
 <p>JARVIS accumulates your dialogs and learns to respond in your style.</p>
 
 <h4 style='color:#44aaff;'>📊 Step 1 — Data Collection (automatic)</h4>
@@ -1992,11 +1992,11 @@ short replies, duplicates, voice recognition errors.</p>
 
 <p style='color:#44ff44;background:#0d2a0d;padding:8px;border-radius:4px;'>
 💡 More likes = better future model.<br>
-Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.</p>)"
+Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.</p>)w"
         },
         {
             "👁", "Зрение и экран", "Screen Vision",
-            R"(<h3 style='color:#00d4ff;'>👁 Зрение и управление экраном</h3>
+            R"w(<h3 style='color:#00d4ff;'>👁 Зрение и управление экраном</h3>
 <p>JARVIS видит твой экран и может кликать по элементам.</p>
 <h4 style='color:#44aaff;'>Команды зрения:</h4>
 <table border='0' cellpadding='4'>
@@ -2011,8 +2011,8 @@ Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.
 <li>Кнопка <b>📎</b> — выбрать файл</li>
 <li>Перетащить файл в окно</li>
 <li>Поддерживаются: .txt .cpp .h .py .pdf .docx изображения</li>
-</ul>)",
-            R"(<h3 style='color:#00d4ff;'>👁 Screen Vision & Control</h3>
+</ul>)w",
+            R"w(<h3 style='color:#00d4ff;'>👁 Screen Vision & Control</h3>
 <p>JARVIS sees your screen and can click elements.</p>
 <h4 style='color:#44aaff;'>Vision commands:</h4>
 <table border='0' cellpadding='4'>
@@ -2027,11 +2027,11 @@ Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.
 <li>Click <b>📎</b> button — choose file</li>
 <li>Drag & drop file into window</li>
 <li>Supported: .txt .cpp .h .py .pdf .docx images</li>
-</ul>)"
+</ul>)w"
         },
         {
             "⚙️", "Настройки", "Settings",
-            R"(<h3 style='color:#00d4ff;'>⚙️ Настройки</h3>
+            R"w(<h3 style='color:#00d4ff;'>⚙️ Настройки</h3>
 <h4 style='color:#44aaff;'>API ключи:</h4>
 <ul>
 <li><b>Claude</b> — console.anthropic.com → API Keys → Create Key</li>
@@ -2054,8 +2054,8 @@ Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.
 <li><b>Enter</b> — отправить сообщение</li>
 <li><b>Ctrl+O</b> — прикрепить файл</li>
 <li><b>Esc</b> — закрыть панель уточнения</li>
-</ul>)",
-            R"(<h3 style='color:#00d4ff;'>⚙️ Settings</h3>
+</ul>)w",
+            R"w(<h3 style='color:#00d4ff;'>⚙️ Settings</h3>
 <h4 style='color:#44aaff;'>API Keys:</h4>
 <ul>
 <li><b>Claude</b> — console.anthropic.com → API Keys → Create Key</li>
@@ -2078,11 +2078,11 @@ code & analysis → Claude API</p>
 <li><b>Enter</b> — send message</li>
 <li><b>Ctrl+O</b> — attach file</li>
 <li><b>Esc</b> — close clarification panel</li>
-</ul>)"
+</ul>)w"
         },
         {
             "🔧", "Устранение проблем", "Troubleshooting",
-            R"(<h3 style='color:#00d4ff;'>🔧 Устранение проблем</h3>
+            R"w(<h3 style='color:#00d4ff;'>🔧 Устранение проблем</h3>
 <h4 style='color:#ffaa44;'>Нет ответа от AI:</h4>
 <ul>
 <li>Проверь ключ API: <b>Настройки → Ключ Claude API...</b></li>
@@ -2104,8 +2104,8 @@ code & analysis → Claude API</p>
 <p>Добавь папку JARVIS в исключения антивируса.<br>
 JARVIS использует SendInput и ShellExecuteW — это нормально.</p>
 <h4 style='color:#ffaa44;'>Нашёл баг:</h4>
-<p>Меню <b>Помощь → 🐛 Сообщить о баге...</b> — описание уйдёт разработчику.</p>)",
-            R"(<h3 style='color:#00d4ff;'>🔧 Troubleshooting</h3>
+<p>Меню <b>Помощь → 🐛 Сообщить о баге...</b> — описание уйдёт разработчику.</p>)w",
+            R"w(<h3 style='color:#00d4ff;'>🔧 Troubleshooting</h3>
 <h4 style='color:#ffaa44;'>No AI response:</h4>
 <ul>
 <li>Check API key: <b>Settings → Claude API key...</b></li>
@@ -2127,7 +2127,7 @@ JARVIS использует SendInput и ShellExecuteW — это нормаль
 <p>Add JARVIS folder to antivirus exclusions.<br>
 JARVIS uses SendInput and ShellExecuteW — this is normal.</p>
 <h4 style='color:#ffaa44;'>Found a bug:</h4>
-<p>Menu <b>Help → 🐛 Report a Bug...</b> — description goes to developer.</p>)"
+<p>Menu <b>Help → 🐛 Report a Bug...</b> — description goes to developer.</p>)w"
         },
         };
 

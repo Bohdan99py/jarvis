@@ -325,9 +325,18 @@ PassiveListener::PassiveListener(QObject* parent) : QObject(parent)
 PassiveListener::~PassiveListener()
 {
     stopListening();
+
+    m_transcriber->disconnect();
     m_thread->quit();
-    m_thread->wait(3000);
+    if (!m_thread->wait(5000)) {
+        // Поток завис (например, внутри vosk_recognizer_accept_waveform_s) —
+        // принудительно прерываем чтобы не получить краш при выходе.
+        m_thread->terminate();
+        m_thread->wait(1000);
+    }
+    // Безопасно удалять только после полной остановки потока
     delete m_transcriber;
+    m_transcriber = nullptr;
 }
 
 void PassiveListener::initialize(const PassiveListenerConfig& config)

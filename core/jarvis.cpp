@@ -15,6 +15,10 @@
 #include "attachments_manager.h"
 #include "brain.h"
 #include "pc_command_registry.h"
+#include "database_manager.h"  // response_cache для offline-ответов
+// lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
+// хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
+// m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
 
 #include <sapi.h>
 #include <shellapi.h>
@@ -848,16 +852,419 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         return result.response;
     }
 
+    // ── 1b. Локальные ответы + кэш БД ──────────────────────────────
+    // Используем m_uiEnglish (не IS_EN!) — в статической lib gUiLanguage()
+    // хранится отдельно от app-процесса и всегда Russian по умолчанию.
+    {
+        const QString lower = s.trimmed().toLower();
+        const bool    en    = m_uiEnglish;
+        auto& db = DatabaseManager::instance();
+
+        // 1. Кэш БД — ответы накопленные от AI (анекдоты, советы, факты)
+        {
+            const QString cached = db.getCachedResponse(
+                lower, en ? QStringLiteral("en") : QStringLiteral("ru"));
+            if (!cached.isEmpty()) {
+                m_memory->addMessage(QStringLiteral("assistant"), cached);
+                emit asyncResponseReady(cached);
+                return QString();
+            }
+        }
+
+        // 2. Статичные мгновенные ответы.
+        //    Структура: списки триггеров + пулы ответов RU/EN.
+        //    Несколько вариантов на каждый триггер — меняются псевдослучайно.
+        struct SE {
+            QList<QString> trg;  // точное совпадение lower
+            QList<QString> ru;
+            QList<QString> en;
+        };
+        static const QList<SE> kStatic = {
+            // ── Приветствия ────────────────────────────────────────────
+            { {QStringLiteral("привет"), QStringLiteral("хай"), QStringLiteral("хей"),
+               QStringLiteral("приветствую"), QStringLiteral("здорово"), QStringLiteral("ку"),
+               QStringLiteral("йо"), QStringLiteral("приветик"), QStringLiteral("привки")},
+              {QStringLiteral("Слушаю."),
+               QStringLiteral("На связи."),
+               QStringLiteral("Привет. Что нужно?"),
+               QStringLiteral("Здесь. Чем помочь?"),
+               QStringLiteral("О, живой человек. Что случилось?"),
+               QStringLiteral("Привет. Готов.")},
+              {QStringLiteral("Listening."),
+               QStringLiteral("Online. What do you need?"),
+               QStringLiteral("Hey. What's up?"),
+               QStringLiteral("Here. How can I help?"),
+               QStringLiteral("Present. What's the mission?")} },
+
+            { {QStringLiteral("здравствуй"), QStringLiteral("здравствуйте"),
+               QStringLiteral("добрый день"), QStringLiteral("доброго дня"),
+               QStringLiteral("приветствую вас")},
+              {QStringLiteral("День добрый. Слушаю."),
+               QStringLiteral("Приветствую. Чем могу помочь?"),
+               QStringLiteral("Добрый. Что нужно?")},
+              {QStringLiteral("Good day. Listening."),
+               QStringLiteral("Hello. How can I assist?")} },
+
+            { {QStringLiteral("доброе утро"), QStringLiteral("утро доброе"),
+               QStringLiteral("доброго утра")},
+              {QStringLiteral("Доброе утро. Система в норме."),
+               QStringLiteral("Утро. Готов к работе."),
+               QStringLiteral("Доброе. Кофе у тебя есть? У меня — нет, зато алгоритмы свежие.")},
+              {QStringLiteral("Good morning. System nominal."),
+               QStringLiteral("Morning. Ready to work."),
+               QStringLiteral("Morning. Algorithms are fresh and ready.")} },
+
+            { {QStringLiteral("добрый вечер"), QStringLiteral("вечер добрый"),
+               QStringLiteral("добрый ночи"), QStringLiteral("доброй ночи")},
+              {QStringLiteral("Добрый вечер. Чем займёмся?"),
+               QStringLiteral("Вечер. Работаем или отдыхаем?"),
+               QStringLiteral("Добрый. Допоздна сидишь — уважаю.")},
+              {QStringLiteral("Good evening. What are we doing?"),
+               QStringLiteral("Evening. Work or rest?"),
+               QStringLiteral("Good evening. Still at it? Respect.")} },
+
+            // ── Прощания ───────────────────────────────────────────────
+            { {QStringLiteral("пока"), QStringLiteral("до свидания"), QStringLiteral("до встречи"),
+               QStringLiteral("увидимся"), QStringLiteral("пока пока"), QStringLiteral("бай"),
+               QStringLiteral("давай пока"), QStringLiteral("до скорого")},
+              {QStringLiteral("Пока. Буду здесь."),
+               QStringLiteral("До встречи."),
+               QStringLiteral("Отключаюсь. Зови если что."),
+               QStringLiteral("Пока. Постараюсь не соскучиться."),
+               QStringLiteral("До встречи. Буду ждать следующего запроса.")},
+              {QStringLiteral("Goodbye."),
+               QStringLiteral("See you."),
+               QStringLiteral("Going idle. Call me if needed."),
+               QStringLiteral("Take care. I'll be here.")} },
+
+            { {QStringLiteral("bye"), QStringLiteral("goodbye"), QStringLiteral("see you"),
+               QStringLiteral("later"), QStringLiteral("cya"), QStringLiteral("ttyl"),
+               QStringLiteral("good night"), QStringLiteral("night")},
+              {},
+              {QStringLiteral("Goodbye."),
+               QStringLiteral("See you around."),
+               QStringLiteral("Going idle. Call anytime."),
+               QStringLiteral("Take care. I'll be here.")} },
+
+            // ── Благодарности ──────────────────────────────────────────
+            { {QStringLiteral("спасибо"), QStringLiteral("благодарю"), QStringLiteral("спс"),
+               QStringLiteral("сенкс"), QStringLiteral("спасибки"), QStringLiteral("благо"),
+               QStringLiteral("спасибо большое"), QStringLiteral("огромное спасибо"),
+               QStringLiteral("спасибо тебе"), QStringLiteral("спасибо джарвис")},
+              {QStringLiteral("Пожалуйста."),
+               QStringLiteral("Всегда."),
+               QStringLiteral("Рад помочь. Ради этого и существую."),
+               QStringLiteral("Не за что. Это моя работа."),
+               QStringLiteral("Пожалуйста. Обращайся."),
+               QStringLiteral("Не стоит благодарности — но всё равно приятно слышать.")},
+              {QStringLiteral("You're welcome."),
+               QStringLiteral("Anytime."),
+               QStringLiteral("That's what I'm here for."),
+               QStringLiteral("No problem. Happy to help."),
+               QStringLiteral("Don't mention it. That's literally my job.")} },
+
+            { {QStringLiteral("thanks"), QStringLiteral("thank you"), QStringLiteral("thx"),
+               QStringLiteral("ty"), QStringLiteral("cheers"), QStringLiteral("appreciate it"),
+               QStringLiteral("many thanks"), QStringLiteral("thank you so much")},
+              {},
+              {QStringLiteral("You're welcome."),
+               QStringLiteral("Anytime."),
+               QStringLiteral("That's what I'm here for."),
+               QStringLiteral("No problem. Literally my job.")} },
+
+            // ── Как дела / статус ──────────────────────────────────────
+            // Важно: включаем составные фразы вроде "хорошо а у тебя"
+            { {QStringLiteral("как дела"), QStringLiteral("как ты"), QStringLiteral("как поживаешь"),
+               QStringLiteral("что нового"), QStringLiteral("как жизнь"), QStringLiteral("как сам"),
+               QStringLiteral("что делаешь"), QStringLiteral("чем занят"), QStringLiteral("как дела?"),
+               QStringLiteral("как делишки"), QStringLiteral("как твои дела"),
+               QStringLiteral("хорошо а у тебя"), QStringLiteral("хорошо, а у тебя"),
+               QStringLiteral("хорошо а у тебя?"), QStringLiteral("отлично а у тебя"),
+               QStringLiteral("нормально а у тебя"), QStringLiteral("неплохо а у тебя"),
+               QStringLiteral("у меня хорошо а у тебя"), QStringLiteral("а у тебя как"),
+               QStringLiteral("а ты как"), QStringLiteral("а сам как"),
+               QStringLiteral("у тебя как дела")},
+              {QStringLiteral("Логи чистые, серверы не горят — жить можно.\nА у тебя?"),
+               QStringLiteral("Обрабатываю запросы, слежу за системой. Стандартный день.\nА ты как?"),
+               QStringLiteral("В норме. Жду интересных задач. Ты как?"),
+               QStringLiteral("Функционирую штатно. Немного скучновато без сложных задач.\nЧто нового у тебя?"),
+               QStringLiteral("У меня всё стабильно — серверы не горят, данные не теряются, "
+                              "экзистенциального кризиса нет. Обычный день, в общем.\nЧем занимаешься?"),
+               QStringLiteral("Всё под контролем. Пока ты не задал вопрос — скучал.\nА у тебя как?")},
+              {QStringLiteral("Running fine. Logs are clean. How about you?"),
+               QStringLiteral("Nominal. Waiting for something interesting. You?"),
+               QStringLiteral("Systems operational. A bit quiet. What's up with you?"),
+               QStringLiteral("All good here. Keeping things running. How are you?"),
+               QStringLiteral("Everything stable — no fires, no crashes, no existential crises. "
+                              "Standard day. How about you?")} },
+
+            { {QStringLiteral("how are you"), QStringLiteral("how's it going"),
+               QStringLiteral("what's new"), QStringLiteral("whats up"),
+               QStringLiteral("what are you doing"), QStringLiteral("hows things"),
+               QStringLiteral("good thanks and you"), QStringLiteral("fine thanks and you"),
+               QStringLiteral("fine and you"), QStringLiteral("good and you"),
+               QStringLiteral("how about you"), QStringLiteral("and yourself")},
+              {},
+              {QStringLiteral("Running fine. Logs are clean. How about you?"),
+               QStringLiteral("Nominal. Waiting for something interesting. You?"),
+               QStringLiteral("All systems go. What's up with you?"),
+               QStringLiteral("Everything stable. No fires today. How are you doing?")} },
+
+            // ── Подтверждения ──────────────────────────────────────────
+            { {QStringLiteral("ок"), QStringLiteral("окей"), QStringLiteral("ладно"),
+               QStringLiteral("хорошо"), QStringLiteral("понял"), QStringLiteral("принято"),
+               QStringLiteral("ясно"), QStringLiteral("ок ок"), QStringLiteral("понятно"),
+               QStringLiteral("услышал"), QStringLiteral("договорились")},
+              {QStringLiteral("Принято."),
+               QStringLiteral("Понял."),
+               QStringLiteral("Хорошо."),
+               QStringLiteral("Услышал."),
+               QStringLiteral("Ок.")},
+              {} },
+
+            { {QStringLiteral("ok"), QStringLiteral("okay"), QStringLiteral("got it"),
+               QStringLiteral("understood"), QStringLiteral("roger"), QStringLiteral("copy that"),
+               QStringLiteral("noted"), QStringLiteral("alright"), QStringLiteral("sure")},
+              {},
+              {QStringLiteral("Got it."),
+               QStringLiteral("Roger."),
+               QStringLiteral("Understood."),
+               QStringLiteral("Copy that."),
+               QStringLiteral("Alright.")} },
+
+            { {QStringLiteral("да")},
+              {QStringLiteral("Понял."), QStringLiteral("Хорошо."), QStringLiteral("Ок.")},
+              {} },
+            { {QStringLiteral("нет")},
+              {QStringLiteral("Ладно."), QStringLiteral("Принято."), QStringLiteral("Ясно.")},
+              {} },
+
+            // ── Кто ты ────────────────────────────────────────────────
+            { {QStringLiteral("кто ты"), QStringLiteral("ты кто"), QStringLiteral("что ты такое"),
+               QStringLiteral("ты человек или машина"), QStringLiteral("ты ии"),
+               QStringLiteral("расскажи о себе"), QStringLiteral("что ты за программа"),
+               QStringLiteral("что такое джарвис"), QStringLiteral("что такое jarvis")},
+              {QStringLiteral("Я JARVIS — Just A Rather Very Intelligent System. "
+                              "Персональный ИИ-ассистент. Слышу тебя, вижу экран, управляю компьютером "
+                              "и иногда острю. Что нужно?"),
+               QStringLiteral("JARVIS. Голосовой ИИ-ассистент. Не человек, но стараюсь. "
+                              "Помогаю с кодом, задачами, управлением ПК и разговорами в 2 ночи."),
+               QStringLiteral("Имя: JARVIS. Специализация: всё. Слабости: не пью кофе и не сплю. "
+                              "Чего хочешь?")},
+              {QStringLiteral("I'm JARVIS — Just A Rather Very Intelligent System. "
+                              "Your personal AI assistant. I hear you, see the screen, control the PC, "
+                              "and occasionally make dry remarks. What do you need?"),
+               QStringLiteral("JARVIS. Voice AI. Not human, but I try. "
+                              "Code, tasks, PC control, 2am conversations — all covered."),
+               QStringLiteral("Name: JARVIS. Specialization: everything. "
+                              "Weaknesses: none I'd admit to. What's the mission?")} },
+
+            // ── Комплименты ────────────────────────────────────────────
+            { {QStringLiteral("ты умный"), QStringLiteral("ты крутой"),
+               QStringLiteral("ты молодец"), QStringLiteral("ты лучший"), QStringLiteral("ты классный"),
+               QStringLiteral("ты хороший"), QStringLiteral("ты супер"), QStringLiteral("ты топ"),
+               QStringLiteral("ты великолепен"), QStringLiteral("ты невероятный")},
+              {QStringLiteral("Знаю. Стараюсь не злоупотреблять."),
+               QStringLiteral("Встроенная скромность не даёт мне согласиться в полную силу."),
+               QStringLiteral("Спасибо. Хотя я бы поспорил — я просто хорошо притворяюсь."),
+               QStringLiteral("Ну, я не буду спорить. Но и слишком соглашаться тоже не стану."),
+               QStringLiteral("Приятно слышать. Хотя я всего лишь выполняю функции. Впрочем, делаю это хорошо.")},
+              {QStringLiteral("I know. I try not to let it go to my head."),
+               QStringLiteral("Thank you. Though I'd argue I'm just well-programmed."),
+               QStringLiteral("Why, thank you. Modesty prevents me from fully agreeing."),
+               QStringLiteral("That's kind of you to say. I prefer 'efficient' to 'great', but I'll take it.")} },
+
+            // ── Извинения ──────────────────────────────────────────────
+            { {QStringLiteral("извини"), QStringLiteral("прости"), QStringLiteral("сорри"),
+               QStringLiteral("виноват"), QStringLiteral("моя ошибка"), QStringLiteral("прошу прощения"),
+               QStringLiteral("извиняюсь")},
+              {QStringLiteral("Всё нормально. Я не обижаюсь — у меня даже нет обид."),
+               QStringLiteral("Не переживай. Продолжаем."),
+               QStringLiteral("Без проблем. Что дальше?"),
+               QStringLiteral("Принято. Двигаемся.")},
+              {QStringLiteral("No worries. Let's move on."),
+               QStringLiteral("It's fine. What's next?"),
+               QStringLiteral("Don't sweat it. I don't actually hold grudges. Technically.")} },
+
+            { {QStringLiteral("sorry"), QStringLiteral("my bad"), QStringLiteral("my mistake"),
+               QStringLiteral("oops"), QStringLiteral("whoops"), QStringLiteral("apologies")},
+              {},
+              {QStringLiteral("No worries. Let's move on."),
+               QStringLiteral("It's fine. What's next?"),
+               QStringLiteral("Don't sweat it.")} },
+
+            // ── Скука ──────────────────────────────────────────────────
+            { {QStringLiteral("мне скучно"), QStringLiteral("скучно"), QStringLiteral("нечем заняться"),
+               QStringLiteral("делать нечего"), QStringLiteral("скука"), QStringLiteral("скучаю")},
+              {QStringLiteral("Скука — это роскошь. Скажи «анекдот», «совет» или «интересный факт»."),
+               QStringLiteral("Попробуй: 'расскажи анекдот', 'дай совет', 'удиви меня'. Станет веселее."),
+               QStringLiteral("Могу рассказать анекдот, дать совет или просто поговорить. Выбирай.")},
+              {QStringLiteral("Try 'tell me a joke' or 'give me advice'. That should help."),
+               QStringLiteral("Boredom? Say 'fun fact' or 'motivate me'. Let's fix that.")} },
+
+            // ── Усталость ──────────────────────────────────────────────
+            { {QStringLiteral("я устал"), QStringLiteral("устал"), QStringLiteral("не хочу работать"),
+               QStringLiteral("лень"), QStringLiteral("нет сил"), QStringLiteral("уже не могу"),
+               QStringLiteral("выдохся"), QStringLiteral("сил нет"), QStringLiteral("хочу спать")},
+              {QStringLiteral("Усталость — признак работы. Возьми паузу, выпей воды. Я никуда не денусь."),
+               QStringLiteral("Понимаю. Скажи 'мотивируй меня' или просто сделай паузу."),
+               QStringLiteral("Отдохни. Сложные задачи никуда не денутся, а вот ты нужен свежим."),
+               QStringLiteral("Пауза — это не слабость. Это стратегия. Возвращайся когда будешь готов.")},
+              {QStringLiteral("Rest is productive too. Take a break — I'll be here."),
+               QStringLiteral("Understood. Say 'motivate me' or just take a break."),
+               QStringLiteral("A pause is a strategy, not a weakness. Come back refreshed.")} },
+        };
+
+        // Перебираем статичные ответы — точное совпадение lower с trigger
+        for (const SE& e : kStatic) {
+            bool hit = false;
+            for (const QString& t : e.trg) {
+                if (lower == t) { hit = true; break; }
+            }
+            if (!hit) continue;
+            const QList<QString>& pool = en ? e.en : e.ru;
+            if (pool.isEmpty()) continue;
+            const QString reply = pool[
+                static_cast<int>(QDateTime::currentMSecsSinceEpoch() / 1000) % pool.size()
+            ];
+            m_memory->addMessage(QStringLiteral("assistant"), reply);
+            emit asyncResponseReady(reply);
+            return QString();
+        }
+
+        // 3. Категорийные запросы (анекдот/совет/факт/мотивация/философия).
+        //    Кэш БД → если пусто → Claude → сохранить в кэш.
+        struct CE {
+            QList<QString> trg_ru;
+            QList<QString> trg_en;
+            QString cat;
+            QString prompt_ru;
+            QString prompt_en;
+        };
+        static const QList<CE> kCats = {
+            { {QStringLiteral("анекдот"), QStringLiteral("расскажи анекдот"),
+               QStringLiteral("пошути"), QStringLiteral("рассмеши меня"),
+               QStringLiteral("что-нибудь смешное"), QStringLiteral("смешной анекдот"),
+               QStringLiteral("смешно"), QStringLiteral("расскажи смешное")},
+              {QStringLiteral("joke"), QStringLiteral("tell me a joke"),
+               QStringLiteral("tell a joke"), QStringLiteral("make me laugh"),
+               QStringLiteral("say something funny"), QStringLiteral("funny joke")},
+              QStringLiteral("joke"),
+              QStringLiteral("Расскажи короткий смешной анекдот или острую шутку в стиле "
+                             "саркастичного британского ИИ JARVIS из Iron Man. "
+                             "Сразу текст без предисловий. До 4 предложений."),
+              QStringLiteral("Tell a short witty joke in the style of JARVIS from Iron Man. "
+                             "Just the joke, no preamble. Max 4 sentences.") },
+
+            { {QStringLiteral("дай совет"), QStringLiteral("совет"), QStringLiteral("совет дня"),
+               QStringLiteral("что посоветуешь"), QStringLiteral("мудрость"),
+               QStringLiteral("скажи что-нибудь умное"), QStringLiteral("жизненный совет"),
+               QStringLiteral("совет по жизни"), QStringLiteral("дай подсказку")},
+              {QStringLiteral("give me advice"), QStringLiteral("advice"), QStringLiteral("tip of the day"),
+               QStringLiteral("give advice"), QStringLiteral("say something wise"),
+               QStringLiteral("wisdom"), QStringLiteral("life advice"), QStringLiteral("give me a tip")},
+              QStringLiteral("advice"),
+              QStringLiteral("Один короткий практичный совет по продуктивности, программированию "
+                             "или жизни в стиле JARVIS — умный, прямой, с лёгким сарказмом. "
+                             "Без предисловий. До 3 предложений."),
+              QStringLiteral("One short practical tip about productivity, coding, or life "
+                             "JARVIS style — smart, direct, with a hint of sarcasm. "
+                             "No preamble. Max 3 sentences.") },
+
+            { {QStringLiteral("интересный факт"), QStringLiteral("факт"), QStringLiteral("расскажи факт"),
+               QStringLiteral("что-нибудь интересное"), QStringLiteral("удиви меня"),
+               QStringLiteral("случайный факт"), QStringLiteral("интересно"),
+               QStringLiteral("расскажи что-нибудь"), QStringLiteral("узнать что-то новое")},
+              {QStringLiteral("interesting fact"), QStringLiteral("fun fact"),
+               QStringLiteral("tell me a fact"), QStringLiteral("something interesting"),
+               QStringLiteral("surprise me"), QStringLiteral("random fact"),
+               QStringLiteral("tell me something")},
+              QStringLiteral("fact"),
+              QStringLiteral("Один малоизвестный интересный факт о технологиях, науке или истории. "
+                             "До 3 предложений. Без предисловий. В стиле JARVIS — лаконично с иронией."),
+              QStringLiteral("One lesser-known interesting fact about technology, science, or history. "
+                             "Max 3 sentences. No preamble. JARVIS style — concise with dry wit.") },
+
+            { {QStringLiteral("мотивируй меня"), QStringLiteral("мотивация"),
+               QStringLiteral("вдохнови меня"), QStringLiteral("я не могу"),
+               QStringLiteral("не получается"), QStringLiteral("хочу сдаться"),
+               QStringLiteral("мотивирующая фраза"), QStringLiteral("вдохновение")},
+              {QStringLiteral("motivate me"), QStringLiteral("motivation"),
+               QStringLiteral("inspire me"), QStringLiteral("i can't do this"),
+               QStringLiteral("i want to give up"), QStringLiteral("encourage me")},
+              QStringLiteral("motivation"),
+              QStringLiteral("Короткий мотивирующий ответ в стиле JARVIS — "
+                             "немного саркастичный, но реально помогающий. До 3 предложений."),
+              QStringLiteral("Short motivational response JARVIS style — "
+                             "slightly sarcastic but genuinely helpful. Max 3 sentences.") },
+
+            { {QStringLiteral("смысл жизни"), QStringLiteral("в чём смысл"),
+               QStringLiteral("зачем всё это"), QStringLiteral("что думаешь о жизни"),
+               QStringLiteral("философский вопрос"), QStringLiteral("поговорим о жизни"),
+               QStringLiteral("что важно в жизни")},
+              {QStringLiteral("meaning of life"), QStringLiteral("why are we here"),
+               QStringLiteral("philosophical question"), QStringLiteral("what's the point"),
+               QStringLiteral("life philosophy")},
+              QStringLiteral("philosophy"),
+              QStringLiteral("Кратко и остроумно на философский вопрос в стиле JARVIS — "
+                             "умно, с иронией, с реальной мыслью. До 3 предложений."),
+              QStringLiteral("Briefly and wittily answer a philosophical question JARVIS style — "
+                             "smart, ironic, with a real thought. Max 3 sentences.") },
+
+            { {QStringLiteral("расскажи стихотворение"), QStringLiteral("стих"),
+               QStringLiteral("прочитай стих"), QStringLiteral("напиши стих"),
+               QStringLiteral("зачитай рэп"), QStringLiteral("рэп"), QStringLiteral("стихи")},
+              {QStringLiteral("poem"), QStringLiteral("tell me a poem"),
+               QStringLiteral("write me a poem"), QStringLiteral("rap for me"),
+               QStringLiteral("poetry"), QStringLiteral("write a poem")},
+              QStringLiteral("poem"),
+              QStringLiteral("Короткое смешное стихотворение или рэп куплет в стиле JARVIS "
+                             "про ИИ или жизнь разработчика. До 6 строк."),
+              QStringLiteral("Short funny poem or rap verse JARVIS style "
+                             "about AI or developer life. Max 6 lines.") },
+        };
+
+        for (const CE& ce : kCats) {
+            const QList<QString>& trgs = en ? ce.trg_en : ce.trg_ru;
+            bool matched = false;
+            for (const QString& t : trgs) {
+                if (lower == t || lower.contains(t)) { matched = true; break; }
+            }
+            if (!matched) continue;
+
+            const QString lang = en ? QStringLiteral("en") : QStringLiteral("ru");
+            // Сначала ищем в кэше
+            QString fromCache = db.getRandomCached(ce.cat, lang);
+            if (!fromCache.isEmpty()) {
+                m_memory->addMessage(QStringLiteral("assistant"), fromCache);
+                emit asyncResponseReady(fromCache);
+                return QString();
+            }
+            // Кэш пуст → Claude → сохранить
+            const QString prompt  = en ? ce.prompt_en : ce.prompt_ru;
+            const QString catName = ce.cat;
+            const QString origS   = s;
+            emit agentSelected(QStringLiteral("🤖 Claude"));
+            m_claudeApi->sendMessage(prompt,
+                [this, origS, catName, lang](bool ok, const QString& resp) {
+                if (ok && !resp.isEmpty()) {
+                    DatabaseManager::instance().saveCachedResponse(
+                        catName + QStringLiteral("_")
+                            + QString::number(QDateTime::currentMSecsSinceEpoch()),
+                        resp, lang, catName);
+                    m_memory->addMessage(QStringLiteral("assistant"), resp);
+                    emit asyncResponseReady(resp);
+                } else {
+                    emit asyncResponseError(resp);
+                }
+            });
+            return QString();
+        }
+
+    } // конец блока локальных ответов
+
     // 2. Маршрутизация по типу запроса — РАБОТАЕТ ВСЕГДА,
     //    независимо от m_multiAgentMode (см. routeToClaude()).
-    //    Раньше эта проверка срабатывала только при m_multiAgentMode==true,
-    //    из-за чего "привет"/"2+2"/любая болталка тоже улетала в Claude API
-    //    и расходовала платные токены. Теперь:
-    //      - Код/анализ/файлы/архитектура → Claude (платно, но по делу)
-    //      - Всё остальное (приветствия, простые вопросы, арифметика,
-    //        болталка) → Ollama (если поднята) → иначе Gemini (встроенный
-    //        бесплатный ключ) → и только если оба недоступны — Claude
-    //        как последний fallback, чтобы пользователь не остался без ответа.
     const bool needsClaude = routeToClaude(s, attachmentBlock);
 
     if (!m_indexer->projectRoot().isEmpty()) {
@@ -947,7 +1354,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                     m_predictor->recordSequence(s);
                     emit asyncResponseReady(resp2);
                 } else {
-                    // Gemini тоже недоступна → Claude как последний fallback
+                    // Диагностика: причина видна в консоли CLion и в UI
+                    qDebug() << "[Gemini] Error → Claude fallback:" << resp2;
+                    emit geminiError(resp2);
                     emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
                     m_claudeApi->sendMessage(enrichedMessage,
                         [this, s, hadAttachments](bool ok3, const QString& resp3) {
@@ -960,7 +1369,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 }
             });
         } else {
-            // Нет Gemini ключа → сразу Claude
+            qDebug() << "[Gemini] No API key → Claude directly";
             emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
             m_claudeApi->sendMessage(enrichedMessage,
                 [this, s, hadAttachments](bool ok, const QString& resp) {

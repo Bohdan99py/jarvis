@@ -182,14 +182,26 @@ public:
                                                      const QString& aiResp, int rating);
 
     // ── voice_journal (пассивная запись голоса) ────────────
-    // Используем универсальные параметры чтобы не тащить passive_listener.h
     qint64 addVoiceJournalEntry(const QString& transcript, const QString& language,
                                 float confidence, const QDateTime& capturedAt);
     bool   markJournalEntryProcessed(qint64 id);
-    // Возвращает необработанные записи как QList<QMap>
     QList<QMap<QString,QVariant>> getUnprocessedJournalEntries(qint64 userId, int limit = 200);
     int    voiceJournalCount(qint64 userId, bool processedOnly = false);
     int    cleanupOldJournalEntries(qint64 userId, int olderThanDays = 7);
+
+    // ── response_cache (кэш AI-ответов для offline) ────────
+    // JARVIS один раз спрашивает Claude → кэширует → дальше offline.
+    // Накапливается библиотека анекдотов, советов, фактов без доп. затрат.
+    QString getCachedResponse(const QString& trigger,
+                              const QString& language = QStringLiteral("ru"),
+                              const QString& category = QString());
+    bool    saveCachedResponse(const QString& trigger,
+                               const QString& response,
+                               const QString& language = QStringLiteral("ru"),
+                               const QString& category = QStringLiteral("chitchat"));
+    QString getRandomCached(const QString& category,
+                            const QString& language = QStringLiteral("ru"));
+    int     responseCacheCount();
 
 signals:
     void databaseError(const QString& error);
@@ -211,5 +223,5 @@ private:
     QString        m_lastError;
     mutable QMutex m_mutex;
 
-    static constexpr int k_schemaVersion = 3;
+    static constexpr int k_schemaVersion = 5;
 };

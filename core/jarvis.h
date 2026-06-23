@@ -82,6 +82,13 @@ public:
     void setMultiAgentMode(bool enabled);
     bool multiAgentMode() const { return m_multiAgentMode; }
 
+    // Синхронизация языка UI — нужна потому что gUiLanguage() (lang.h)
+    // это static inline и в MSVC JarvisCore.lib имеет свой экземпляр,
+    // независимый от app/mainwindow.cpp. Без явной передачи IS_EN в core
+    // всегда возвращает Russian (дефолт), даже если в UI выбран English.
+    void setUiLanguage(bool english) { m_uiEnglish = english; }
+    bool uiEnglish() const           { return m_uiEnglish; }
+
     // Синхронизировать данные индексатора с SessionMemory (system prompt)
     void syncProjectInfoToMemory();
 
@@ -102,6 +109,7 @@ signals:
     void speakingChanged(bool speaking);
     void asyncResponseReady(const QString& response);
     void asyncResponseError(const QString& error);
+    void geminiError(const QString& error);  // причина fallback на Claude — видна в UI
     void suggestionAvailable(const QString& description, const QString& action);
     void attachmentsConsumed();
     void agentSelected(const QString& agentName);
@@ -181,6 +189,7 @@ private:
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 
     bool              m_multiAgentMode    = false;
+    bool              m_uiEnglish         = false;  // синхронизируется из MainWindow
     bool              m_ideOpenedThisSession = false; // CLion открыт авто-режимом в этой сессии
     std::atomic<bool> m_speaking{false};
     QMutex            m_ttsMutex;

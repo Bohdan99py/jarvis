@@ -884,14 +884,34 @@ VoiceInput::VoiceInput(QObject* parent) : QObject(parent)
 VoiceInput::~VoiceInput()
 {
     stopListening();
+
+    // m_worker живёт в m_thread — нельзя удалять его из главного потока.
+    // deleteLater() поставит удаление в очередь самого объекта (его потока),
+    // но поскольку мы сейчас его останавливаем, вызовем напрямую после wait().
+    m_worker->disconnect();
     m_thread->quit();
-    m_thread->wait(3000);
-    delete m_worker;
-    if (m_setupThread) {
-        m_setupThread->quit();
-        m_setupThread->wait(3000);
-        delete m_downloader;
+    if (!m_thread->wait(5000)) {
+        // Поток завис — принудительно прерываем, чтобы не получить
+        // "Destroyed while thread is still running" при выходе
+        m_thread->terminate();
+        m_thread->wait(1000);
     }
+    // Только после полной остановки потока безопасно удалять worker
+    delete m_worker;
+    m_worker = nullptr;
+
+    if (m_setupThread && m_setupThread->isRunning()) {
+        m_setupThread->quit();
+        if (!m_setupThread->wait(3000)) {
+            m_setupThread->terminate();
+            m_setupThread->wait(1000);
+        }
+    }
+    // m_downloader и m_setupThread удалятся как дети QObject (parent = this),
+    // но если moveToThread был вызван — parent ownership потерян,
+    // поэтому удаляем явно.
+    delete m_downloader;
+    m_downloader = nullptr;
 }
 
 void VoiceInput::initialize(const WhisperConfig& config)
@@ -921,6 +941,12 @@ void VoiceInput::startSetup(const QStringList& modelIds)
 {
     if (m_setupThread && m_setupThread->isRunning()) return;
 
+    // Удаляем предыдущий setupThread если он завершился но не был почищен
+    if (m_setupThread && !m_setupThread->isRunning()) {
+        delete m_downloader;  m_downloader  = nullptr;
+        delete m_setupThread; m_setupThread = nullptr;
+    }
+
     QString installDir = voskInstallDir();
 
     m_setupThread = new QThread(this);
@@ -929,13 +955,22 @@ void VoiceInput::startSetup(const QStringList& modelIds)
 
     connectDownloader(m_downloader);
 
+    // QueuedConnection критически важен: setupFinished эмитится из потока
+    // m_setupThread, а onSetupFinished должен выполняться в главном потоке.
+    // Без этого onSetupFinished вызывается в потоке и делает
+    // m_setupThread->wait() — deadlock (поток ждёт сам себя).
     connect(m_downloader, &VoskDownloader::setupFinished,
-            this, &VoiceInput::onSetupFinished);
+            this, &VoiceInput::onSetupFinished,
+            Qt::QueuedConnection);
 
     connect(m_setupThread, &QThread::started,
             m_downloader,  [this, installDir, modelIds]() {
         m_downloader->setupVosk(installDir, modelIds);
     }, Qt::QueuedConnection);
+
+    // Автоочистка потока после завершения
+    connect(m_setupThread, &QThread::finished,
+            m_setupThread, &QThread::deleteLater);
 
     m_setupThread->start(QThread::LowPriority);
 }
@@ -1013,9 +1048,18 @@ void VoiceInput::connectDownloader(VoskDownloader* dl)
 
 void VoiceInput::onSetupFinished(bool success, const QString& error)
 {
+    // Этот слот теперь выполняется в главном потоке (QueuedConnection).
+    // m_setupThread завершится сам через finished→deleteLater.
+    // wait() здесь больше не нужен и был источником deadlock:
+    // поток эмитил сигнал → слот вызывался в том же потоке → wait() блокировал его самого.
     if (m_setupThread) {
         m_setupThread->quit();
-        m_setupThread->wait(3000);
+        // Не делаем wait() — поток завершится асинхронно через deleteLater
+        m_setupThread = nullptr;  // обнуляем указатель, deleteLater уберёт объект
+    }
+    if (m_downloader) {
+        m_downloader->deleteLater();
+        m_downloader = nullptr;
     }
 
     markFirstRunComplete();

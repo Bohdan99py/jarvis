@@ -35,17 +35,36 @@ void ActionPredictor::initDefaultRules()
     m_rules = {
         // После запуска IDE → вероятно, нужен поиск или файл
         {QStringLiteral("rider"),
-         QStringLiteral("найди документация unreal engine"),
-         QStringLiteral("Открыть документацию UE?"), 0},
+         QStringLiteral("open_app:Rider"),
+         QStringLiteral("Открыть Rider?"), 0},
 
-        // После блокнота → возможно, нужно сохранить
+        {QStringLiteral("clion"),
+         QStringLiteral("open_app:CLion"),
+         QStringLiteral("Открыть CLion?"), 0},
+
+        // После Steam → вероятно, хочет поиграть
+        {QStringLiteral("steam"),
+         QStringLiteral("open_app:Steam"),
+         QStringLiteral("Открыть Steam?"), 0},
+
+        // После Discord → вероятно, хочет общаться
+        {QStringLiteral("discord"),
+         QStringLiteral("open_app:Discord"),
+         QStringLiteral("Открыть Discord?"), 0},
+
+        // После Chrome/браузера → вероятно, нужен YouTube
+        {QStringLiteral("chrome"),
+         QStringLiteral("open_app:YouTube"),
+         QStringLiteral("Открыть YouTube?"), 0},
+
+        // После блокнота → возможно, нужно напечатать
         {QStringLiteral("notepad"),
          QStringLiteral("напечатай "),
          QStringLiteral("Напечатать текст?"), 0},
 
         // После поиска → возможно, нужен YouTube
         {QStringLiteral("найди"),
-         QStringLiteral("youtube "),
+         QStringLiteral("open_app:YouTube"),
          QStringLiteral("Поискать на YouTube?"), 0},
 
         // Вечер → предложить заблокировать
@@ -109,8 +128,31 @@ void ActionPredictor::recordSequence(const QString& command)
             if (prevCount >= 3 && currCount >= 3) {
                 PatternRule newRule;
                 newRule.trigger = prev;
-                newRule.suggestedAction = curr;
-                newRule.description = QStringLiteral("Выполнить «") + curr + QStringLiteral("»?");
+
+                // Если текущая команда начинается с глагола открытия —
+                // сохраняем как open_app: чтобы кнопка Yes её выполнила
+                // напрямую, не отправляя название приложения в AI как текст.
+                static const QStringList openPrefixes = {
+                    QStringLiteral("открой "), QStringLiteral("запусти "),
+                    QStringLiteral("open "),   QStringLiteral("launch "),
+                    QStringLiteral("start "),  QStringLiteral("run "),
+                };
+                bool isOpenCmd = false;
+                for (const QString& prefix : openPrefixes) {
+                    if (curr.startsWith(prefix)) {
+                        QString appName = curr.mid(prefix.length()).trimmed();
+                        // Капитализируем первую букву для красивого отображения
+                        if (!appName.isEmpty()) appName[0] = appName[0].toUpper();
+                        newRule.suggestedAction = QStringLiteral("open_app:") + appName;
+                        newRule.description = QStringLiteral("Открыть «") + appName + QStringLiteral("»?");
+                        isOpenCmd = true;
+                        break;
+                    }
+                }
+                if (!isOpenCmd) {
+                    newRule.suggestedAction = curr;
+                    newRule.description = QStringLiteral("Выполнить «") + curr + QStringLiteral("»?");
+                }
                 newRule.hitCount = 1;
                 m_rules.append(newRule);
             }

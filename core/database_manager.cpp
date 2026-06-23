@@ -238,7 +238,7 @@ bool DatabaseManager::createTables()
     execQuery("CREATE INDEX IF NOT EXISTS idx_train_user ON training_logs(user_id, rating DESC)");
     execQuery("CREATE UNIQUE INDEX IF NOT EXISTS idx_train_dedup ON training_logs(user_id, user_message, ai_response)");
 
-    // voice_journal — сырые транскрипции от PassiveListener
+    // voice_journal
     if (!execQuery(R"(CREATE TABLE IF NOT EXISTS voice_journal (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     INTEGER NOT NULL DEFAULT 1
@@ -250,6 +250,20 @@ bool DatabaseManager::createTables()
         created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     ))")) return false;
     execQuery("CREATE INDEX IF NOT EXISTS idx_journal_user ON voice_journal(user_id, processed, created_at)");
+
+    // response_cache — кэш AI-ответов для offline (анекдоты, советы, факты)
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS response_cache (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger    TEXT    NOT NULL,
+        category   TEXT    NOT NULL DEFAULT 'chitchat',
+        response   TEXT    NOT NULL,
+        language   TEXT    NOT NULL DEFAULT 'ru',
+        use_count  INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+        last_used  TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_trigger  ON response_cache(trigger, language)");
+    execQuery("CREATE INDEX       IF NOT EXISTS idx_cache_category ON response_cache(category, language)");
 
     return true;
 }
@@ -263,7 +277,6 @@ bool DatabaseManager::runMigrations()
     if (ver < 1) { execQuery("UPDATE schema_version SET version=1"); ver = 1; }
     if (ver < 2) { execQuery("UPDATE schema_version SET version=2"); ver = 2; }
     if (ver < 3) {
-        // Добавляем таблицу training_logs если её нет (для существующих БД)
         execQuery(R"(CREATE TABLE IF NOT EXISTS training_logs (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL DEFAULT 1,
@@ -280,7 +293,6 @@ bool DatabaseManager::runMigrations()
         ver = 3;
     }
     if (ver < 4) {
-        // Добавляем voice_journal для пассивной записи голоса
         execQuery(R"(CREATE TABLE IF NOT EXISTS voice_journal (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id     INTEGER NOT NULL DEFAULT 1,
@@ -292,6 +304,23 @@ bool DatabaseManager::runMigrations()
         ))");
         execQuery("CREATE INDEX IF NOT EXISTS idx_journal_user ON voice_journal(user_id, processed, created_at)");
         execQuery("UPDATE schema_version SET version=4");
+        ver = 4;
+    }
+    if (ver < 5) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS response_cache (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            trigger    TEXT    NOT NULL,
+            category   TEXT    NOT NULL DEFAULT 'chitchat',
+            response   TEXT    NOT NULL,
+            language   TEXT    NOT NULL DEFAULT 'ru',
+            use_count  INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            last_used  TEXT    NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_trigger  ON response_cache(trigger, language)");
+        execQuery("CREATE INDEX       IF NOT EXISTS idx_cache_category ON response_cache(category, language)");
+        execQuery("UPDATE schema_version SET version=5");
+        ver = 5;
     }
     return true;
 }
@@ -1171,4 +1200,85 @@ bool DatabaseManager::updateTrainingLogRating(const QString& userMsg,
     q.bindValue(":aresp", aiResp.simplified());
     if (!q.exec()) { logError("updateTrainingLogRating", q.lastError()); return false; }
     return q.numRowsAffected() > 0;
+}
+
+// ============================================================
+//  response_cache
+// ============================================================
+
+QString DatabaseManager::getCachedResponse(const QString& trigger,
+                                            const QString& language,
+                                            const QString& category)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    if (category.isEmpty()) {
+        q.prepare(R"(SELECT id, response FROM response_cache
+                     WHERE trigger=:t AND language=:lang
+                     ORDER BY use_count DESC LIMIT 1)");
+    } else {
+        q.prepare(R"(SELECT id, response FROM response_cache
+                     WHERE trigger=:t AND language=:lang AND category=:cat
+                     ORDER BY use_count DESC LIMIT 1)");
+        q.bindValue(":cat", category);
+    }
+    q.bindValue(":t",    trigger.trimmed().toLower());
+    q.bindValue(":lang", language);
+    if (!q.exec() || !q.next()) return QString();
+    qint64 id = q.value(0).toLongLong();
+    QString response = q.value(1).toString();
+    QSqlQuery upd(db);
+    upd.prepare("UPDATE response_cache SET use_count=use_count+1,last_used=datetime('now') WHERE id=:id");
+    upd.bindValue(":id", id);
+    upd.exec();
+    return response;
+}
+
+bool DatabaseManager::saveCachedResponse(const QString& trigger,
+                                          const QString& response,
+                                          const QString& language,
+                                          const QString& category)
+{
+    if (trigger.isEmpty() || response.isEmpty()) return false;
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(INSERT INTO response_cache (trigger, category, response, language)
+                 VALUES (:t, :cat, :resp, :lang)
+                 ON CONFLICT(trigger, language)
+                 DO UPDATE SET response=excluded.response,
+                               category=excluded.category,
+                               last_used=datetime('now'))");
+    q.bindValue(":t",    trigger.trimmed().toLower());
+    q.bindValue(":cat",  category);
+    q.bindValue(":resp", response.trimmed());
+    q.bindValue(":lang", language);
+    if (!q.exec()) { logError("saveCachedResponse", q.lastError()); return false; }
+    return true;
+}
+
+QString DatabaseManager::getRandomCached(const QString& category, const QString& language)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(SELECT id, response FROM response_cache
+                 WHERE category=:cat AND language=:lang
+                 ORDER BY use_count ASC, RANDOM() LIMIT 1)");
+    q.bindValue(":cat",  category);
+    q.bindValue(":lang", language);
+    if (!q.exec() || !q.next()) return QString();
+    qint64 id = q.value(0).toLongLong();
+    QString response = q.value(1).toString();
+    QSqlQuery upd(db);
+    upd.prepare("UPDATE response_cache SET use_count=use_count+1,last_used=datetime('now') WHERE id=:id");
+    upd.bindValue(":id", id);
+    upd.exec();
+    return response;
+}
+
+int DatabaseManager::responseCacheCount()
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.exec("SELECT COUNT(*) FROM response_cache");
+    return q.next() ? q.value(0).toInt() : 0;
 }
