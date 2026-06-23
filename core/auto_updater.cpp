@@ -179,25 +179,34 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
     if (!installerPath.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
         return;
 
-    // Запускаем через explorer.exe — он всегда работает в пользовательском
-    // контексте и не наследует UAC-ограничения родительского процесса.
-    // Это решает проблему когда ShellExecuteW молча блокируется при запуске
-    // из-под IDE или любого elevated процесса.
-    const std::wstring wExplorer = L"explorer.exe";
-    const std::wstring wPath     = installerPath.toStdWString();
+    const std::wstring wPath = QDir::toNativeSeparators(installerPath).toStdWString();
 
+    // Сначала пробуем "runas" — запрос повышения прав (UAC).
+    // Большинство NSIS/Inno Setup инсталляторов требуют Admin.
     HINSTANCE result = ShellExecuteW(
         nullptr,
-        L"open",
-        wExplorer.c_str(),  // explorer.exe как лаунчер
-        wPath.c_str(),      // путь к установщику — аргумент explorer
+        L"runas",
+        wPath.c_str(),
+        nullptr,
         nullptr,
         SW_SHOWNORMAL
     );
 
+    // Если пользователь отклонил UAC или runas недоступен — пробуем "open"
+    if (reinterpret_cast<intptr_t>(result) <= 32) {
+        result = ShellExecuteW(
+            nullptr,
+            L"open",
+            wPath.c_str(),
+            nullptr,
+            nullptr,
+            SW_SHOWNORMAL
+        );
+    }
+
     if (reinterpret_cast<intptr_t>(result) > 32) {
-        // Установщик запущен — ждём 3 сек и закрываемся корректно
-        QTimer::singleShot(3000, this, []() {
+        emit installerLaunched();
+        QTimer::singleShot(2000, this, []() {
             QCoreApplication::quit();
         });
     } else {

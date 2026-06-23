@@ -817,17 +817,28 @@ void VoskWorker::reloadModels(const WhisperConfig& config)
 #endif
 }
 
-// Догрузить все модели из сохранённого конфига, которых ещё нет в памяти.
-// Вызывается из recognize() перед прогоном буфера, чтобы тяжёлые модели
-// поднимались по запросу.
-void VoskWorker::ensureHeavyModelsLoaded()
+// Догрузить модель для конкретного языка (lazy on-demand).
+// При lang=="auto" грузим только те языки, для которых ещё нет
+// загруженной модели, но ПРОПУСКАЕМ тяжёлую EN-large если EN-small
+// уже в памяти (40 MB vs 1.8 GB — для команд/wake word small достаточна).
+void VoskWorker::ensureModelForLang(const QString& lang)
 {
 #ifdef JARVIS_VOSK_AVAILABLE
     if (!m_lazyLoadEnabled) return;
 
     QMap<QString, QString> paths = collectModelPaths(m_lastConfig);
-    for (auto it = paths.constBegin(); it != paths.constEnd(); ++it) {
-        if (!isModelLoaded(it.key())) {
+
+    if (lang != QStringLiteral("auto") && !lang.isEmpty()) {
+        if (!isModelLoaded(lang) && paths.contains(lang)) {
+            loadOne(lang, paths.value(lang));
+        }
+    } else {
+        for (auto it = paths.constBegin(); it != paths.constEnd(); ++it) {
+            if (isModelLoaded(it.key())) continue;
+            // Не грузим EN-large если EN-small уже есть —
+            // для wake word и команд small достаточна.
+            if (it.key() == QStringLiteral("en") && isModelLoaded(QStringLiteral("en")))
+                continue;
             loadOne(it.key(), it.value());
         }
     }
@@ -875,9 +886,6 @@ void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
         return;
     }
 
-    // Ленивая дозагрузка тяжёлых моделей по запросу + сброс таймера выгрузки:
-    // каждое распознавание продлевает жизнь моделей на MODEL_UNLOAD_TIMEOUT_MS.
-    ensureHeavyModelsLoaded();
     startUnloadTimer();
 
     if (m_models.isEmpty()) {
@@ -887,15 +895,11 @@ void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
 
     bool whisper = isWhisperLevel(pcmData);
 
-    // Прогоняем буфер через ВСЕ загруженные модели и сравниваем их
-    // по реальной средней уверенности распознавания (per-word confidence
-    // из Vosk JSON), а не по факту "текст не пустой" — Vosk почти всегда
-    // возвращает какой-то текст, даже когда язык не совпадает, потому
-    // что модель ищет ближайшее по фонетике слово в своём словаре.
     struct Candidate { QString text; QString lang; float conf; int words; };
     QVector<Candidate> candidates;
     candidates.reserve(m_models.size());
 
+    // Фаза 1: распознаём уже загруженными (small) моделями
     for (auto& mp : m_models) {
         RecognitionResult r = tryRecognize(mp.recognizer, pcmData);
         if (!r.text.isEmpty()) {
@@ -903,15 +907,35 @@ void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
         }
     }
 
+    // Фаза 2: если confidence низкий или нет результатов — догружаем
+    // нужную тяжёлую модель и пробуем ещё раз.
+    // При "auto": если best confidence < 0.5, грузим недостающие языки.
+    // При конкретном языке: грузим только его если ещё нет.
+    const float bestConf = candidates.isEmpty() ? 0.0f : [&](){
+        float mx = 0.0f;
+        for (const auto& c : candidates) mx = qMax(mx, c.conf);
+        return mx;
+    }();
+
+    constexpr float LOW_CONF_THRESHOLD = 0.5f;
+    if (bestConf < LOW_CONF_THRESHOLD || candidates.isEmpty()) {
+        const int modelsBefore = m_models.size();
+        ensureModelForLang(preferredLang);
+
+        if (m_models.size() > modelsBefore) {
+            for (int i = modelsBefore; i < m_models.size(); ++i) {
+                auto& mp = m_models[i];
+                RecognitionResult r = tryRecognize(mp.recognizer, pcmData);
+                if (!r.text.isEmpty()) {
+                    candidates.push_back({r.text, mp.lang, r.avgConfidence, r.wordCount});
+                }
+            }
+        }
+    }
+
     if (candidates.isEmpty()) return;
 
-    // Скоринг: уверенность — главный критерий. Если preferredLang задан
-    // явно (не "auto") и его confidence не сильно хуже лучшей альтернативы
-    // (в пределах 0.08), отдаём предпочтение ему — пользователь явно
-    // выбрал язык интерфейса/диктовки. При "auto" побеждает чистый максимум
-    // средней уверенности; при равенстве — больше распознанных слов
-    // (длиннее/увереннее результат, меньше шанс случайного фонетического
-    // совпадения на коротком обрывке).
+    // Скоринг: уверенность — главный критерий
     const Candidate* best = &candidates.front();
     for (const auto& c : candidates) {
         if (c.conf > best->conf ||

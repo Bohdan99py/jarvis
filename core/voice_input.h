@@ -240,7 +240,7 @@ private:
     // после MODEL_UNLOAD_TIMEOUT_MS простоя, экономя ~3.6 GB RAM.
     bool isSmallModel(const QString& modelId) const;
     bool isModelLoaded(const QString& lang) const;
-    void ensureHeavyModelsLoaded();    // догрузить все модели из m_lastConfig
+    void ensureModelForLang(const QString& lang); // догрузить одну модель по языку
     void unloadHeavyModels();          // слот таймера: освободить всё кроме small
     void startUnloadTimer();           // создать/перезапустить таймер (в потоке worker'а)
     bool loadOne(const QString& lang, const QString& path); // загрузить одну модель
@@ -251,7 +251,7 @@ private:
     QTimer*       m_unloadTimer    = nullptr;
     WhisperConfig m_lastConfig;        // сохранённый конфиг для ленивой дозагрузки
     bool          m_lazyLoadEnabled = true;
-    static constexpr int MODEL_UNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 минут
+    static constexpr int MODEL_UNLOAD_TIMEOUT_MS = 2 * 60 * 1000; // 2 минуты
 };
 
 // ============================================================
