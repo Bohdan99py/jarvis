@@ -5,28 +5,28 @@
 
 // ===== SESSION & HISTORY =====
 // Reduced from 100 to 20 to save ~40MB
-#define MAX_SESSION_MESSAGES 20
+#define MAX_SESSION_MESSAGES_LIMIT 20
 
 // Reduced from 50 to 10 to save ~20MB
-#define MAX_PAST_SESSIONS 10
+#define MAX_PAST_SESSIONS_LIMIT 10
 
 // Reduced from 20 to 10 to save ~5MB
-#define MAX_SESSION_TOPICS 10
+#define MAX_SESSION_TOPICS_LIMIT 10
 
 // Reduced from 20 to 10 to save ~2MB
-#define MAX_SESSION_FILES 10
+#define MAX_SESSION_FILES_LIMIT 10
 
 // ===== PROJECT INDEXING =====
 // Reduced from 500 to 250 files to save ~50MB
-#define MAX_INDEXED_FILES 250
+#define MAX_INDEXED_FILES_LIMIT 250
 
 // Reduced from 200 to 100 symbols/file to save ~30MB
-#define MAX_SYMBOLS_PER_FILE 100
+#define MAX_SYMBOLS_PER_FILE_LIMIT 100
 
 // ===== VOICE & AUDIO BUFFERS =====
 // 5MB max recording buffer
 #define MAX_AUDIO_BUFFER_MB 5
-#define AUDIO_CHUNK_SIZE 4096
+#define AUDIO_CHUNK_SIZE_LIMIT 4096
 
 // ===== DATABASE PAGINATION =====
 // Fetch messages in smaller chunks
