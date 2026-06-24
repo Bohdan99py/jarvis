@@ -359,7 +359,8 @@ BackgroundLearner::BackgroundLearner(QObject* parent) : QObject(parent)
 BackgroundLearner::~BackgroundLearner()
 {
     stop();
-    // m_worker принадлежит потоку, удалится при его завершении
+    delete m_worker;
+    m_worker = nullptr;
 }
 
 void BackgroundLearner::setWatchPaths(const QStringList& paths)
@@ -387,7 +388,10 @@ void BackgroundLearner::stop()
     if (!m_running) return;
     m_timer->stop();
     m_thread->quit();
-    m_thread->wait(5000);
+    if (!m_thread->wait(5000)) {
+        m_thread->terminate();
+        m_thread->wait(1000);
+    }
     m_running = false;
     qDebug() << "[Learner] Stopped";
 }
