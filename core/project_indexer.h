@@ -12,6 +12,7 @@
 #include <QSet>
 
 #include "jarvis_core_export.h"
+#include "memory_limits.h"
 
 // Один символ (класс, функция, переменная, макрос и т.д.)
 struct CodeSymbol
@@ -141,6 +142,9 @@ private:
 
     static const QStringList s_sourceExtensions;
 
-    static constexpr int MAX_INDEXED_FILES = 500;
-    static constexpr int MAX_SYMBOLS_PER_FILE = 200;
+    // OPTIMIZED: Phase 1 Memory Reduction
+    // Reduced from 500 to 250 files (~50MB savings)
+    static constexpr int MAX_INDEXED_FILES = MAX_INDEXED_FILES_LIMIT;
+    // Reduced from 200 to 100 symbols/file (~30MB savings)
+    static constexpr int MAX_SYMBOLS_PER_FILE = MAX_SYMBOLS_PER_FILE_LIMIT;
 };

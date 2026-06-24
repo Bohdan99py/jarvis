@@ -11,6 +11,7 @@
 #include <QDateTime>
 
 #include "jarvis_core_export.h"
+#include "memory_limits.h"
 
 struct ChatMessage
 {
@@ -148,10 +149,13 @@ private:
     QStringList m_sessionFilesTouched;     // файлы, созданные/изменённые за сессию
     int         m_currentSessionIndex = -1; // индекс записи текущей сессии в m_pastSessions
 
-    static constexpr int MAX_SESSION_MESSAGES = 100;
-    // 50 записей — достаточно для нескольких недель истории.
-    // Старые сессии автоматически удаляются.
-    static constexpr int MAX_PAST_SESSIONS    = 50;
-    static constexpr int MAX_SESSION_TOPICS   = 20;
-    static constexpr int MAX_SESSION_FILES    = 20;
+    // OPTIMIZED: Phase 1 Memory Reduction
+    // Reduced from 100 to 20 (~40MB savings)
+    static constexpr int MAX_SESSION_MESSAGES = MAX_SESSION_MESSAGES_LIMIT;
+    // Reduced from 50 to 10 (~20MB savings)
+    static constexpr int MAX_PAST_SESSIONS    = MAX_PAST_SESSIONS_LIMIT;
+    // Reduced from 20 to 10 (~5MB savings)
+    static constexpr int MAX_SESSION_TOPICS   = MAX_SESSION_TOPICS_LIMIT;
+    // Reduced from 20 to 10 (~2MB savings)
+    static constexpr int MAX_SESSION_FILES    = MAX_SESSION_FILES_LIMIT;
 };

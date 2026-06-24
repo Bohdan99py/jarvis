@@ -20,6 +20,8 @@
 #include <QMutex>
 #include <optional>
 
+#include "memory_limits.h"
+
 // ============================================================
 //  Структуры специфичные для БД
 // ============================================================
@@ -122,10 +124,13 @@ public:
     qint64                       getOrCreateDefaultUser();
 
     // ── chat_history ───────────────────────────────────────
+    // OPTIMIZED: Phase 1 - Paginated message fetching
+    // Fetch messages in chunks of MESSAGES_PAGE_SIZE (10) instead of all at once
     qint64               addMessage(const DbChatMessage& msg);
-    QList<DbChatMessage> getSession(const QString& sessionId);
-    QList<DbChatMessage> getRecentMessages(qint64 userId, int limit = 50);
-    QList<DbChatMessage> searchMessages(qint64 userId, const QString& query);
+    QList<DbChatMessage> getSession(const QString& sessionId, int limit = MESSAGES_PAGE_SIZE);
+    QList<DbChatMessage> getSessionPage(const QString& sessionId, int offset, int limit = MESSAGES_PAGE_SIZE);
+    QList<DbChatMessage> getRecentMessages(qint64 userId, int limit = MESSAGES_PAGE_SIZE);
+    QList<DbChatMessage> searchMessages(qint64 userId, const QString& query, int limit = QUERY_CHUNK_SIZE);
     bool                 deleteSession(const QString& sessionId);
     bool                 clearHistory(qint64 userId);
     int                  monthlyTokens(qint64 userId, const QString& model);
@@ -144,7 +149,7 @@ public:
     // ── memory_kv (запомни / вспомни) ─────────────────────
     bool                  memSet(qint64 userId, const QString& key, const QString& value);
     QString               memGet(qint64 userId, const QString& key,
-                                 const QString& def = QString());
+                                const QString& def = QString());
     bool                  memDelete(qint64 userId, const QString& key);
     QMap<QString,QString> memGetAll(qint64 userId);
 
