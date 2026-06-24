@@ -276,7 +276,7 @@ int LearnerWorker::analyzeChat()
                           .arg(processed).arg(sessions.size()));
     }
 
-    return DatabaseManager::instance().getTopPatterns(1, 1000).size();
+    return DatabaseManager::instance().patternCount(1);
 }
 
 void LearnerWorker::extractPatternsFromSession(const QString& sessionId)

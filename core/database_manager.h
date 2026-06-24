@@ -166,6 +166,7 @@ public:
     bool                     upsertPattern(const DbBehaviorPattern& p);
     QList<DbBehaviorPattern> getTopPatterns(qint64 userId, int limit = 50);
     QList<DbBehaviorPattern> findPatterns(qint64 userId, const QString& triggerHint);
+    int                      patternCount(qint64 userId);
     bool                     clearPatterns(qint64 userId);
 
     // ── training_logs (👍 лайкнутые диалоги для fine-tuning) ─

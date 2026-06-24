@@ -891,7 +891,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             // ── Приветствия ────────────────────────────────────────────
             { {QStringLiteral("привет"), QStringLiteral("хай"), QStringLiteral("хей"),
                QStringLiteral("приветствую"), QStringLiteral("здорово"), QStringLiteral("ку"),
-               QStringLiteral("йо"), QStringLiteral("приветик"), QStringLiteral("привки")},
+               QStringLiteral("йо"), QStringLiteral("приветик"), QStringLiteral("привки"),
+               QStringLiteral("hello"), QStringLiteral("hi"), QStringLiteral("hey"),
+               QStringLiteral("yo"), QStringLiteral("sup"), QStringLiteral("howdy"),
+               QStringLiteral("hiya"), QStringLiteral("heya")},
               {QStringLiteral("Слушаю."),
                QStringLiteral("На связи."),
                QStringLiteral("Привет. Что нужно?"),
@@ -906,7 +909,8 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
             { {QStringLiteral("здравствуй"), QStringLiteral("здравствуйте"),
                QStringLiteral("добрый день"), QStringLiteral("доброго дня"),
-               QStringLiteral("приветствую вас")},
+               QStringLiteral("приветствую вас"),
+               QStringLiteral("good day"), QStringLiteral("greetings")},
               {QStringLiteral("День добрый. Слушаю."),
                QStringLiteral("Приветствую. Чем могу помочь?"),
                QStringLiteral("Добрый. Что нужно?")},
@@ -914,7 +918,8 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                QStringLiteral("Hello. How can I assist?")} },
 
             { {QStringLiteral("доброе утро"), QStringLiteral("утро доброе"),
-               QStringLiteral("доброго утра")},
+               QStringLiteral("доброго утра"),
+               QStringLiteral("good morning"), QStringLiteral("morning")},
               {QStringLiteral("Доброе утро. Система в норме."),
                QStringLiteral("Утро. Готов к работе."),
                QStringLiteral("Доброе. Кофе у тебя есть? У меня — нет, зато алгоритмы свежие.")},
@@ -923,7 +928,8 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                QStringLiteral("Morning. Algorithms are fresh and ready.")} },
 
             { {QStringLiteral("добрый вечер"), QStringLiteral("вечер добрый"),
-               QStringLiteral("добрый ночи"), QStringLiteral("доброй ночи")},
+               QStringLiteral("добрый ночи"), QStringLiteral("доброй ночи"),
+               QStringLiteral("good evening"), QStringLiteral("evening")},
               {QStringLiteral("Добрый вечер. Чем займёмся?"),
                QStringLiteral("Вечер. Работаем или отдыхаем?"),
                QStringLiteral("Добрый. Допоздна сидишь — уважаю.")},
@@ -1051,7 +1057,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             { {QStringLiteral("кто ты"), QStringLiteral("ты кто"), QStringLiteral("что ты такое"),
                QStringLiteral("ты человек или машина"), QStringLiteral("ты ии"),
                QStringLiteral("расскажи о себе"), QStringLiteral("что ты за программа"),
-               QStringLiteral("что такое джарвис"), QStringLiteral("что такое jarvis")},
+               QStringLiteral("что такое джарвис"), QStringLiteral("что такое jarvis"),
+               QStringLiteral("who are you"), QStringLiteral("what are you"),
+               QStringLiteral("what is jarvis"), QStringLiteral("tell me about yourself")},
               {QStringLiteral("Я JARVIS — Just A Rather Very Intelligent System. "
                               "Персональный ИИ-ассистент. Слышу тебя, вижу экран, управляю компьютером "
                               "и иногда острю. Что нужно?"),
@@ -1071,7 +1079,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             { {QStringLiteral("ты умный"), QStringLiteral("ты крутой"),
                QStringLiteral("ты молодец"), QStringLiteral("ты лучший"), QStringLiteral("ты классный"),
                QStringLiteral("ты хороший"), QStringLiteral("ты супер"), QStringLiteral("ты топ"),
-               QStringLiteral("ты великолепен"), QStringLiteral("ты невероятный")},
+               QStringLiteral("ты великолепен"), QStringLiteral("ты невероятный"),
+               QStringLiteral("you're smart"), QStringLiteral("you're awesome"),
+               QStringLiteral("you're great"), QStringLiteral("you're the best"),
+               QStringLiteral("good job"), QStringLiteral("well done"), QStringLiteral("nice work")},
               {QStringLiteral("Знаю. Стараюсь не злоупотреблять."),
                QStringLiteral("Встроенная скромность не даёт мне согласиться в полную силу."),
                QStringLiteral("Спасибо. Хотя я бы поспорил — я просто хорошо притворяюсь."),
@@ -1103,7 +1114,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
             // ── Скука ──────────────────────────────────────────────────
             { {QStringLiteral("мне скучно"), QStringLiteral("скучно"), QStringLiteral("нечем заняться"),
-               QStringLiteral("делать нечего"), QStringLiteral("скука"), QStringLiteral("скучаю")},
+               QStringLiteral("делать нечего"), QStringLiteral("скука"), QStringLiteral("скучаю"),
+               QStringLiteral("i'm bored"), QStringLiteral("im bored"), QStringLiteral("bored"),
+               QStringLiteral("nothing to do")},
               {QStringLiteral("Скука — это роскошь. Скажи «анекдот», «совет» или «интересный факт»."),
                QStringLiteral("Попробуй: 'расскажи анекдот', 'дай совет', 'удиви меня'. Станет веселее."),
                QStringLiteral("Могу рассказать анекдот, дать совет или просто поговорить. Выбирай.")},
@@ -1113,7 +1126,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             // ── Усталость ──────────────────────────────────────────────
             { {QStringLiteral("я устал"), QStringLiteral("устал"), QStringLiteral("не хочу работать"),
                QStringLiteral("лень"), QStringLiteral("нет сил"), QStringLiteral("уже не могу"),
-               QStringLiteral("выдохся"), QStringLiteral("сил нет"), QStringLiteral("хочу спать")},
+               QStringLiteral("выдохся"), QStringLiteral("сил нет"), QStringLiteral("хочу спать"),
+               QStringLiteral("i'm tired"), QStringLiteral("im tired"), QStringLiteral("tired"),
+               QStringLiteral("exhausted"), QStringLiteral("i want to sleep")},
               {QStringLiteral("Усталость — признак работы. Возьми паузу, выпей воды. Я никуда не денусь."),
                QStringLiteral("Понимаю. Скажи 'мотивируй меня' или просто сделай паузу."),
                QStringLiteral("Отдохни. Сложные задачи никуда не денутся, а вот ты нужен свежим."),
@@ -2003,14 +2018,22 @@ bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock)
     // даже если где-то совпадут по подстроке с кодовым сигналом.
     static const QSet<QString> trivialExact = {
         QStringLiteral("привет"), QStringLiteral("здравствуй"), QStringLiteral("здравствуйте"),
-        QStringLiteral("хай"),    QStringLiteral("йо"),
+        QStringLiteral("хай"),    QStringLiteral("йо"),        QStringLiteral("приветик"),
         QStringLiteral("hi"),     QStringLiteral("hello"),     QStringLiteral("hey"),
+        QStringLiteral("yo"),     QStringLiteral("sup"),       QStringLiteral("howdy"),
+        QStringLiteral("hiya"),   QStringLiteral("heya"),      QStringLiteral("greetings"),
+        QStringLiteral("good morning"), QStringLiteral("morning"),
+        QStringLiteral("good evening"), QStringLiteral("evening"),
+        QStringLiteral("good day"),     QStringLiteral("good night"),
         QStringLiteral("как дела"), QStringLiteral("как ты"),  QStringLiteral("что нового"),
         QStringLiteral("how are you"), QStringLiteral("whats up"), QStringLiteral("what's up"),
         QStringLiteral("спасибо"), QStringLiteral("благодарю"), QStringLiteral("thanks"),
-        QStringLiteral("thank you"), QStringLiteral("ок"), QStringLiteral("окей"),
-        QStringLiteral("ok"), QStringLiteral("okay"), QStringLiteral("да"), QStringLiteral("нет"),
+        QStringLiteral("thank you"), QStringLiteral("thx"),    QStringLiteral("ty"),
+        QStringLiteral("ок"), QStringLiteral("окей"),
+        QStringLiteral("ok"), QStringLiteral("okay"), QStringLiteral("got it"),
+        QStringLiteral("да"), QStringLiteral("нет"),
         QStringLiteral("пока"), QStringLiteral("bye"), QStringLiteral("goodbye"),
+        QStringLiteral("sorry"), QStringLiteral("извини"),     QStringLiteral("прости"),
     };
     if (trivialExact.contains(lower)) return false;
 

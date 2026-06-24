@@ -53,6 +53,7 @@
 #include <QTime>
 #include <QFont>
 #include <QPropertyAnimation>
+#include <QGraphicsOpacityEffect>
 #include <QMessageBox>
 #include <QMenu>
 #include <QAction>
@@ -327,11 +328,15 @@ MainWindow::MainWindow(QWidget* parent)
         m_pulse = !m_pulse;
         if (m_jarvis->isSpeaking()) {
             m_dot->setStyleSheet(m_pulse
-                ? QStringLiteral("color: #00ff88; font-size: 18px;")
-                : QStringLiteral("color: #005533; font-size: 18px;"));
+                ? QStringLiteral("color: #00ff88; font-size: 20px;")
+                : QStringLiteral("color: #005533; font-size: 16px;"));
+        } else if (!m_input->isEnabled()) {
+            m_dot->setStyleSheet(m_pulse
+                ? QStringLiteral("color: #cc88ff; font-size: 20px;")
+                : QStringLiteral("color: #7733cc; font-size: 16px;"));
         }
     });
-    m_pulseTimer->start(400);
+    m_pulseTimer->start(350);
 
     m_jarvis->autoUpdater()->checkForUpdates(true);
 }
@@ -415,6 +420,32 @@ void MainWindow::applyLanguage(bool english)
 // ============================================================
 
 void MainWindow::applyTheme(int index)
+{
+    auto* fadeEffect = new QGraphicsOpacityEffect(this);
+    fadeEffect->setOpacity(1.0);
+    setGraphicsEffect(fadeEffect);
+
+    auto* fadeOut = new QPropertyAnimation(fadeEffect, "opacity", this);
+    fadeOut->setDuration(120);
+    fadeOut->setStartValue(1.0);
+    fadeOut->setEndValue(0.5);
+
+    auto* fadeIn = new QPropertyAnimation(fadeEffect, "opacity", this);
+    fadeIn->setDuration(200);
+    fadeIn->setStartValue(0.5);
+    fadeIn->setEndValue(1.0);
+
+    connect(fadeOut, &QPropertyAnimation::finished, this, [this, index, fadeIn, fadeEffect]() {
+        applyThemeStyleSheet(index);
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
+    });
+    connect(fadeIn, &QPropertyAnimation::finished, this, [this, fadeEffect]() {
+        setGraphicsEffect(nullptr);
+    });
+    fadeOut->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void MainWindow::applyThemeStyleSheet(int index)
 {
     switch (index) {
     case 1: { // Glass — frosted translucent, distinct from dark
@@ -2942,12 +2973,28 @@ void MainWindow::showClarification(const QString& question, const QStringList& o
     }
     m_clarifyBtnLay->addStretch(1);
 
+    m_clarifyBar->setMaximumHeight(0);
     m_clarifyBar->setVisible(true);
+    auto* anim = new QPropertyAnimation(m_clarifyBar, "maximumHeight", this);
+    anim->setDuration(250);
+    anim->setStartValue(0);
+    anim->setEndValue(120);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void MainWindow::hideClarification()
 {
-    if (m_clarifyBar) m_clarifyBar->setVisible(false);
+    if (!m_clarifyBar) return;
+    auto* anim = new QPropertyAnimation(m_clarifyBar, "maximumHeight", this);
+    anim->setDuration(200);
+    anim->setStartValue(m_clarifyBar->height());
+    anim->setEndValue(0);
+    anim->setEasingCurve(QEasingCurve::InCubic);
+    connect(anim, &QPropertyAnimation::finished, m_clarifyBar, [this]() {
+        m_clarifyBar->setVisible(false);
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
     m_pendingInput.clear();
 }
 
@@ -3095,7 +3142,14 @@ void MainWindow::onSuggestion(const QString& description, const QString& action)
 {
     m_pendingSuggestionAction = action;
     m_suggestionText->setText(QStringLiteral("→ ") + description);
+    m_suggestionBar->setMaximumHeight(0);
     m_suggestionBar->setVisible(true);
+    auto* anim = new QPropertyAnimation(m_suggestionBar, "maximumHeight", this);
+    anim->setDuration(250);
+    anim->setStartValue(0);
+    anim->setEndValue(60);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void MainWindow::onAgentSelected(const QString& agentName)
@@ -3186,7 +3240,14 @@ void MainWindow::showUpdateBar(const QString& version)
     m_updateProgress->setValue(0);
     m_updateProgress->setVisible(false);
     m_updateBtn->setVisible(true);
+    m_updateBar->setMaximumHeight(0);
     m_updateBar->setVisible(true);
+    auto* anim = new QPropertyAnimation(m_updateBar, "maximumHeight", this);
+    anim->setDuration(300);
+    anim->setStartValue(0);
+    anim->setEndValue(60);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 
     appendLog(Str::logSystem(),
               (IS_EN ? QStringLiteral("Update available v") : QStringLiteral("Доступно обновление v")) + version,
@@ -3598,7 +3659,7 @@ void MainWindow::buildUI()
         Qt::LinksAccessibleByMouse |
         Qt::LinksAccessibleByKeyboard
     );
-    m_log->document()->setMaximumBlockCount(1000);
+    m_log->document()->setMaximumBlockCount(300);
     vbox->addWidget(m_log, 1);
 
     // === Панель предложений ===
@@ -4061,10 +4122,9 @@ void MainWindow::appendLog(const QString& who, const QString& text, const QStrin
 {
     QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
     QString html = QStringLiteral(
-        "<div style='margin-bottom:6px;'>"
-        "<span style='color:%1;'>[%2]</span> "
-        "<span style='color:%3;'>%4:</span> "
-        "<span style='color:%5;'>%6</span></div>"
+        "<span style='color:%1'>[%2]</span> "
+        "<b style='color:%3'>%4:</b> "
+        "<span style='color:%5'>%6</span>"
     ).arg(Theme::LogColors::timestamp, time, color, who, color,
           text.toHtmlEscaped().replace(QStringLiteral("\n"), QStringLiteral("<br>")));
 

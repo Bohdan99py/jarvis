@@ -65,7 +65,7 @@ QSqlDatabase DatabaseManager::connection()
     q.exec("PRAGMA journal_mode=WAL");
     q.exec("PRAGMA foreign_keys=ON");
     q.exec("PRAGMA synchronous=NORMAL");
-    q.exec("PRAGMA cache_size=-8000");
+    q.exec("PRAGMA cache_size=-2000");
     return db;
 }
 
@@ -102,7 +102,7 @@ bool DatabaseManager::open(const QString& dbPath)
     q.exec("PRAGMA journal_mode=WAL");
     q.exec("PRAGMA foreign_keys=ON");
     q.exec("PRAGMA synchronous=NORMAL");
-    q.exec("PRAGMA cache_size=-8000");
+    q.exec("PRAGMA cache_size=-2000");
 
     if (!createTables())  return false;
     if (!runMigrations()) return false;
@@ -927,6 +927,16 @@ QList<DbBehaviorPattern> DatabaseManager::findPatterns(qint64 userId, const QStr
     q.bindValue(":hint", QStringLiteral("%%1%").arg(triggerHint));
     if (q.exec()) while (q.next()) res.append(patternFromQuery(q));
     return res;
+}
+
+int DatabaseManager::patternCount(qint64 userId)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT COUNT(*) FROM behavior_patterns WHERE user_id=:uid");
+    q.bindValue(":uid", userId);
+    if (q.exec() && q.next()) return q.value(0).toInt();
+    return 0;
 }
 
 bool DatabaseManager::clearPatterns(qint64 userId)

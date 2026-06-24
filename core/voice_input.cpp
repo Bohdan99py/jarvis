@@ -83,6 +83,20 @@ static void initCatalog()
         false
     });
 
+    // ---- Russian small (45 MB) — быстрый старт ----
+    g_catalog.push_back({
+        QStringLiteral("ru-small"),
+        QStringLiteral("ru"),
+        QStringLiteral("Russian — Быстрая (Рекомендуется)"),
+        QStringLiteral("45 MB · Команды и wake word · Быстрая загрузка"),
+        QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"),
+        QStringLiteral("vosk-model-small-ru-0.22"),
+        QStringLiteral("model-ru-small"),
+        QStringLiteral("am/final.mdl"),
+        45LL * 1024 * 1024,
+        true
+    });
+
     // ---- Russian (1.8 GB) ----
     g_catalog.push_back({
         QStringLiteral("ru"),

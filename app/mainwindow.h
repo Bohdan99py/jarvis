@@ -101,6 +101,7 @@ private:
 
     void applyLanguage(bool english);
     void applyTheme(int index);
+    void applyThemeStyleSheet(int index);
 
     bool tryOpenApp(const QString& userText, const Intent& intent);
     bool trySystemControl(const QString& userText);
