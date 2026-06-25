@@ -296,7 +296,7 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
         m_taskContext.recentApps.prepend(app);
         if (m_taskContext.recentApps.size() > 10)
             m_taskContext.recentApps.removeLast();
-        m_taskContext.currentTask = QStringLiteral("Работа с ") + app;
+        m_taskContext.currentTask = QStringLiteral("Working with ") + app;
     }
 
     recordCommandUsage(lower.split(QChar(' ')).first());
@@ -475,17 +475,17 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
     if (lower.contains(QStringLiteral("сегодня")) || lower.contains(QStringLiteral("today"))) {
         rangeStart  = startOfDay(now.date());
         rangeEnd    = now;
-        periodLabel = QStringLiteral("сегодня");
+        periodLabel = QStringLiteral("today");
     } else if (lower.contains(QStringLiteral("позавчера"))) {
         const QDate d = now.date().addDays(-2);
         rangeStart  = startOfDay(d);
         rangeEnd    = endOfDay(d);
-        periodLabel = QStringLiteral("позавчера");
+        periodLabel = QStringLiteral("day before yesterday");
     } else if (lower.contains(QStringLiteral("вчера")) || lower.contains(QStringLiteral("yesterday"))) {
         const QDate d = now.date().addDays(-1);
         rangeStart  = startOfDay(d);
         rangeEnd    = endOfDay(d);
-        periodLabel = QStringLiteral("вчера");
+        periodLabel = QStringLiteral("yesterday");
     } else if (lower.contains(QStringLiteral("прошлой недел"))
             || lower.contains(QStringLiteral("прошлую недел"))
             || lower.contains(QStringLiteral("last week"))) {
@@ -496,20 +496,20 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
         const QDate lastSunday = thisMonday.addDays(-1);
         rangeStart  = startOfDay(lastMonday);
         rangeEnd    = endOfDay(lastSunday);
-        periodLabel = QStringLiteral("на прошлой неделе");
+        periodLabel = QStringLiteral("last week");
     } else if (lower.contains(QStringLiteral("этой недел")) || lower.contains(QStringLiteral("this week"))) {
         const int dow = now.date().dayOfWeek();
         const QDate thisMonday = now.date().addDays(1 - dow);
         rangeStart  = startOfDay(thisMonday);
         rangeEnd    = now;
-        periodLabel = QStringLiteral("на этой неделе");
+        periodLabel = QStringLiteral("this week");
     } else if (lower.contains(QStringLiteral("прошлом месяц")) || lower.contains(QStringLiteral("last month"))) {
         const QDate firstOfThis  = QDate(now.date().year(), now.date().month(), 1);
         const QDate lastOfPrev   = firstOfThis.addDays(-1);
         const QDate firstOfPrev  = QDate(lastOfPrev.year(), lastOfPrev.month(), 1);
         rangeStart  = startOfDay(firstOfPrev);
         rangeEnd    = endOfDay(lastOfPrev);
-        periodLabel = QStringLiteral("в прошлом месяце");
+        periodLabel = QStringLiteral("last month");
     } else {
         // "за последние N дней" / "last N days"
         static const QRegularExpression reDays(
@@ -519,7 +519,7 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
             const int n = qMax(1, m.captured(1).toInt());
             rangeStart  = startOfDay(now.date().addDays(-n));
             rangeEnd    = now;
-            periodLabel = QStringLiteral("за последние ") + QString::number(n) + QStringLiteral(" дн.");
+            periodLabel = QStringLiteral("last ") + QString::number(n) + QStringLiteral(" days");
         }
     }
 
@@ -576,7 +576,7 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
             "По заданному периоду/теме в журнале сессий ничего не найдено. "
             "Сообщи пользователю честно, что данных за этот период/по этой теме нет — "
             "не придумывай содержимое.\n");
-        context += QStringLiteral("--- Конец журнала сессий ---\n");
+        context += QStringLiteral("--- End of session journal ---\n");
         return context;
     }
 
@@ -593,32 +593,32 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
         const QJsonObject& s = matches[i];
         const QString date = s[QStringLiteral("date")].toString();
 
-        context += QStringLiteral("\n## Сессия от ") + date + QStringLiteral("\n");
+        context += QStringLiteral("\n## Session from ") + date + QStringLiteral("\n");
 
         QStringList topics;
         for (const auto& t : s[QStringLiteral("topics")].toArray()) topics.append(t.toString());
         if (!topics.isEmpty()) {
-            context += QStringLiteral("Темы: ") + topics.join(QStringLiteral(", ")) + QStringLiteral("\n");
+            context += QStringLiteral("Topics: ") + topics.join(QStringLiteral(", ")) + QStringLiteral("\n");
         }
 
         QStringList files;
         for (const auto& f : s[QStringLiteral("filesTouched")].toArray()) files.append(f.toString());
         if (!files.isEmpty()) {
-            context += QStringLiteral("Файлы: ") + files.join(QStringLiteral(", ")) + QStringLiteral("\n");
+            context += QStringLiteral("Files: ") + files.join(QStringLiteral(", ")) + QStringLiteral("\n");
         }
 
         const QString summary = s[QStringLiteral("summary")].toString();
         if (!summary.isEmpty()) {
-            context += QStringLiteral("Содержание:\n") + summary + QStringLiteral("\n");
+            context += QStringLiteral("Content:\n") + summary + QStringLiteral("\n");
         }
     }
 
     context += QStringLiteral(
-        "\nЭто реальные данные из журнала сессий JARVIS — отвечай пользователю на "
-        "их основе, в свободной форме (\"На прошлой неделе вы занимались...\"). "
-        "Не упоминай слова 'журнал' или JSON-структуры — расскажи как человек, "
-        "вспоминающий, чем вы вместе занимались.\n");
-    context += QStringLiteral("--- Конец журнала сессий ---\n");
+        "\nThis is real data from the JARVIS session journal. Answer the user based on "
+        "this data in a natural, conversational way (\"Last week you were working on...\"). "
+        "Don't mention 'journal' or JSON structures — recall it like a person "
+        "remembering what you worked on together.\n");
+    context += QStringLiteral("--- End of session journal ---\n");
     return context;
 }
 

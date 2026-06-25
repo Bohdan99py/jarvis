@@ -89,12 +89,12 @@ UserProfile::Scenario UserProfile::classifyScenario(const ContextSnapshot& ctx)
 QString UserProfile::scenarioName(Scenario s)
 {
     switch (s) {
-    case Scenario::GameDev:  return QStringLiteral("Разработка");
-    case Scenario::Art:      return QStringLiteral("Рисование/3D");
-    case Scenario::Gaming:   return QStringLiteral("Игра");
-    case Scenario::Browsing: return QStringLiteral("Браузер");
-    case Scenario::Chat:     return QStringLiteral("Общение");
-    default:                 return QStringLiteral("Неопределено");
+    case Scenario::GameDev:  return QStringLiteral("Development");
+    case Scenario::Art:      return QStringLiteral("Art / 3D");
+    case Scenario::Gaming:   return QStringLiteral("Gaming");
+    case Scenario::Browsing: return QStringLiteral("Browsing");
+    case Scenario::Chat:     return QStringLiteral("Conversation");
+    default:                 return QStringLiteral("Unknown");
     }
 }
 
@@ -125,10 +125,10 @@ int UserProfile::timeBucket(int hourOfDay)
 QString UserProfile::timeBucketName(int bucket)
 {
     switch (bucket) {
-    case 0: return QStringLiteral("ночь");
-    case 1: return QStringLiteral("утро");
-    case 2: return QStringLiteral("день");
-    case 3: return QStringLiteral("вечер");
+    case 0: return QStringLiteral("night");
+    case 1: return QStringLiteral("morning");
+    case 2: return QStringLiteral("afternoon");
+    case 3: return QStringLiteral("evening");
     default: return QStringLiteral("?");
     }
 }
@@ -261,14 +261,14 @@ QString UserProfile::buildProfileSummary(int maxLines) const
 
     if (entries.isEmpty()) {
         return QStringLiteral(
-            "Профиль пока пуст — JARVIS только начал учиться на твоих командах.");
+            "Profile is empty — I'm still learning your patterns. Keep talking.");
     }
 
     std::sort(entries.begin(), entries.end(),
               [](const Entry& a, const Entry& b) { return a.total > b.total; });
 
-    QString text = QStringLiteral("Текущий сценарий: ") + scenarioName(currentScenario())
-                 + QStringLiteral("\nЧастые паттерны:\n");
+    QString text = QStringLiteral("Current scenario: ") + scenarioName(currentScenario())
+                 + QStringLiteral("\nFrequent patterns:\n");
 
     int shown = 0;
     for (const auto& e : entries) {

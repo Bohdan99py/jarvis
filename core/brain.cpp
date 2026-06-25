@@ -487,13 +487,13 @@ QString Brain::buildClarificationQuestion(
 
     // Для поиска — самый частый случай неоднозначности
     // Предлагаем варианты в зависимости от того, что знаем
-    return QStringLiteral("Уточни — «") + originalInput.trimmed()
-         + QStringLiteral("» — где искать?\n"
-           "  [1] В файлах проекта\n"
-           "  [2] На компьютере (все файлы)\n"
-           "  [3] В истории браузера\n"
-           "  [4] В интернете\n"
-           "  [5] В нашем разговоре");
+    return QStringLiteral("Clarify — '") + originalInput.trimmed()
+         + QStringLiteral("' — where should I look?\n"
+           "  [1] Project files\n"
+           "  [2] Entire computer\n"
+           "  [3] Browser history\n"
+           "  [4] The internet\n"
+           "  [5] Our conversation");
 }
 
 // ============================================================

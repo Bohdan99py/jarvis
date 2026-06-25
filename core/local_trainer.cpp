@@ -173,7 +173,7 @@ void LocalTrainer::train(DatabaseManager* db)
 {
     if (m_process && m_process->state() != QProcess::NotRunning) {
         emit trainingFinished(false,
-            QStringLiteral("Обучение уже запущено / Training already in progress"));
+            QStringLiteral("Training already in progress"));
         return;
     }
 
@@ -183,8 +183,7 @@ void LocalTrainer::train(DatabaseManager* db)
     // 1. Проверяем Ollama
     if (!isOllamaAvailable()) {
         emit trainingFinished(false,
-            QStringLiteral("Ollama не найдена. Установите: https://ollama.com\n\n"
-                           "Ollama not found. Install from: https://ollama.com"));
+            QStringLiteral("Ollama not found. Install from: https://ollama.com"));
         return;
     }
     emit trainingProgress(QStringLiteral("✅ Ollama is running"));
@@ -199,13 +198,13 @@ void LocalTrainer::train(DatabaseManager* db)
         pull.start(QStringLiteral("ollama"), { QStringLiteral("pull"), m_baseModel });
         if (!pull.waitForStarted(5000)) {
             emit trainingFinished(false,
-                QStringLiteral("Не удалось скачать модель %1").arg(m_baseModel));
+                QStringLiteral("Failed to download model %1").arg(m_baseModel));
             return;
         }
         pull.waitForFinished(600000); // 10 минут на скачивание
         if (pull.exitCode() != 0) {
             emit trainingFinished(false,
-                QStringLiteral("Ошибка при скачивании %1:\n%2")
+                QStringLiteral("Error downloading %1:\n%2")
                     .arg(m_baseModel, QString::fromUtf8(pull.readAllStandardError())));
             return;
         }
@@ -220,10 +219,8 @@ void LocalTrainer::train(DatabaseManager* db)
 
     if (pairs.isEmpty()) {
         emit trainingFinished(false,
-            QStringLiteral("Нет лайкнутых ответов для обучения!\n"
-                           "Нажимайте 👍 на ответы которые вам нравятся.\n\n"
-                           "No liked responses for training!\n"
-                           "Click 👍 on responses you like."));
+            QStringLiteral("No liked responses for training!\n"
+                           "Click 👍 on responses you like to build a training set."));
         return;
     }
     emit trainingProgress(
@@ -288,10 +285,7 @@ void LocalTrainer::onProcessFinished(int exitCode, QProcess::ExitStatus /*status
     if (exitCode == 0) {
         emit trainingProgress(QStringLiteral("✅ Model '%1' created successfully!").arg(m_outputModel));
         emit trainingFinished(true,
-            QStringLiteral("Модель '%1' создана!\n\n"
-                           "Ollama → Settings → выберите '%1' как модель Ollama.\n"
-                           "Или скажите: «Джарвис, переключись на %1»\n\n"
-                           "Model '%1' created!\n"
+            QStringLiteral("Model '%1' created!\n\n"
                            "Go to Settings → select '%1' as Ollama model.\n"
                            "Or say: \"Jarvis, switch to %1\"")
                 .arg(m_outputModel));

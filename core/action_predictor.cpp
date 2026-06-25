@@ -36,46 +36,46 @@ void ActionPredictor::initDefaultRules()
         // После запуска IDE → вероятно, нужен поиск или файл
         {QStringLiteral("rider"),
          QStringLiteral("open_app:Rider"),
-         QStringLiteral("Открыть Rider?"), 0},
+         QStringLiteral("Open Rider?"), 0},
 
         {QStringLiteral("clion"),
          QStringLiteral("open_app:CLion"),
-         QStringLiteral("Открыть CLion?"), 0},
+         QStringLiteral("Open CLion?"), 0},
 
         // После Steam → вероятно, хочет поиграть
         {QStringLiteral("steam"),
          QStringLiteral("open_app:Steam"),
-         QStringLiteral("Открыть Steam?"), 0},
+         QStringLiteral("Open Steam?"), 0},
 
         // После Discord → вероятно, хочет общаться
         {QStringLiteral("discord"),
          QStringLiteral("open_app:Discord"),
-         QStringLiteral("Открыть Discord?"), 0},
+         QStringLiteral("Open Discord?"), 0},
 
         // После Chrome/браузера → вероятно, нужен YouTube
         {QStringLiteral("chrome"),
          QStringLiteral("open_app:YouTube"),
-         QStringLiteral("Открыть YouTube?"), 0},
+         QStringLiteral("Open YouTube?"), 0},
 
         // После блокнота → возможно, нужно напечатать
         {QStringLiteral("notepad"),
          QStringLiteral("напечатай "),
-         QStringLiteral("Напечатать текст?"), 0},
+         QStringLiteral("Type some text?"), 0},
 
         // После поиска → возможно, нужен YouTube
         {QStringLiteral("найди"),
          QStringLiteral("open_app:YouTube"),
-         QStringLiteral("Поискать на YouTube?"), 0},
+         QStringLiteral("Search on YouTube?"), 0},
 
         // Вечер → предложить заблокировать
         {QStringLiteral("время"),
          QStringLiteral("заблокируй"),
-         QStringLiteral("Заблокировать экран?"), 0},
+         QStringLiteral("Lock the screen?"), 0},
 
         // После нескольких команд → предложить статистику
         {QStringLiteral("помощь"),
          QStringLiteral("статистика"),
-         QStringLiteral("Посмотреть статистику?"), 0},
+         QStringLiteral("Check usage stats?"), 0},
     };
 }
 
@@ -144,14 +144,14 @@ void ActionPredictor::recordSequence(const QString& command)
                         // Капитализируем первую букву для красивого отображения
                         if (!appName.isEmpty()) appName[0] = appName[0].toUpper();
                         newRule.suggestedAction = QStringLiteral("open_app:") + appName;
-                        newRule.description = QStringLiteral("Открыть «") + appName + QStringLiteral("»?");
+                        newRule.description = QStringLiteral("Open '") + appName + QStringLiteral("'?");
                         isOpenCmd = true;
                         break;
                     }
                 }
                 if (!isOpenCmd) {
                     newRule.suggestedAction = curr;
-                    newRule.description = QStringLiteral("Выполнить «") + curr + QStringLiteral("»?");
+                    newRule.description = QStringLiteral("Run '") + curr + QStringLiteral("'?");
                 }
                 newRule.hitCount = 1;
                 m_rules.append(newRule);
@@ -224,7 +224,7 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
 
         ActionSuggestion s;
         s.action = cmd;
-        s.description = QStringLiteral("Часто используете: ") + cmd;
+        s.description = QStringLiteral("Frequently used: ") + cmd;
         s.confidence = qMin(1.0, count * 0.05);
         if (s.confidence >= MIN_CONFIDENCE) {
             suggestions.append(s);

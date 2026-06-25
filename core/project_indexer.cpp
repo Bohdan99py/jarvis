@@ -653,11 +653,11 @@ QStringList ProjectIndexer::allFiles() const
 QString ProjectIndexer::projectMap() const
 {
     if (m_files.isEmpty())
-        return QStringLiteral("Проект не проиндексирован.");
+        return QStringLiteral("No project indexed.");
 
     QString map;
-    map += QStringLiteral("Проект: ") + QFileInfo(m_projectRoot).fileName() + QStringLiteral("\n");
-    map += QStringLiteral("Файлов: ") + QString::number(m_files.size())
+    map += QStringLiteral("Project: ") + QFileInfo(m_projectRoot).fileName() + QStringLiteral("\n");
+    map += QStringLiteral("Files: ") + QString::number(m_files.size())
          + QStringLiteral(", Символов: ") + QString::number(symbolCount()) + QStringLiteral("\n\n");
 
     // Группируем по файлам

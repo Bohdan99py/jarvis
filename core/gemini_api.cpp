@@ -171,7 +171,7 @@ void GeminiApi::sendMessage(const QString& userMessage, ResponseCallback callbac
     }
 
     if (m_requesting) {
-        callback(false, QStringLiteral("Запрос уже выполняется, подождите..."));
+        callback(false, QStringLiteral("Hold on — a request is already in progress."));
         return;
     }
 

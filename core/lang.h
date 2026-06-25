@@ -1,6 +1,6 @@
 #pragma once
 // -------------------------------------------------------
-// lang.h — Строки интерфейса J.A.R.V.I.S. (RU / EN)
+// lang.h — J.A.R.V.I.S. UI strings (EN / RU)
 // -------------------------------------------------------
 
 #include <QString>
@@ -11,7 +11,7 @@ enum class UiLanguage { Russian, English };
 
 inline UiLanguage& gUiLanguage()
 {
-    static UiLanguage lang = UiLanguage::Russian;
+    static UiLanguage lang = UiLanguage::English;
     return lang;
 }
 
@@ -72,19 +72,19 @@ inline QString dlgRestartNeeded()   { return IS_EN ? "Language changed. Some UI 
 
 // --- Приветствие ---
 inline QString greetNight() {
-    return IS_EN ? "Still up? Respect. JARVIS online"
+    return IS_EN ? "Still up? Bold move. JARVIS online — let's make it count."
                  : "Ещё не спишь? Уважаю. JARVIS в сети";
 }
 inline QString greetMorning() {
-    return IS_EN ? "Morning. Systems warmed up"
+    return IS_EN ? "Morning, sir. Systems warmed up, coffee not included."
                  : "Утро. Системы прогреты";
 }
 inline QString greetDay() {
-    return IS_EN ? "Afternoon. All systems nominal"
+    return IS_EN ? "Afternoon. All systems nominal — as they should be."
                  : "День. Все системы в норме";
 }
 inline QString greetEvening() {
-    return IS_EN ? "Evening shift. Ready to work"
+    return IS_EN ? "Evening shift. I don't get tired, but I appreciate the company."
                  : "Вечерняя смена. Готов к работе";
 }
 inline QString greetReady() {
@@ -92,13 +92,13 @@ inline QString greetReady() {
 }
 
 // --- Статусы ---
-inline QString statusThinking()     { return IS_EN ? "Thinking..."               : "Думаю..."; }
-inline QString statusReady()        { return IS_EN ? "Ready"                     : "Готово"; }
+inline QString statusThinking()     { return IS_EN ? "Processing..."              : "Думаю..."; }
+inline QString statusReady()        { return IS_EN ? "Standing by"                : "Готово"; }
 inline QString statusIndexing()     { return IS_EN ? "Indexing: "               : "Индексирую: "; }
 inline QString statusDownload()     { return IS_EN ? "Downloading: %1%"         : "Скачивание: %1%"; }
 inline QString statusAttached()     { return IS_EN ? "Attached files: "         : "Прикреплено файлов: "; }
-inline QString statusAttachCleared(){ return IS_EN ? "Attachments cleared."     : "Прикрепления очищены."; }
-inline QString statusAttachKept()   { return IS_EN ? "Attachments kept between requests." : "Прикрепления сохраняются между запросами."; }
+inline QString statusAttachCleared(){ return IS_EN ? "Attachments cleared. Slate wiped clean." : "Прикрепления очищены."; }
+inline QString statusAttachKept()   { return IS_EN ? "Attachments persist between requests." : "Прикрепления сохраняются между запросами."; }
 inline QString statusAttachOneShot(){ return IS_EN ? "Attachments cleared after each send." : "Прикрепления очищаются после каждой отправки."; }
 
 // --- Лог ---
@@ -122,26 +122,26 @@ inline QString apiClaudeConnected() { return IS_EN ? "Claude API connected. Atta
                                                    : "Claude API подключён. Прикрепляйте файлы кнопкой 📎 или перетаскиванием в окно."; }
 inline QString apiNoKey()           { return IS_EN ? "Enter a command or 'help'. For AI mode: apikey <your-key>"
                                                    : "Введите команду или «помощь». Для AI-режима: apikey <ваш-ключ>"; }
-inline QString apiKeySaved()        { return IS_EN ? "API key saved. Claude API connected." : "API-ключ сохранён. Claude API подключён."; }
-inline QString apiGeminiKeySaved()  { return IS_EN ? "Gemini key saved." : "Gemini ключ сохранён."; }
+inline QString apiKeySaved()        { return IS_EN ? "API key locked in. Claude API connected — at your service." : "API-ключ сохранён. Claude API подключён."; }
+inline QString apiGeminiKeySaved()  { return IS_EN ? "Gemini key saved. Ready to route." : "Gemini ключ сохранён."; }
 
 // --- Вайбкодинг ---
 inline QString vibeModeOn()         { return IS_EN ? "Vibecoding ON. Code will be pulled from the index or attached files."
                                                    : "Вайбкодинг включён. Нужный код я возьму из индекса либо из прикреплённых файлов."; }
-inline QString vibeModeOff()        { return IS_EN ? "Vibecoding OFF. Normal mode." : "Вайбкодинг выключен. Обычный режим."; }
+inline QString vibeModeOff()        { return IS_EN ? "Vibecoding OFF. Back to standard ops." : "Вайбкодинг выключен. Обычный режим."; }
 inline QString vibePlaceholder()    { return IS_EN ? "Describe what to do: 'optimize X', 'add Y', 'fix Z'..."
                                                    : "Опиши что сделать: «оптимизируй X», «добавь Y», «исправь Z»..."; }
 
 // --- Инпут-плейсхолдер ---
-inline QString inputPlaceholder()   { return IS_EN ? "Enter command or question..." : "Введите команду или вопрос..."; }
+inline QString inputPlaceholder()   { return IS_EN ? "Talk to me — command, question, anything..." : "Введите команду или вопрос..."; }
 
 // --- Проект ---
 inline QString projLoaded()         { return IS_EN ? "Project loaded from cache: " : "Проект загружен из кэша: "; }
 inline QString projFiles()          { return IS_EN ? " files)"    : " файлов)"; }
 inline QString projIndexed()        { return IS_EN ? "Project indexed!\nFiles: " : "Проект проиндексирован!\nФайлов: "; }
 inline QString projSymbols()        { return IS_EN ? ", Symbols: "              : ", Символов: "; }
-inline QString projNotIndexed()     { return IS_EN ? "Project not indexed."     : "Проект не проиндексирован."; }
-inline QString projChooseFirst()    { return IS_EN ? "Choose a folder first."   : "Сначала выберите папку."; }
+inline QString projNotIndexed()     { return IS_EN ? "No project indexed yet."  : "Проект не проиндексирован."; }
+inline QString projChooseFirst()    { return IS_EN ? "Pick a folder first."     : "Сначала выберите папку."; }
 inline QString projReindexed()      { return IS_EN ? "Re-indexed: "             : "Переиндексировано: "; }
 inline QString projFilesCount()     { return IS_EN ? " files."                  : " файлов."; }
 inline QString projInfoLabel()      { return IS_EN ? "Project: "                : "Проект: "; }
@@ -157,7 +157,7 @@ inline QString updDownloaded()      { return IS_EN ? "Update downloaded. Launchi
 // --- О программе ---
 inline QString aboutText()          {
     return IS_EN
-        ? "J.A.R.V.I.S. — Personal AI Assistant\n\nVersion: v%1\nEngines: Claude API + Gemini API\nAuthor: Bohdan99py"
+        ? "J.A.R.V.I.S. — Just A Rather Very Intelligent System\n\nVersion: v%1\nEngines: Claude API + Gemini API\nAuthor: Bohdan99py"
         : "J.A.R.V.I.S. — Personal AI Assistant\n\nВерсия: v%1\nДвижки: Claude API + Gemini API\nАвтор: Bohdan99py";
 }
 
@@ -165,12 +165,12 @@ inline QString aboutText()          {
 inline QString whatsNew() {
     return IS_EN
         ? "What's new in v%1:\n"
+          "• Deep Context — JARVIS tracks your workflow and adapts in real time\n"
+          "• Multi-user — local user profiles, each with their own memory\n"
+          "• Knowledge Base — learns facts about you across sessions\n"
           "• Offline Brain — answers from learned patterns without API\n"
           "• Auto-caching — every response saved for future offline use\n"
-          "• Smart voice — only loads heavy models when needed (saves ~3 GB RAM)\n"
-          "• Consciousness — JARVIS knows what it has learned about you\n"
-          "• Modern UI — glassmorphism design with transparency\n"
-          "• Auto-updater fix — installer now launches correctly"
+          "• Modern UI — glassmorphism design with transparency"
         : "Что нового в v%1:\n"
           "• Офлайн-мозг — ответы из выученных паттернов без API\n"
           "• Авто-кэш — каждый ответ сохраняется для офлайн-режима\n"
@@ -192,13 +192,13 @@ inline QString startupTip() {
         "Совет: команда «память» покажет сохранённые факты.",
     };
     static const char* tipsEN[] = {
-        "Tip: click 👍 on responses you like — JARVIS learns from them.",
-        "Tip: voice commands work in Russian and English.",
-        "Tip: drag files into the window to attach them to your question.",
-        "Tip: JARVIS remembers patterns and responds faster over time.",
-        "Tip: say 'Jarvis' to activate voice input.",
-        "Tip: 'profile' command shows what JARVIS learned about you.",
-        "Tip: 'memory' command shows saved facts.",
+        "Pro tip: hit 👍 on responses you like — I learn from your taste.",
+        "Voice commands work in both Russian and English. Try it.",
+        "Drag files into this window to attach them. I'll read anything.",
+        "I remember patterns. The more you talk, the faster I get.",
+        "Say 'Jarvis' out loud to activate voice input. Like the movies.",
+        "Type 'profile' to see what I've learned about your work style.",
+        "Type 'memory' to see all the facts I've stored for you.",
     };
     int idx = static_cast<int>(QDateTime::currentMSecsSinceEpoch() / 1000) % 7;
     return IS_EN ? QString::fromUtf8(tipsEN[idx]) : QString::fromUtf8(tipsRU[idx]);
@@ -207,7 +207,7 @@ inline QString startupTip() {
 // --- Fallback команды ---
 inline QString fallbackNoCmd()      {
     return IS_EN
-        ? "Command not recognized. Type 'help' for command list.\nFor free chat, set an API key."
+        ? "Didn't catch that. Type 'help' to see what I can do.\nFor free conversation, set an API key first."
         : "Не понял команду. Напишите «помощь» для списка команд.\nДля свободного диалога установите API-ключ: apikey <ваш-ключ>";
 }
 

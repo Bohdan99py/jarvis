@@ -208,7 +208,7 @@ void ClaudeApi::sendMessage(const QString& userMessage, ResponseCallback callbac
     }
 
     if (m_requesting) {
-        callback(false, QStringLiteral("Запрос уже выполняется, подождите..."));
+        callback(false, QStringLiteral("Hold on — a request is already in progress."));
         return;
     }
 
@@ -274,25 +274,25 @@ void ClaudeApi::handleReply(QNetworkReply* reply, ResponseCallback callback)
 
         switch (statusCode) {
         case 400:
-            errorMsg = QStringLiteral("Ошибка запроса (400)");
+            errorMsg = QStringLiteral("Bad request (400)");
             if (!apiDetail.isEmpty()) {
                 errorMsg += QStringLiteral(": ") + apiDetail;
             }
             break;
         case 401:
-            errorMsg = QStringLiteral("Неверный API-ключ. Проверьте: apikey <ключ>");
+            errorMsg = QStringLiteral("Invalid API key. Fix it: apikey <your-key>");
             break;
         case 403:
-            errorMsg = QStringLiteral("Доступ запрещён (403). Проверьте аккаунт на console.anthropic.com");
+            errorMsg = QStringLiteral("Access denied (403). Check your account at console.anthropic.com");
             break;
         case 429:
-            errorMsg = QStringLiteral("Превышен лимит запросов. Подождите немного.");
+            errorMsg = QStringLiteral("Rate limit hit. Give it a moment.");
             break;
         case 529:
-            errorMsg = QStringLiteral("API перегружен. Попробуйте позже.");
+            errorMsg = QStringLiteral("API overloaded. Try again shortly.");
             break;
         default:
-            errorMsg = QStringLiteral("Ошибка API (HTTP %1)").arg(statusCode);
+            errorMsg = QStringLiteral("API error (HTTP %1)").arg(statusCode);
             if (!apiDetail.isEmpty()) {
                 errorMsg += QStringLiteral(": ") + apiDetail;
             } else {
@@ -309,7 +309,7 @@ void ClaudeApi::handleReply(QNetworkReply* reply, ResponseCallback callback)
     QJsonDocument doc = QJsonDocument::fromJson(data);
 
     if (!doc.isObject()) {
-        callback(false, QStringLiteral("Некорректный ответ от API."));
+        callback(false, QStringLiteral("Invalid response from API."));
         return;
     }
 
@@ -330,7 +330,7 @@ void ClaudeApi::handleReply(QNetworkReply* reply, ResponseCallback callback)
     }
 
     if (responseText.isEmpty()) {
-        callback(false, QStringLiteral("Пустой ответ от API."));
+        callback(false, QStringLiteral("Empty response from API."));
         return;
     }
 
