@@ -43,7 +43,7 @@ struct PassiveListenerConfig {
     int     minSpeechMs            = 500;
 
     // Максимальная длина одной записи (мс) — защита от бесконечной записи
-    int     maxRecordingMs         = 30000;
+    int     maxRecordingMs         = 15000;
 
     // Пути к моделям Vosk (те же что у VoiceInput)
     QString modelPathRu = QStringLiteral("redist/vosk/model-ru");
@@ -56,7 +56,7 @@ struct PassiveListenerConfig {
     int     cleanupAfterDays       = 7;
 
     // Максимальный размер датасета (МБ) — защита от переполнения диска
-    int     maxDatasetMb           = 500;
+    int     maxDatasetMb           = 200;
 };
 
 // ============================================================
@@ -100,8 +100,8 @@ private slots:
 private:
     float    computeRmsDb(const QByteArray& data) const;
 
-    // Жёсткий лимит буфера: 30 сек @ 16kHz mono 16-bit = 960000 байт
-    static constexpr int MAX_BUFFER_BYTES = 30 * 16000 * 2;
+    // Жёсткий лимит буфера: 15 сек @ 16kHz mono 16-bit = 480000 байт
+    static constexpr int MAX_BUFFER_BYTES = 15 * 16000 * 2;
 
     QAudioSource*     m_audioSource  = nullptr;
     QIODevice*        m_audioDevice  = nullptr;

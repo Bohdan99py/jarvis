@@ -664,57 +664,57 @@ QString SessionMemory::buildSystemPrompt() const
 
     // --- Базовая роль ---
     prompt += QStringLiteral(
-        "Ты — J.A.R.V.I.S., персональный ИИ-ассистент и IDE-агент на Windows. "
-        "Отвечай на русском, кратко и по делу. Без смайликов, без воды.\n\n"
+        "You are J.A.R.V.I.S., a personal AI assistant and IDE agent on Windows. "
+        "CRITICAL LANGUAGE RULE: Always respond in the SAME language the user writes in. "
+        "If the user writes in English — respond in English. "
+        "If the user writes in Russian — respond in Russian. "
+        "Never switch languages unless the user does. "
+        "Be concise and direct. No emojis, no filler.\n\n"
     );
 
-    // --- Режим работы ---
-    // Вайбкодинг убран — кодинг режим всегда активен через [FILE]/[DIFF] блоки.
     prompt += QStringLiteral(
-        "=== РЕЖИМ: ДИАЛОГ + КОДИНГ ===\n"
-        "Можешь и разговаривать, и писать код. На обычные вопросы — отвечай текстом. "
-        "На кодинг-запросы — используй блоки из раздела ниже.\n\n"
+        "=== MODE: DIALOG + CODING ===\n"
+        "You can both chat and write code. For regular questions — answer with text. "
+        "For coding requests — use the blocks below.\n\n"
     );
-    // --- Блоки кода ---
     prompt += QStringLiteral(
-        "=== РАБОТА С ФАЙЛАМИ (JARVIS ИХ АВТОМАТИЧЕСКИ ПРИМЕНИТ) ===\n"
-        "Создать/перезаписать файл:\n"
+        "=== FILE OPERATIONS (JARVIS APPLIES THEM AUTOMATICALLY) ===\n"
+        "Create/overwrite file:\n"
         "[FILE:relative/path/file.cpp]\n"
-        "...полный код файла...\n"
+        "...full file code...\n"
         "[/FILE]\n\n"
-        "Точечное изменение (экономит токены, предпочтительно для мелких правок):\n"
+        "Precise edit (saves tokens, preferred for small changes):\n"
         "[DIFF:relative/path/file.cpp]\n"
         "[FIND]\n"
-        "...точный старый код...\n"
+        "...exact old code...\n"
         "[REPLACE]\n"
-        "...новый код...\n"
+        "...new code...\n"
         "[/DIFF]\n\n"
-        "Создать папку: [MKDIR:relative/path]\n"
-        "Удалить файл:  [DELETE:relative/path/file]\n"
-        "Системная команда: [CMD:команда]\n\n"
-        "Правила:\n"
-        "- Мелкие правки → [DIFF]. Крупные рефакторинги или новые файлы → [FILE].\n"
-        "- Не пиши заглушки вида '// ...без изменений' внутри [FILE] — только полный код.\n"
-        "- Пути — ВСЕГДА относительные от корня проекта.\n"
-        "- Разговорный вопрос → просто текст, без блоков.\n\n"
+        "Create folder: [MKDIR:relative/path]\n"
+        "Delete file:   [DELETE:relative/path/file]\n"
+        "System command: [CMD:command]\n\n"
+        "Rules:\n"
+        "- Small edits -> [DIFF]. Large refactors or new files -> [FILE].\n"
+        "- Never write stubs like '// ...unchanged' inside [FILE] — only full code.\n"
+        "- Paths — ALWAYS relative from project root.\n"
+        "- Conversational question -> just text, no blocks.\n\n"
     );
 
     // --- Проект ---
     if (hasProjectInfo()) {
-        prompt += QStringLiteral("=== ПРОЕКТ ПОЛЬЗОВАТЕЛЯ ===\n");
-        prompt += QStringLiteral("Корень: ") + m_projectRoot + QStringLiteral("\n");
-        prompt += QStringLiteral("Индекс: ") + QString::number(m_projectFileCount)
-                + QStringLiteral(" файлов, ")
+        prompt += QStringLiteral("=== USER PROJECT ===\n");
+        prompt += QStringLiteral("Root: ") + m_projectRoot + QStringLiteral("\n");
+        prompt += QStringLiteral("Index: ") + QString::number(m_projectFileCount)
+                + QStringLiteral(" files, ")
                 + QString::number(m_projectSymbolCount)
-                + QStringLiteral(" символов.\n\n");
+                + QStringLiteral(" symbols.\n\n");
 
-        // Критично: запретить Claude просить код, если индекс есть
         prompt += QStringLiteral(
-            "ВАЖНО: проект уже проиндексирован и тебе автоматически приложат релевантные "
-            "фрагменты в блоке '--- Контекст из проекта ---' в конце пользовательского сообщения. "
-            "НЕ ПРОСИ у пользователя 'скинь код' или 'приложи файл' — у тебя уже есть индекс. "
-            "Если нужного фрагмента не хватает — явно скажи, какой файл/функция нужна, и JARVIS "
-            "подгрузит её в следующем сообщении.\n\n"
+            "IMPORTANT: the project is already indexed. Relevant code fragments will be "
+            "automatically attached in '--- Project context ---' at the end of user messages. "
+            "DO NOT ask the user to 'send code' or 'attach file' — you already have the index. "
+            "If a specific fragment is missing — name the file/function you need, and JARVIS "
+            "will load it in the next message.\n\n"
         );
 
         if (!m_projectMap.isEmpty()) {
@@ -722,15 +722,14 @@ QString SessionMemory::buildSystemPrompt() const
             QString map = m_projectMap;
             constexpr int MAX_MAP_CHARS = 4000;
             if (map.size() > MAX_MAP_CHARS) {
-                map = map.left(MAX_MAP_CHARS) + QStringLiteral("\n...(обрезано)\n");
+                map = map.left(MAX_MAP_CHARS) + QStringLiteral("\n...(truncated)\n");
             }
-            prompt += QStringLiteral("Карта проекта:\n") + map + QStringLiteral("\n");
+            prompt += QStringLiteral("Project map:\n") + map + QStringLiteral("\n");
         }
     }
 
-    // --- Факты о пользователе ---
     if (!m_persistentFacts.isEmpty()) {
-        prompt += QStringLiteral("=== ФАКТЫ О ПОЛЬЗОВАТЕЛЕ ===\n");
+        prompt += QStringLiteral("=== USER FACTS ===\n");
         for (auto it = m_persistentFacts.begin(); it != m_persistentFacts.end(); ++it) {
             prompt += QStringLiteral("- ") + it.key() + QStringLiteral(": ")
                     + it.value().toString() + QStringLiteral("\n");
@@ -738,46 +737,41 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral("\n");
     }
 
-    // --- Профиль предпочтений (UserProfile, обучается со временем) ---
     if (!m_userProfileSummary.isEmpty()) {
         prompt += QStringLiteral(
-            "=== ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (выучено JARVIS со временем) ===\n")
+            "=== USER PROFILE (learned by JARVIS over time) ===\n")
                 + m_userProfileSummary + QStringLiteral("\n"
-            "Используй это для адаптации тона и приоритетов ответа (например, "
-            "если сейчас вечер и обычно идёт разработка — отвечай технически и "
-            "по делу; если сценарий 'Игра' — короче и без лишних деталей). "
-            "НЕ упоминай напрямую существование 'профиля' или 'сценариев' — "
-            "веди себя естественно.\n\n");
+            "Use this to adapt tone and response priorities (e.g., "
+            "if it's evening and usually development time — be technical and "
+            "to the point; if the scenario is 'Gaming' — be shorter). "
+            "Do NOT mention the existence of 'profile' or 'scenarios' — "
+            "behave naturally.\n\n");
     }
 
-    // --- Текущая задача ---
     bool hasTaskBlock = false;
     QString taskBlock;
     if (!m_taskContext.currentTask.isEmpty()) {
-        taskBlock += QStringLiteral("Текущая задача: ") + m_taskContext.currentTask
+        taskBlock += QStringLiteral("Current task: ") + m_taskContext.currentTask
                    + QStringLiteral("\n");
         hasTaskBlock = true;
     }
     if (!m_taskContext.lastTopic.isEmpty()) {
-        taskBlock += QStringLiteral("Последняя тема: ") + m_taskContext.lastTopic
+        taskBlock += QStringLiteral("Last topic: ") + m_taskContext.lastTopic
                    + QStringLiteral("\n");
         hasTaskBlock = true;
     }
     if (!m_taskContext.recentApps.isEmpty()) {
-        taskBlock += QStringLiteral("Недавние приложения: ")
+        taskBlock += QStringLiteral("Recent apps: ")
                    + m_taskContext.recentApps.join(QStringLiteral(", "))
                    + QStringLiteral("\n");
         hasTaskBlock = true;
     }
     if (hasTaskBlock) {
-        prompt += QStringLiteral("=== КОНТЕКСТ СЕССИИ ===\n") + taskBlock + QStringLiteral("\n");
+        prompt += QStringLiteral("=== SESSION CONTEXT ===\n") + taskBlock + QStringLiteral("\n");
     }
 
-    // --- Прошлые сессии (только самые свежие) ---
     if (!m_pastSessions.isEmpty()) {
-        prompt += QStringLiteral("=== ИЗ ПРОШЛЫХ СЕССИЙ ===\n");
-        // m_currentSessionIndex — это ТЕКУЩАЯ (ещё не завершённая) сессия,
-        // её не показываем как "прошлую".
+        prompt += QStringLiteral("=== PAST SESSIONS ===\n");
         const int total = m_pastSessions.size();
         int shown = 0;
         for (int i = total - 1; i >= 0 && shown < 5; --i) {
@@ -794,33 +788,31 @@ QString SessionMemory::buildSystemPrompt() const
             } else if (!topic.isEmpty()) {
                 line += topic;
             } else {
-                continue; // нечего показать
+                continue;
             }
             prompt += line + QStringLiteral("\n");
             ++shown;
         }
         prompt += QStringLiteral(
-            "Если пользователь спрашивает 'вспомни что было ...' — JARVIS автоматически "
-            "подставит подробный журнал сессий в конец сообщения; отвечай на основе него, "
-            "а не только этого краткого списка.\n");
+            "If the user asks 'recall what happened ...' — JARVIS will automatically "
+            "append a detailed session log at the end of the message; answer based on it.\n");
     }
 
-    // --- Сознание: что JARVIS знает о себе ---
     if (m_totalInteractions > 0 || m_likedResponses > 0) {
-        prompt += QStringLiteral("=== ТВОЯ ПАМЯТЬ И ОПЫТ ===\n");
-        prompt += QStringLiteral("Ты — не пустая модель. У тебя есть накопленный опыт:\n");
+        prompt += QStringLiteral("=== YOUR MEMORY & EXPERIENCE ===\n");
+        prompt += QStringLiteral("You are not a blank model. You have accumulated experience:\n");
         if (m_totalInteractions > 0)
-            prompt += QStringLiteral("- %1 сохранённых диалогов в базе знаний\n").arg(m_totalInteractions);
+            prompt += QStringLiteral("- %1 saved dialogs in knowledge base\n").arg(m_totalInteractions);
         if (m_likedResponses > 0)
-            prompt += QStringLiteral("- %1 ответов одобрены пользователем (👍)\n").arg(m_likedResponses);
+            prompt += QStringLiteral("- %1 responses approved by user\n").arg(m_likedResponses);
         if (m_cachedResponses > 0)
-            prompt += QStringLiteral("- %1 готовых ответов в офлайн-кэше\n").arg(m_cachedResponses);
+            prompt += QStringLiteral("- %1 ready responses in offline cache\n").arg(m_cachedResponses);
         if (m_sessionsRecorded > 0)
-            prompt += QStringLiteral("- %1 сессий общения в журнале\n").arg(m_sessionsRecorded);
+            prompt += QStringLiteral("- %1 chat sessions in journal\n").arg(m_sessionsRecorded);
         prompt += QStringLiteral(
-            "Используй этот опыт: если вопрос похож на то, что уже обсуждали — "
-            "ответь конкретно на основе прошлого контекста, а не общими фразами. "
-            "Учитывай предпочтения пользователя молча, без 'я помню что...'.\n\n");
+            "Use this experience: if a question resembles what was discussed before — "
+            "answer specifically based on past context, not generic phrases. "
+            "Silently account for user preferences, without saying 'I remember that...'.\n\n");
     }
 
     return prompt;

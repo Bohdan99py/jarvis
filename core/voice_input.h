@@ -4,13 +4,9 @@
 //
 // Vosk — офлайн ASR, работает без интернета и GPU.
 // При первом запуске показывает диалог выбора моделей.
-// Поддерживаемые языки и модели:
-//   EN small  — ~40 MB   (быстрый старт, хватает для команд)
-//   EN large  — ~1.8 GB  (высокое качество, диктовка)
-//   RU        — ~1.8 GB  (русский, высокое качество)
-//   DE        — ~1.0 GB  (немецкий)
-//   FR        — ~1.0 GB  (французский)
-//   ZH        — ~0.5 GB  (китайский, малая модель)
+// Только лёгкие модели для распознавания команд:
+//   EN small  — ~40 MB   (английские команды + wake word)
+//   RU small  — ~45 MB   (русские команды + wake word)
 //
 // Политика записи:
 //   - Запись активируется ТОЛЬКО при обнаружении голосовой
@@ -37,9 +33,9 @@
 // ============================================================
 
 struct VoskModelInfo {
-    QString id;           // "en-small", "en-large", "ru", "de", "fr", "zh"
-    QString language;     // "en", "ru", "de", "fr", "zh"
-    QString displayName;  // "English (Fast)" и т.п.
+    QString id;           // "en-small", "ru-small"
+    QString language;     // "en", "ru"
+    QString displayName;  // "English", "Russian"
     QString description;  // описание для UI
     QString url;          // URL для скачивания ZIP
     QString zipPrefix;    // имя верхней папки в ZIP
@@ -74,7 +70,7 @@ struct WhisperConfig {
 
     float   silenceDbThreshold  = -45.0f;
     int     silenceAfterSpeechMs = 800;
-    int     maxRecordingMs       = 15000;
+    int     maxRecordingMs       = 10000;
     int     minSpeechMs          = 200;
     QString language    = QStringLiteral("auto");
     QStringList wakeWords = { "джарвис", "jarvis", "джарви" };
@@ -250,8 +246,8 @@ private:
 
     QTimer*       m_unloadTimer    = nullptr;
     WhisperConfig m_lastConfig;        // сохранённый конфиг для ленивой дозагрузки
-    bool          m_lazyLoadEnabled = true;
-    static constexpr int MODEL_UNLOAD_TIMEOUT_MS = 2 * 60 * 1000; // 2 минуты
+    bool          m_lazyLoadEnabled = false;
+    static constexpr int MODEL_UNLOAD_TIMEOUT_MS = 60 * 1000; // 1 минута
 };
 
 // ============================================================

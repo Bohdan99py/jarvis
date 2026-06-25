@@ -76,12 +76,11 @@ message(STATUS "Qt version: ${Qt6_VERSION}")
 #   redist/vosk/vosk_api.h           — заголовок
 #   redist/vosk/libvosk.lib          — import lib для MSVC
 #
-# Модели (папки):
-#   redist/vosk/model-ru/            — vosk-model-ru-0.42 (~1.8GB)
+# Models (small only — for command recognition, not dictation):
 #   redist/vosk/model-en/            — vosk-model-small-en-us-0.15 (~40MB)
+#   redist/vosk/model-ru-small/      — vosk-model-small-ru-0.22 (~45MB)
 #
-# Скачать модели:
-#   https://alphacephei.com/vosk/models
+# Models are downloaded at first run. Large models removed to save ~7GB.
 # ============================================================
 
 set(_vosk_dir "${CMAKE_SOURCE_DIR}/redist/vosk")

@@ -513,14 +513,10 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
     const bool coding = isCodingIntent(userQuery);
 
     constexpr int MAX_FILES          = 3;
-    // 8192-токенный лимит вывода (см. ClaudeApi::MAX_TOKENS) даёт Claude
-    // возможность работать с гораздо большими фрагментами кода — поднимаем
-    // и окно чтения файлов соответственно (ещё в пределах ~3% от 1M
-    // контекста модели, цена входных токенов минимальна: $3/1M).
-    constexpr int MAX_FILE_CHARS     = 40000;
-    constexpr int MAX_TOTAL_CHARS    = 100000;
-    constexpr int MAX_SYMBOL_MATCHES = 8;
-    constexpr int MAX_GREP_HITS      = 10;
+    constexpr int MAX_FILE_CHARS     = 20000;
+    constexpr int MAX_TOTAL_CHARS    = 50000;
+    constexpr int MAX_SYMBOL_MATCHES = 6;
+    constexpr int MAX_GREP_HITS      = 8;
 
     QStringList pickedFiles;
     QSet<QString> pickedFilesSet;
@@ -581,29 +577,26 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
     context.reserve(8192);
     int budget = MAX_TOTAL_CHARS;
 
-    context += QStringLiteral("\n\n--- Контекст из проекта (автоматически от JARVIS) ---\n");
+    context += QStringLiteral("\n\n--- Project context (auto-attached by JARVIS) ---\n");
     context += QStringLiteral("# Root: ") + m_indexer->projectRoot() + QStringLiteral("\n");
     if (coding) {
         context += QStringLiteral(
-            "# Режим: КОДИНГ. Используй приложенные файлы как авторитетный источник. "
-            "Отвечай сразу блоками [FILE:...] или [DIFF:...]. "
-            "Для ИЗМЕНЕНИЯ существующего файла (особенно большого) предпочитай "
-            "[DIFF:...][FIND]...[REPLACE]...[/DIFF] — это экономит токены и не требует "
-            "переписывать весь файл. [FILE:...] используй для НОВЫХ файлов или полной "
-            "перезаписи. Если новый файл получается очень большим и не уместится в один "
-            "ответ — пиши его как обычно одним [FILE:...] блоком до конца контекста: "
-            "JARVIS автоматически попросит тебя дописать остаток, если ответ обрежется "
-            "по лимиту токенов, и склеит файл сам. Если нужен ещё какой-то файл — "
-            "назови его и жди следующего сообщения.\n");
+            "# Mode: CODING. Use attached files as authoritative source. "
+            "Respond with [FILE:...] or [DIFF:...] blocks. "
+            "For MODIFYING existing files (especially large ones) prefer "
+            "[DIFF:...][FIND]...[REPLACE]...[/DIFF] — saves tokens. "
+            "[FILE:...] for NEW files or full rewrites. "
+            "If a new file is very large — write it as one [FILE:...] block: "
+            "JARVIS will auto-continue if the response is truncated.\n");
     } else {
         context += QStringLiteral(
-            "# Режим: ЧТЕНИЕ. Отвечай на вопрос пользователя, опираясь на эти фрагменты.\n");
+            "# Mode: READ. Answer the user's question based on these fragments.\n");
     }
 
     auto appendAndTrim = [&](const QString& chunk) -> bool {
         if (chunk.size() >= budget) {
             context += chunk.left(budget);
-            context += QStringLiteral("\n... (обрезано по лимиту) ...\n");
+            context += QStringLiteral("\n... (truncated) ...\n");
             budget = 0;
             return false;
         }
@@ -620,9 +613,9 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
         QString trimmed = content;
         if (trimmed.size() > MAX_FILE_CHARS) {
             trimmed = trimmed.left(MAX_FILE_CHARS)
-                    + QStringLiteral("\n// ... (файл обрезан, ")
+                    + QStringLiteral("\n// ... (file truncated, ")
                     + QString::number(content.size() - MAX_FILE_CHARS)
-                    + QStringLiteral(" символов скрыто) ...\n");
+                    + QStringLiteral(" chars hidden) ...\n");
         }
 
         QString header = QStringLiteral("\n### FILE: ") + rel + QStringLiteral("\n```\n");
@@ -631,7 +624,7 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
     }
 
     if (budget > 1000 && !symbolHits.isEmpty()) {
-        appendAndTrim(QStringLiteral("\n### Найденные символы:\n"));
+        appendAndTrim(QStringLiteral("\n### Found symbols:\n"));
         int written = 0;
         for (const auto& sym : symbolHits) {
             if (budget <= 500) break;
@@ -650,7 +643,7 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
     }
 
     if (budget > 500 && !grepHits.isEmpty()) {
-        QString block = QStringLiteral("\n### Совпадения grep:\n");
+        QString block = QStringLiteral("\n### Grep matches:\n");
         for (const auto& h : grepHits) {
             block += h.filePath + QStringLiteral(":") + QString::number(h.line)
                    + QStringLiteral("  ") + h.lineText.left(200) + QStringLiteral("\n");
@@ -665,23 +658,21 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
             // карта проекта уже есть в системном промпте, пусть сам
             // спроектирует решение и создаст/изменит нужные файлы.
             context += QStringLiteral(
-                "\n(Автопоиск не нашёл существующих файлов по теме запроса — "
-                "вероятно, это НОВАЯ функциональность. Карта проекта есть "
-                "в системном промпте. Спроектируй реализацию сам: укажи в какие "
-                "существующие файлы добавить код через [DIFF:...] и какие новые "
-                "файлы/папки создать через [FILE:...]/[MKDIR:...]. Не спрашивай "
-                "пользователя «какой файл?» — предложи готовое решение. "
-                "Следуй принципам проекта: минимум новых файлов, единый "
-                "корневой CMakeLists.txt, полные файлы вместо фрагментов.)\n");
+                "\n(Auto-search found no existing files matching the request — "
+                "likely NEW functionality. Project map is in system prompt. "
+                "Design the implementation yourself: specify which existing files "
+                "to modify via [DIFF:...] and which new files to create via "
+                "[FILE:...]/[MKDIR:...]. Don't ask 'which file?' — propose a solution. "
+                "Follow project conventions: minimal new files, single root CMakeLists.txt.)\n");
         } else {
             context += QStringLiteral(
-                "\n(Автопоиск не нашёл прямых совпадений. "
-                "Если пользователь прикрепил файлы «скрепкой» — опирайся на них. "
-                "Если и прикреплений нет — попроси пользователя указать конкретный файл.)\n");
+                "\n(Auto-search found no direct matches. "
+                "If the user attached files — use them. "
+                "If no attachments — ask the user to specify a file.)\n");
         }
     }
 
-    context += QStringLiteral("--- Конец контекста из проекта ---\n");
+    context += QStringLiteral("--- End of project context ---\n");
     return context;
 }
 
@@ -1294,7 +1285,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         auto patterns = db.findPatterns(1, s.toLower());
         if (!patterns.isEmpty()) {
             const DbBehaviorPattern& best = patterns.first();
-            if (best.frequency >= 3 && best.confidence >= 0.6f
+            if (best.frequency >= 2 && best.confidence >= 0.5f
                 && !best.response.isEmpty() && best.response.length() > 10)
             {
                 qDebug() << "[Brain] Offline answer from patterns:"
@@ -1357,9 +1348,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             "If a task is complex — be serious and precise. "
             "Never use filler phrases like 'Of course!' or 'Certainly!'. "
             "Speak naturally, like a person, not a corporate chatbot. "
-            "In Russian: use informal 'ты', be direct, witty, human-like. "
-            "Example of good tone: 'Нашёл. Хотя ты мог бы и сам догадаться.' "
-            "or 'Готово. И нет, ты не первый кто это спрашивает.']\n\n");
+            "CRITICAL: Always respond in the SAME language the user writes in. "
+            "English input -> English response. Russian input -> Russian response. "
+            "In Russian: use informal 'ты', be direct, witty, human-like.]\n\n");
 
         if (!langInstruction.isEmpty()) {
             prefix += QStringLiteral("[LANG_INSTRUCTION: ")
@@ -1397,11 +1388,11 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                     m_memory->updateContext(s, resp2);
                     m_predictor->recordSequence(s);
                     // Auto-cache conversational response for offline
-                    if (resp2.length() <= 1000 && !resp2.contains(QStringLiteral("```"))) {
+                    if (resp2.length() <= 2000 && !resp2.contains(QStringLiteral("```"))) {
                         DbBehaviorPattern cached;
                         cached.userId   = 1;
                         cached.trigger  = s.toLower().simplified();
-                        cached.response = resp2.left(500);
+                        cached.response = resp2.left(1000);
                         cached.context  = QStringLiteral("{}");
                         cached.confidence = 0.7f;
                         DatabaseManager::instance().upsertPattern(cached);
@@ -1456,11 +1447,11 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 m_memory->updateContext(s, response);
                 m_predictor->recordSequence(s);
                 // Auto-cache conversational response for offline
-                if (response.length() <= 1000 && !response.contains(QStringLiteral("```"))) {
+                if (response.length() <= 2000 && !response.contains(QStringLiteral("```"))) {
                     DbBehaviorPattern cached;
                     cached.userId   = 1;
                     cached.trigger  = s.toLower().simplified();
-                    cached.response = response.left(500);
+                    cached.response = response.left(1000);
                     cached.context  = QStringLiteral("{}");
                     cached.confidence = 0.7f;
                     DatabaseManager::instance().upsertPattern(cached);
@@ -1642,11 +1633,8 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
     m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
     m_memory->updateContext(userInput, displayResponse);
 
-    // ── Auto-cache: сохраняем ответ в behavior_patterns для будущего
-    // офлайн-использования. Не кэшируем код-блоки (быстро устаревают)
-    // и слишком длинные ответы (>1000 символов — скорее всего развёрнутый анализ).
     if (!displayResponse.isEmpty()
-        && displayResponse.length() <= 1000
+        && displayResponse.length() <= 2000
         && !displayResponse.contains(QStringLiteral("[FILE:"))
         && !displayResponse.contains(QStringLiteral("[DIFF:"))
         && !displayResponse.contains(QStringLiteral("```")))
@@ -1654,7 +1642,7 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         DbBehaviorPattern cached;
         cached.userId     = 1;
         cached.trigger    = userInput.toLower().simplified();
-        cached.response   = displayResponse.left(500);
+        cached.response   = displayResponse.left(1000);
         cached.context    = QStringLiteral("{}");
         cached.confidence = 0.7f;
         DatabaseManager::instance().upsertPattern(cached);

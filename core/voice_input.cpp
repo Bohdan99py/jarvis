@@ -55,12 +55,12 @@ static void initCatalog()
 {
     if (!g_catalog.isEmpty()) return;
 
-    // ---- English small (40 MB) — быстрый старт ----
+    // ---- English small (40 MB) — command recognition ----
     g_catalog.push_back({
         QStringLiteral("en-small"),
         QStringLiteral("en"),
-        QStringLiteral("English — Fast (Recommended)"),
-        QStringLiteral("40 MB · Commands & wake words · Instant load · Best for most users"),
+        QStringLiteral("English (Recommended)"),
+        QStringLiteral("40 MB · Commands & wake words · Instant load"),
         QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"),
         QStringLiteral("vosk-model-small-en-us-0.15"),
         QStringLiteral("model-en"),
@@ -69,25 +69,11 @@ static void initCatalog()
         true
     });
 
-    // ---- English large (1.8 GB) — диктовка ----
-    g_catalog.push_back({
-        QStringLiteral("en-large"),
-        QStringLiteral("en"),
-        QStringLiteral("English — High Quality"),
-        QStringLiteral("1.8 GB · Dictation & transcription · Slower load · Best accuracy"),
-        QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-en-us-0.42-gigaspeech.zip"),
-        QStringLiteral("vosk-model-en-us-0.42-gigaspeech"),
-        QStringLiteral("model-en-large"),
-        QStringLiteral("am/final.mdl"),
-        1800LL * 1024 * 1024,
-        false
-    });
-
-    // ---- Russian small (45 MB) — быстрый старт ----
+    // ---- Russian small (45 MB) — command recognition ----
     g_catalog.push_back({
         QStringLiteral("ru-small"),
         QStringLiteral("ru"),
-        QStringLiteral("Russian — Быстрая (Рекомендуется)"),
+        QStringLiteral("Russian / Русский (Рекомендуется)"),
         QStringLiteral("45 MB · Команды и wake word · Быстрая загрузка"),
         QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"),
         QStringLiteral("vosk-model-small-ru-0.22"),
@@ -95,62 +81,6 @@ static void initCatalog()
         QStringLiteral("am/final.mdl"),
         45LL * 1024 * 1024,
         true
-    });
-
-    // ---- Russian (1.8 GB) ----
-    g_catalog.push_back({
-        QStringLiteral("ru"),
-        QStringLiteral("ru"),
-        QStringLiteral("Russian — Высокое качество"),
-        QStringLiteral("1.8 GB · Диктовка и команды · Поддержка RU/EN переключения"),
-        QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip"),
-        QStringLiteral("vosk-model-ru-0.42"),
-        QStringLiteral("model-ru"),
-        QStringLiteral("am/final.mdl"),
-        1800LL * 1024 * 1024,
-        false
-    });
-
-    // ---- German (1.0 GB) ----
-    g_catalog.push_back({
-        QStringLiteral("de"),
-        QStringLiteral("de"),
-        QStringLiteral("Deutsch — Hohe Qualität"),
-        QStringLiteral("1.0 GB · Diktat und Befehle"),
-        QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-de-0.21.zip"),
-        QStringLiteral("vosk-model-de-0.21"),
-        QStringLiteral("model-de"),
-        QStringLiteral("am/final.mdl"),
-        1000LL * 1024 * 1024,
-        false
-    });
-
-    // ---- French (1.0 GB) ----
-    g_catalog.push_back({
-        QStringLiteral("fr"),
-        QStringLiteral("fr"),
-        QStringLiteral("Français — Haute qualité"),
-        QStringLiteral("1.0 GB · Dictée et commandes"),
-        QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-fr-0.22.zip"),
-        QStringLiteral("vosk-model-fr-0.22"),
-        QStringLiteral("model-fr"),
-        QStringLiteral("am/final.mdl"),
-        1000LL * 1024 * 1024,
-        false
-    });
-
-    // ---- Chinese small (500 MB) ----
-    g_catalog.push_back({
-        QStringLiteral("zh"),
-        QStringLiteral("zh"),
-        QStringLiteral("中文 — 快速识别"),
-        QStringLiteral("500 MB · 命令和短语"),
-        QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"),
-        QStringLiteral("vosk-model-small-cn-0.22"),
-        QStringLiteral("model-zh"),
-        QStringLiteral("am/final.mdl"),
-        500LL * 1024 * 1024,
-        false
     });
 }
 
@@ -191,9 +121,9 @@ VoskSetupStatus VoskDownloader::checkStatus(const QString& installDir)
     for (const auto& m : VoskModels::catalog()) {
         if (m.isInstalled(installDir)) {
             s.installedModelIds.append(m.id);
-            if (m.id == QStringLiteral("ru") || m.id == QStringLiteral("ru-small"))
+            if (m.language == QStringLiteral("ru"))
                 s.modelRuReady = true;
-            if (m.id == QStringLiteral("en-small") || m.id == QStringLiteral("en-large"))
+            if (m.language == QStringLiteral("en"))
                 s.modelEnReady = true;
         }
     }
@@ -530,7 +460,7 @@ bool VoiceRecorder::start(const WhisperConfig& config)
     }
 
     m_audioSource = new QAudioSource(inputDevice, m_format, this);
-    m_audioSource->setBufferSize(4096);
+    m_audioSource->setBufferSize(2048);
     m_audioDevice = m_audioSource->start();
 
     if (!m_audioDevice) {
@@ -1073,7 +1003,7 @@ VoiceInput::VoiceInput(QObject* parent) : QObject(parent)
     connect(this, &VoiceInput::requestRecognize,    m_worker, &VoskWorker::recognize,    Qt::QueuedConnection);
     connect(this, &VoiceInput::requestReloadModels, m_worker, &VoskWorker::reloadModels, Qt::QueuedConnection);
 
-    m_thread->start(QThread::LowPriority);
+    m_thread->start(QThread::LowestPriority);
 }
 
 VoiceInput::~VoiceInput()
