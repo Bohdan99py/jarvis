@@ -141,7 +141,7 @@ void MacroRecorder::startRecording(const QString& macroName)
     m_timer.restart();
 
     if (!installHooks()) {
-        emit errorOccurred(QStringLiteral("Не удалось установить хуки ввода"));
+        emit errorOccurred(QStringLiteral("Failed to install input hooks"));
         m_recording = false;
         return;
     }
@@ -240,7 +240,7 @@ bool MacroRecorder::play(const QString& name, int repeatCount)
 {
     const auto it = m_macros.find(name);
     if (it == m_macros.end()) {
-        emit errorOccurred(QStringLiteral("Макрос не найден: ") + name);
+        emit errorOccurred(QStringLiteral("Macro not found: ") + name);
         return false;
     }
     return play(it.value(), repeatCount);
@@ -326,9 +326,9 @@ void MacroRecorder::saveMacro(const Macro& macro)
     m_macros[macro.name] = macro;
     const QString path = m_macroDir + QStringLiteral("/") + macro.name + QStringLiteral(".json");
     if (!macro.save(path))
-        emit errorOccurred(QStringLiteral("Не удалось сохранить макрос: ") + path);
+        emit errorOccurred(QStringLiteral("Failed to save macro: ") + path);
     else
-        emit feedbackReady(QStringLiteral("Макрос «%1» сохранён, %2 событий")
+        emit feedbackReady(QStringLiteral("Macro '%1' saved, %2 events")
                                .arg(macro.name).arg(macro.events.size()));
 }
 

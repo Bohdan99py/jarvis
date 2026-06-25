@@ -152,8 +152,8 @@ void VoskDownloader::setupVosk(const QString& installDir, const QStringList& mod
     auto status = checkStatus(installDir);
     if (!status.dllReady) {
         emit setupFinished(false,
-            QStringLiteral("Не удалось установить libvosk.dll.\n"
-                           "Проверьте интернет и попробуйте снова."));
+            QStringLiteral("Failed to install libvosk.dll.\n"
+                           "Check your internet connection and try again."));
         return;
     }
 
@@ -181,12 +181,12 @@ void VoskDownloader::setupVosk(const QString& installDir, const QStringList& mod
 
     status = checkStatus(installDir);
     if (status.anyModelReady()) {
-        emit logMessage(QStringLiteral("🎉 Vosk готов! Голосовой ввод активирован."));
+        emit logMessage(QStringLiteral("🎉 Vosk ready! Voice input activated."));
         emit setupFinished(true, QString());
     } else {
         emit setupFinished(false,
-            QStringLiteral("Ни одна модель не установлена.\n"
-                           "Проверьте подключение к интернету и попробуйте снова."));
+            QStringLiteral("No models installed.\n"
+                           "Check your internet connection and try again."));
     }
 }
 
@@ -224,7 +224,7 @@ void VoskDownloader::downloadModel(const QString& installDir, const QString& mod
         emit setupFinished(true, QString());
     } else {
         emit setupFinished(false,
-            QStringLiteral("Не удалось скачать модель %1").arg(info.displayName));
+            QStringLiteral("Failed to download model %1").arg(info.displayName));
     }
 }
 
@@ -442,7 +442,7 @@ bool VoiceRecorder::start(const WhisperConfig& config)
 
     QAudioDevice inputDevice = QMediaDevices::defaultAudioInput();
     if (inputDevice.isNull()) {
-        emit error(QStringLiteral("Микрофон не найден"));
+        emit error(QStringLiteral("No microphone detected"));
         return false;
     }
 
@@ -454,7 +454,7 @@ bool VoiceRecorder::start(const WhisperConfig& config)
         if (inputDevice.isFormatSupported(m_format)) { found = true; break; }
     }
     if (!found) {
-        emit error(QStringLiteral("Аудиоформат не поддерживается устройством: %1")
+        emit error(QStringLiteral("Audio format not supported by device: %1")
                    .arg(inputDevice.description()));
         return false;
     }
@@ -464,7 +464,7 @@ bool VoiceRecorder::start(const WhisperConfig& config)
     m_audioDevice = m_audioSource->start();
 
     if (!m_audioDevice) {
-        emit error(QStringLiteral("Не удалось открыть микрофон"));
+        emit error(QStringLiteral("Failed to open microphone"));
         return false;
     }
 
@@ -756,10 +756,10 @@ void VoskWorker::reloadModels(const WhisperConfig& config)
 
     m_loaded = any;
     emit modelsLoaded(any, any ? QString()
-        : QStringLiteral("Не удалось загрузить ни одной модели Vosk"));
+        : QStringLiteral("Failed to load any Vosk models"));
 #else
     Q_UNUSED(config)
-    emit modelsLoaded(false, QStringLiteral("Vosk stub build — модели недоступны"));
+    emit modelsLoaded(false, QStringLiteral("Vosk stub build — models unavailable"));
 #endif
 }
 
@@ -828,14 +828,14 @@ void VoskWorker::recognize(QByteArray pcmData, QString preferredLang)
 {
 #ifdef JARVIS_VOSK_AVAILABLE
     if (!m_loaded) {
-        emit error(QStringLiteral("Модели не загружены"));
+        emit error(QStringLiteral("Models not loaded"));
         return;
     }
 
     startUnloadTimer();
 
     if (m_models.isEmpty()) {
-        emit error(QStringLiteral("Модели не загружены"));
+        emit error(QStringLiteral("Models not loaded"));
         return;
     }
 
@@ -1251,7 +1251,7 @@ void VoiceInput::onModelsLoaded(bool success, const QString& err)
 void VoiceInput::startListening()
 {
     if (!m_initialized) {
-        emit errorOccurred(QStringLiteral("Голосовой ввод ещё не готов"));
+        emit errorOccurred(QStringLiteral("Voice input not ready yet"));
         return;
     }
     if (m_listening) return;

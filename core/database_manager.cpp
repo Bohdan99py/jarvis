@@ -322,6 +322,37 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=5");
         ver = 5;
     }
+    if (ver < 6) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS activity_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL DEFAULT 1,
+            app_name    TEXT    NOT NULL,
+            window_title TEXT   NOT NULL DEFAULT '',
+            category    TEXT    NOT NULL DEFAULT 'other',
+            duration_sec INTEGER NOT NULL DEFAULT 0,
+            hour_of_day INTEGER NOT NULL DEFAULT 0,
+            day_of_week INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id, created_at DESC)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_activity_cat  ON activity_log(user_id, category, hour_of_day)");
+        execQuery(R"(CREATE TABLE IF NOT EXISTS knowledge_base (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         INTEGER NOT NULL DEFAULT 1,
+            category        TEXT    NOT NULL DEFAULT 'general',
+            key             TEXT    NOT NULL,
+            value           TEXT    NOT NULL,
+            confidence      REAL    NOT NULL DEFAULT 0.5,
+            reinforcements  INTEGER NOT NULL DEFAULT 1,
+            learned_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            last_seen       TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(user_id, key)
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_kb_user ON knowledge_base(user_id, category)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_kb_conf ON knowledge_base(user_id, confidence DESC)");
+        execQuery("UPDATE schema_version SET version=6");
+        ver = 6;
+    }
     return true;
 }
 

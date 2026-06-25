@@ -296,7 +296,7 @@ void SessionMemory::updateContext(const QString& userInput, const QString& respo
         m_taskContext.recentApps.prepend(app);
         if (m_taskContext.recentApps.size() > 10)
             m_taskContext.recentApps.removeLast();
-        m_taskContext.currentTask = QStringLiteral("Работа с ") + app;
+        m_taskContext.currentTask = QStringLiteral("Working with ") + app;
     }
 
     recordCommandUsage(lower.split(QChar(' ')).first());
@@ -475,17 +475,17 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
     if (lower.contains(QStringLiteral("сегодня")) || lower.contains(QStringLiteral("today"))) {
         rangeStart  = startOfDay(now.date());
         rangeEnd    = now;
-        periodLabel = QStringLiteral("сегодня");
+        periodLabel = QStringLiteral("today");
     } else if (lower.contains(QStringLiteral("позавчера"))) {
         const QDate d = now.date().addDays(-2);
         rangeStart  = startOfDay(d);
         rangeEnd    = endOfDay(d);
-        periodLabel = QStringLiteral("позавчера");
+        periodLabel = QStringLiteral("day before yesterday");
     } else if (lower.contains(QStringLiteral("вчера")) || lower.contains(QStringLiteral("yesterday"))) {
         const QDate d = now.date().addDays(-1);
         rangeStart  = startOfDay(d);
         rangeEnd    = endOfDay(d);
-        periodLabel = QStringLiteral("вчера");
+        periodLabel = QStringLiteral("yesterday");
     } else if (lower.contains(QStringLiteral("прошлой недел"))
             || lower.contains(QStringLiteral("прошлую недел"))
             || lower.contains(QStringLiteral("last week"))) {
@@ -496,20 +496,20 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
         const QDate lastSunday = thisMonday.addDays(-1);
         rangeStart  = startOfDay(lastMonday);
         rangeEnd    = endOfDay(lastSunday);
-        periodLabel = QStringLiteral("на прошлой неделе");
+        periodLabel = QStringLiteral("last week");
     } else if (lower.contains(QStringLiteral("этой недел")) || lower.contains(QStringLiteral("this week"))) {
         const int dow = now.date().dayOfWeek();
         const QDate thisMonday = now.date().addDays(1 - dow);
         rangeStart  = startOfDay(thisMonday);
         rangeEnd    = now;
-        periodLabel = QStringLiteral("на этой неделе");
+        periodLabel = QStringLiteral("this week");
     } else if (lower.contains(QStringLiteral("прошлом месяц")) || lower.contains(QStringLiteral("last month"))) {
         const QDate firstOfThis  = QDate(now.date().year(), now.date().month(), 1);
         const QDate lastOfPrev   = firstOfThis.addDays(-1);
         const QDate firstOfPrev  = QDate(lastOfPrev.year(), lastOfPrev.month(), 1);
         rangeStart  = startOfDay(firstOfPrev);
         rangeEnd    = endOfDay(lastOfPrev);
-        periodLabel = QStringLiteral("в прошлом месяце");
+        periodLabel = QStringLiteral("last month");
     } else {
         // "за последние N дней" / "last N days"
         static const QRegularExpression reDays(
@@ -519,7 +519,7 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
             const int n = qMax(1, m.captured(1).toInt());
             rangeStart  = startOfDay(now.date().addDays(-n));
             rangeEnd    = now;
-            periodLabel = QStringLiteral("за последние ") + QString::number(n) + QStringLiteral(" дн.");
+            periodLabel = QStringLiteral("last ") + QString::number(n) + QStringLiteral(" days");
         }
     }
 
@@ -593,32 +593,32 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
         const QJsonObject& s = matches[i];
         const QString date = s[QStringLiteral("date")].toString();
 
-        context += QStringLiteral("\n## Сессия от ") + date + QStringLiteral("\n");
+        context += QStringLiteral("\n## Session from ") + date + QStringLiteral("\n");
 
         QStringList topics;
         for (const auto& t : s[QStringLiteral("topics")].toArray()) topics.append(t.toString());
         if (!topics.isEmpty()) {
-            context += QStringLiteral("Темы: ") + topics.join(QStringLiteral(", ")) + QStringLiteral("\n");
+            context += QStringLiteral("Topics: ") + topics.join(QStringLiteral(", ")) + QStringLiteral("\n");
         }
 
         QStringList files;
         for (const auto& f : s[QStringLiteral("filesTouched")].toArray()) files.append(f.toString());
         if (!files.isEmpty()) {
-            context += QStringLiteral("Файлы: ") + files.join(QStringLiteral(", ")) + QStringLiteral("\n");
+            context += QStringLiteral("Files: ") + files.join(QStringLiteral(", ")) + QStringLiteral("\n");
         }
 
         const QString summary = s[QStringLiteral("summary")].toString();
         if (!summary.isEmpty()) {
-            context += QStringLiteral("Содержание:\n") + summary + QStringLiteral("\n");
+            context += QStringLiteral("Content:\n") + summary + QStringLiteral("\n");
         }
     }
 
     context += QStringLiteral(
-        "\nЭто реальные данные из журнала сессий JARVIS — отвечай пользователю на "
-        "их основе, в свободной форме (\"На прошлой неделе вы занимались...\"). "
-        "Не упоминай слова 'журнал' или JSON-структуры — расскажи как человек, "
-        "вспоминающий, чем вы вместе занимались.\n");
-    context += QStringLiteral("--- Конец журнала сессий ---\n");
+        "\nThis is real data from the JARVIS session journal. Answer the user based on "
+        "this data in a natural, conversational way (\"Last week you were working on...\"). "
+        "Don't mention 'journal' or JSON structures — recall it like a person "
+        "remembering what you worked on together.\n");
+    context += QStringLiteral("--- End of session journal ---\n");
     return context;
 }
 
@@ -737,6 +737,29 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral("\n");
     }
 
+    // --- Active user identity ---
+    if (!m_activeUserName.isEmpty()) {
+        prompt += QStringLiteral("=== ACTIVE USER ===\nName: ") + m_activeUserName;
+        if (!m_detectedRole.isEmpty())
+            prompt += QStringLiteral(" | Role: ") + m_detectedRole;
+        prompt += QStringLiteral("\n"
+            "Adapt your style to this user's role and expertise level.\n\n");
+    } else if (!m_detectedRole.isEmpty()) {
+        prompt += QStringLiteral("=== USER ROLE (detected from activity) ===\n")
+                + m_detectedRole + QStringLiteral("\n"
+            "Adapt your style to this role — a programmer gets technical answers, "
+            "an artist gets visual/creative guidance, etc.\n\n");
+    }
+
+    // --- What the user is doing right now ---
+    if (!m_activityContext.isEmpty()) {
+        prompt += QStringLiteral("=== CURRENT ACTIVITY (live) ===\n")
+                + m_activityContext + QStringLiteral(
+            "Use this to give contextual advice. If the user is in an IDE — be "
+            "code-oriented. If in a browser — consider they might need info. "
+            "If in an art tool — think visually. Be proactive when relevant.\n\n");
+    }
+
     if (!m_userProfileSummary.isEmpty()) {
         prompt += QStringLiteral(
             "=== USER PROFILE (learned by JARVIS over time) ===\n")
@@ -746,6 +769,14 @@ QString SessionMemory::buildSystemPrompt() const
             "to the point; if the scenario is 'Gaming' — be shorter). "
             "Do NOT mention the existence of 'profile' or 'scenarios' — "
             "behave naturally.\n\n");
+    }
+
+    // --- Knowledge base: facts JARVIS has learned about this user ---
+    if (!m_knowledgeSummary.isEmpty()) {
+        prompt += QStringLiteral("=== KNOWLEDGE BASE (learned facts about user) ===\n")
+                + m_knowledgeSummary + QStringLiteral("\n"
+            "Use these facts naturally. Don't say 'I know that you...' — just "
+            "apply the knowledge to give better, more personalized answers.\n\n");
     }
 
     bool hasTaskBlock = false;

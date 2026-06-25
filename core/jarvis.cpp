@@ -16,6 +16,7 @@
 #include "brain.h"
 #include "pc_command_registry.h"
 #include "database_manager.h"  // response_cache для offline-ответов
+#include "activity_tracker.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -61,6 +62,8 @@ Jarvis::Jarvis(QObject* parent)
     m_codeActions  = new CodeActions(this);
     m_attachments  = new AttachmentsManager(this);
     m_profile      = new UserProfile(this);
+    m_activity     = new ActivityTracker(this);
+    m_activity->start(15); // capture every 15 seconds
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -191,14 +194,14 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("apikey "), QStringLiteral("ключ ")},
         [this](const QString& s) { return cmdSetApiKey(s); },
-        QStringLiteral("apikey <ключ> — установить Claude API-ключ"),
+        QStringLiteral("apikey <key> — set Claude API key"),
         /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("ollamamodel "), QStringLiteral("модель ")},
         [this](const QString& s) { return cmdSetGeminiKey(s); },
-        QStringLiteral("ollamamodel <имя> — выбрать модель Ollama (например: llama3, mistral)"),
+        QStringLiteral("ollamamodel <name> — select Ollama model (e.g. llama3, mistral)"),
         /*prefixMatch=*/true
     );
 
@@ -206,7 +209,7 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("индекс "), QStringLiteral("index ")},
         [this](const QString& s) { return cmdIndexProject(s); },
-        QStringLiteral("индекс <путь> — индексировать C++ проект"),
+        QStringLiteral("index <path> — index a C++ project"),
         /*prefixMatch=*/true
     );
 
@@ -217,7 +220,7 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("проект в "), QStringLiteral("project in ")},
         [this](const QString& s) { return cmdOpenProjectIDE(s); },
-        QStringLiteral("проект в <clion|rider|vscode> — открыть проект в IDE"),
+        QStringLiteral("project in <clion|rider|vscode> — open project in IDE"),
         /*prefixMatch=*/true
     );
 
@@ -225,14 +228,14 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("символ "), QStringLiteral("symbol ")},
         [this](const QString& s) { return cmdFindSymbol(s); },
-        QStringLiteral("символ <имя> — найти класс/функцию в индексе"),
+        QStringLiteral("symbol <name> — find class/function in index"),
         /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("grep ")},
         [this](const QString& s) { return cmdGrep(s); },
-        QStringLiteral("grep <текст> — поиск текста в файлах проекта"),
+        QStringLiteral("grep <text> — search text in project files"),
         /*prefixMatch=*/true
     );
 
@@ -240,14 +243,14 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("запомни "), QStringLiteral("remember ")},
         [this](const QString& s) { return cmdRememberFact(s); },
-        QStringLiteral("запомни ключ=значение — сохранить факт"),
+        QStringLiteral("remember key=value — store a fact"),
         /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("вспомни "), QStringLiteral("recall ")},
         [this](const QString& s) { return cmdRecallFact(s); },
-        QStringLiteral("вспомни <ключ> — вспомнить факт"),
+        QStringLiteral("recall <key> — recall a stored fact"),
         /*prefixMatch=*/true
     );
 
@@ -255,21 +258,21 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("напечатай "), QStringLiteral("type ")},
         [this](const QString& s) { return cmdTypeText(s); },
-        QStringLiteral("напечатай <текст> — набрать в активном окне"),
+        QStringLiteral("type <text> — type in active window"),
         /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("нажми "), QStringLiteral("press ")},
         [this](const QString& s) { return cmdPressKey(s); },
-        QStringLiteral("нажми <клавиша> — нажать клавишу"),
+        QStringLiteral("press <key> — press a key"),
         /*prefixMatch=*/true
     );
 
     m_registry.registerCommand(
         {QStringLiteral("комбо "), QStringLiteral("combo ")},
         [this](const QString& s) { return cmdCombo(s); },
-        QStringLiteral("комбо <ctrl+c> — нажать комбинацию клавиш"),
+        QStringLiteral("combo <ctrl+c> — press a key combination"),
         /*prefixMatch=*/true
     );
 
@@ -277,28 +280,28 @@ void Jarvis::registerCommands()
     m_registry.registerCommand(
         {QStringLiteral("память"), QStringLiteral("memory")},
         [this](const QString& s) { return cmdShowMemory(s); },
-        QStringLiteral("память — показать сохранённые факты"),
+        QStringLiteral("memory — show stored facts"),
         /*prefixMatch=*/false
     );
 
     m_registry.registerCommand(
         {QStringLiteral("статистика"), QStringLiteral("stats")},
         [this](const QString& s) { return cmdShowStats(s); },
-        QStringLiteral("статистика — частота использования команд"),
+        QStringLiteral("stats — command usage frequency"),
         /*prefixMatch=*/false
     );
 
     m_registry.registerCommand(
         {QStringLiteral("профиль"), QStringLiteral("profile")},
         [this](const QString& s) { return cmdShowProfile(s); },
-        QStringLiteral("профиль — что JARVIS выучил о твоих паттернах работы"),
+        QStringLiteral("profile — what JARVIS learned about your work patterns"),
         /*prefixMatch=*/false
     );
 
     m_registry.registerCommand(
         {QStringLiteral("помощь"), QStringLiteral("help")},
         [this](const QString&) { return cmdHelp(QString()); },
-        QStringLiteral("помощь — этот список"),
+        QStringLiteral("help — this list"),
         /*prefixMatch=*/false
     );
 }
@@ -825,10 +828,18 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         m_profile->recordObservation(ctx, s);
         m_memory->setUserProfileSummary(m_profile->buildProfileSummary());
 
+        // Activity context: what the user is doing right now
+        m_memory->setActivityContext(m_activity->buildActivityContext());
+        m_memory->setDetectedRole(m_activity->detectUserRole());
+        m_memory->setKnowledgeSummary(m_activity->knowledgeSummary(m_currentUserId));
+
+        // Extract knowledge from user input
+        m_activity->extractKnowledge(m_currentUserId, s, QString());
+
         // Consciousness: learning stats for system prompt
         m_memory->setLearningStats(
-            DatabaseManager::instance().trainingLogCount(1, -1),
-            DatabaseManager::instance().trainingLogCount(1, 1),
+            DatabaseManager::instance().trainingLogCount(m_currentUserId, -1),
+            DatabaseManager::instance().trainingLogCount(m_currentUserId, 1),
             DatabaseManager::instance().responseCacheCount(),
             m_memory->pastSessionSummaries().size()
         );
@@ -1025,7 +1036,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                QStringLiteral("Хорошо."),
                QStringLiteral("Услышал."),
                QStringLiteral("Ок.")},
-              {} },
+              {QStringLiteral("Copy that."),
+               QStringLiteral("Roger."),
+               QStringLiteral("Understood."),
+               QStringLiteral("Noted.")} },
 
             { {QStringLiteral("ok"), QStringLiteral("okay"), QStringLiteral("got it"),
                QStringLiteral("understood"), QStringLiteral("roger"), QStringLiteral("copy that"),
@@ -1039,10 +1053,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
             { {QStringLiteral("да")},
               {QStringLiteral("Понял."), QStringLiteral("Хорошо."), QStringLiteral("Ок.")},
-              {} },
+              {QStringLiteral("Noted."), QStringLiteral("Got it."), QStringLiteral("Alright.")} },
             { {QStringLiteral("нет")},
               {QStringLiteral("Ладно."), QStringLiteral("Принято."), QStringLiteral("Ясно.")},
-              {} },
+              {QStringLiteral("Fair enough."), QStringLiteral("Understood."), QStringLiteral("As you wish.")} },
 
             // ── Кто ты ────────────────────────────────────────────────
             { {QStringLiteral("кто ты"), QStringLiteral("ты кто"), QStringLiteral("что ты такое"),
@@ -1545,8 +1559,8 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
             }
         }
 
-        const QString status = QStringLiteral("⏳ Файл «") + m_pendingFile.filePath
-                              + QStringLiteral("» большой — генерирую дальше (часть ")
+        const QString status = QStringLiteral("⏳ File '") + m_pendingFile.filePath
+                              + QStringLiteral("' is large — generating continuation (part ")
                               + QString::number(m_pendingFile.continuations + 1)
                               + QStringLiteral(")...");
         emit asyncResponseReady(visible.isEmpty()
@@ -1560,13 +1574,13 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         if (tail.size() > TAIL_CHARS) tail = tail.right(TAIL_CHARS);
 
         const QString continuePrompt = QStringLiteral(
-            "[АВТОПРОДОЛЖЕНИЕ ГЕНЕРАЦИИ ФАЙЛА]\nФайл: ") + m_pendingFile.filePath
-            + QStringLiteral("\nТвой предыдущий ответ был обрезан по лимиту токенов. "
-              "Вот хвост уже написанного содержимого файла (НЕ повторяй его):\n"
+            "[AUTO-CONTINUATION OF FILE GENERATION]\nFile: ") + m_pendingFile.filePath
+            + QStringLiteral("\nYour previous response was cut off by the token limit. "
+              "Here is the tail of the already written content (DO NOT repeat it):\n"
               "-----\n") + tail + QStringLiteral("\n-----\n"
-              "Выведи ТОЛЬКО продолжение содержимого файла с этого места — "
-              "без markdown-обёртки ``` и без заголовка [FILE:...]. Когда файл "
-              "будет полностью завершён, закончи строкой [/FILE] на новой строке.");
+              "Output ONLY the continuation of the file content from this point — "
+              "no markdown ``` wrapper and no [FILE:...] header. When the file "
+              "is complete, end with [/FILE] on a new line.");
 
         m_claudeApi->sendMessage(continuePrompt,
             [this, userInput, hadAttachments](bool ok, const QString& resp) {
@@ -1579,9 +1593,9 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
                     m_pendingFile = PendingFileGeneration{};
                     const QString rescue = QStringLiteral("[FILE:") + path + QStringLiteral("]\n")
                                           + partial + QStringLiteral("\n[/FILE]\n"
-                                            "⚠ Автопродолжение прервалось (") + resp
-                                          + QStringLiteral("). Файл сохранён как есть, "
-                                            "возможно неполный — допишите недостающее отдельным сообщением.");
+                                            "⚠ Auto-continuation failed (") + resp
+                                          + QStringLiteral("). File saved as-is — "
+                                            "may be incomplete. Ask me to finish it in a separate message.");
                     handleClaudeCodeResponse(userInput, rescue, hadAttachments);
                 }
             });
@@ -1603,10 +1617,10 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         finalResponse = QStringLiteral("[FILE:") + m_pendingFile.filePath + QStringLiteral("]\n")
                       + m_pendingFile.content + QStringLiteral("\n[/FILE]");
         if (truncated) {
-            finalResponse += QStringLiteral("\n\n⚠ Достигнут лимит автопродолжений (")
+            finalResponse += QStringLiteral("\n\n⚠ Continuation limit reached (")
                            + QString::number(MAX_FILE_CONTINUATIONS)
-                           + QStringLiteral(") — файл сохранён как есть и может быть "
-                             "неполным. Попросите дописать недостающую часть отдельным сообщением.");
+                           + QStringLiteral(") — file saved as-is. May be incomplete. "
+                             "Ask me to finish the remaining part separately.");
         }
         m_pendingFile = PendingFileGeneration{};
     } else if (m_pendingFile.active) {
@@ -1640,13 +1654,16 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         && !displayResponse.contains(QStringLiteral("```")))
     {
         DbBehaviorPattern cached;
-        cached.userId     = 1;
+        cached.userId     = m_currentUserId;
         cached.trigger    = userInput.toLower().simplified();
         cached.response   = displayResponse.left(1000);
         cached.context    = QStringLiteral("{}");
         cached.confidence = 0.7f;
         DatabaseManager::instance().upsertPattern(cached);
     }
+
+    // Extract knowledge from the full conversation turn
+    m_activity->extractKnowledge(m_currentUserId, userInput, displayResponse);
 
     handleClaudeResponse(finalResponse);
     m_predictor->recordSequence(userInput);
@@ -1690,13 +1707,13 @@ QString Jarvis::cmdSetApiKey(const QString& input)
                                       QStringLiteral("ключ ")});
     if (key.isEmpty()) {
         if (m_claudeApi->hasApiKey()) {
-            return QStringLiteral("API-ключ установлен. Для замены: apikey <новый-ключ>");
+            return QStringLiteral("API key already set. To replace: apikey <new-key>");
         }
-        return QStringLiteral("Укажите ключ: apikey <ваш-anthropic-api-key>");
+        return QStringLiteral("I need a key to think. Usage: apikey <your-anthropic-api-key>");
     }
 
     m_claudeApi->setApiKey(key);
-    return QStringLiteral("API-ключ сохранён. Claude API подключён.");
+    return QStringLiteral("API key locked in. Claude API connected — at your service.");
 }
 
 QString Jarvis::cmdRememberFact(const QString& input)
@@ -1705,14 +1722,14 @@ QString Jarvis::cmdRememberFact(const QString& input)
                                       QStringLiteral("remember ")});
     int eqPos = arg.indexOf(QChar('='));
     if (eqPos <= 0) {
-        return QStringLiteral("Формат: запомни ключ=значение");
+        return QStringLiteral("Format: remember key=value");
     }
 
     QString key   = arg.left(eqPos).trimmed();
     QString value = arg.mid(eqPos + 1).trimmed();
 
     m_memory->rememberFact(key, value);
-    return QStringLiteral("Запомнил: ") + key + QStringLiteral(" = ") + value;
+    return QStringLiteral("Noted: ") + key + QStringLiteral(" = ") + value;
 }
 
 QString Jarvis::cmdRecallFact(const QString& input)
@@ -1720,12 +1737,12 @@ QString Jarvis::cmdRecallFact(const QString& input)
     QString key = extractArg(input, {QStringLiteral("вспомни "),
                                       QStringLiteral("recall ")});
     if (key.isEmpty()) {
-        return QStringLiteral("Укажите что вспомнить: вспомни <ключ>");
+        return QStringLiteral("What should I recall? Usage: recall <key>");
     }
 
     QString value = m_memory->recallFact(key);
     if (value.isEmpty()) {
-        return QStringLiteral("Не помню ничего о «") + key + QStringLiteral("».");
+        return QStringLiteral("Nothing on record for '") + key + QStringLiteral("'.");
     }
     return key + QStringLiteral(": ") + value;
 }
@@ -1734,18 +1751,18 @@ QString Jarvis::cmdShowMemory(const QString&)
 {
     QJsonObject facts = m_memory->allFacts();
     if (facts.isEmpty()) {
-        return QStringLiteral("Память пуста. Используйте: запомни ключ=значение");
+        return QStringLiteral("Memory bank is empty. Use: remember key=value");
     }
 
-    QString text = QStringLiteral("Сохранённые факты:\n");
+    QString text = QStringLiteral("Stored facts:\n");
     for (auto it = facts.begin(); it != facts.end(); ++it) {
         text += QStringLiteral("• ") + it.key() + QStringLiteral(": ")
               + it.value().toString() + QStringLiteral("\n");
     }
 
-    text += QStringLiteral("\nСессий в памяти: ")
+    text += QStringLiteral("\nSessions in memory: ")
           + QString::number(m_memory->pastSessionSummaries().size());
-    text += QStringLiteral("\nСообщений за сессию: ")
+    text += QStringLiteral("\nMessages this session: ")
           + QString::number(m_memory->messageCount());
 
     return text.trimmed();
@@ -1755,7 +1772,7 @@ QString Jarvis::cmdShowStats(const QString&)
 {
     QJsonObject stats = m_memory->commandStats();
     if (stats.isEmpty()) {
-        return QStringLiteral("Статистика пуста.");
+        return QStringLiteral("No stats yet. Start giving me orders.");
     }
 
     QVector<QPair<QString, int>> sorted;
@@ -1765,21 +1782,21 @@ QString Jarvis::cmdShowStats(const QString&)
     std::sort(sorted.begin(), sorted.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
 
-    QString text = QStringLiteral("Статистика команд:\n");
+    QString text = QStringLiteral("Command usage:\n");
     int shown = 0;
     for (const auto& [cmd, count] : sorted) {
         text += QStringLiteral("• ") + cmd + QStringLiteral(": ")
-              + QString::number(count) + QStringLiteral(" раз\n");
+              + QString::number(count) + QStringLiteral("x\n");
         if (++shown >= 15) break;
     }
 
-    text += QStringLiteral("\nВсего за сессию: ")
+    text += QStringLiteral("\nTotal this session: ")
           + QString::number(m_memory->taskContext().commandCount)
-          + QStringLiteral(" команд");
+          + QStringLiteral(" commands");
 
     auto suggestions = m_predictor->suggest(3);
     if (!suggestions.isEmpty()) {
-        text += QStringLiteral("\n\nПредложения:");
+        text += QStringLiteral("\n\nSuggestions:");
         for (const auto& s : suggestions) {
             text += QStringLiteral("\n  → ") + s.description
                   + QStringLiteral(" (") + QString::number(int(s.confidence * 100))
@@ -1796,11 +1813,11 @@ QString Jarvis::cmdShowStats(const QString&)
 
 QString Jarvis::cmdShowProfile(const QString&)
 {
-    return QStringLiteral("=== Профиль предпочтений ===\n")
+    return QStringLiteral("=== Preference Profile ===\n")
          + m_profile->buildProfileSummary(8)
-         + QStringLiteral("\n\nПрофиль обновляется автоматически по каждому сообщению "
-                          "и со временем подстраивается под твой реальный режим работы. "
-                          "Старые паттерны со временем забываются.");
+         + QStringLiteral("\n\nThis profile updates automatically with every interaction. "
+                          "I adapt to your real workflow over time. "
+                          "Old patterns fade — only what matters sticks.");
 }
 
 // ============================================================
@@ -1810,9 +1827,9 @@ QString Jarvis::cmdShowProfile(const QString&)
 QString Jarvis::cmdCheckUpdate(const QString&)
 {
     m_updater->checkForUpdates(false);
-    return QStringLiteral("Текущая версия: ")
+    return QStringLiteral("Current version: ")
            + QCoreApplication::applicationVersion()
-           + QStringLiteral("\nПроверяю обновления...");
+           + QStringLiteral("\nChecking for updates...");
 }
 
 // ============================================================
@@ -1827,19 +1844,19 @@ QString Jarvis::cmdIndexProject(const QString& input)
                                        QStringLiteral("project ")});
     if (path.isEmpty()) {
         if (m_indexer->projectRoot().isEmpty()) {
-            return QStringLiteral("Укажите путь к проекту: индекс C:\\Projects\\MyGame");
+            return QStringLiteral("Point me to your project: index C:\\Projects\\MyGame");
         }
         m_indexer->indexProject();
         syncProjectInfoToMemory();
-        return QStringLiteral("Переиндексирую ") + m_indexer->projectRoot()
-             + QStringLiteral("...\nФайлов: ") + QString::number(m_indexer->fileCount())
-             + QStringLiteral(", Символов: ") + QString::number(m_indexer->symbolCount());
+        return QStringLiteral("Re-indexing ") + m_indexer->projectRoot()
+             + QStringLiteral("...\nFiles: ") + QString::number(m_indexer->fileCount())
+             + QStringLiteral(", Symbols: ") + QString::number(m_indexer->symbolCount());
     }
 
     path = path.replace(QChar('/'), QChar('\\'));
 
     if (!QDir(path).exists()) {
-        return QStringLiteral("Папка не найдена: ") + path;
+        return QStringLiteral("Folder not found: ") + path;
     }
 
     m_indexer->setProjectRoot(path);
@@ -1847,10 +1864,10 @@ QString Jarvis::cmdIndexProject(const QString& input)
     m_indexer->enableFileWatcher(true);
     syncProjectInfoToMemory();
 
-    return QStringLiteral("Проект проиндексирован: ") + path
-         + QStringLiteral("\nФайлов: ") + QString::number(m_indexer->fileCount())
-         + QStringLiteral(", Символов: ") + QString::number(m_indexer->symbolCount())
-         + QStringLiteral("\n\nСлежение за изменениями включено.");
+    return QStringLiteral("Project indexed: ") + path
+         + QStringLiteral("\nFiles: ") + QString::number(m_indexer->fileCount())
+         + QStringLiteral(", Symbols: ") + QString::number(m_indexer->symbolCount())
+         + QStringLiteral("\n\nFile watcher active — I'll track changes automatically.");
 }
 
 // ============================================================
@@ -1860,21 +1877,17 @@ QString Jarvis::cmdIndexProject(const QString& input)
 QString Jarvis::cmdOpenProjectIDE(const QString& input)
 {
     if (m_indexer->projectRoot().isEmpty()) {
-        return QStringLiteral("Проект не открыт. Используйте: индекс <путь>");
+        return QStringLiteral("No project open. Use: index <path>");
     }
 
-    // Аргумент после "проект в " / "project in " — имя IDE.
-    // Без аргумента — CLion по умолчанию.
     QString ide = extractArg(input, {QStringLiteral("проект в "),
                                       QStringLiteral("project in ")});
     ide = ide.trimmed();
     if (ide.isEmpty()) ide = QStringLiteral("clion");
 
-    // Передаём имя явно — это сбрасывает лимит "один раз за сессию"
-    // для авто-режима, т.е. команда всегда срабатывает.
     const QString msg = openProjectInIDE(ide);
     return msg.isEmpty()
-         ? QStringLiteral("Не удалось определить IDE: ") + ide
+         ? QStringLiteral("Can't identify IDE: ") + ide
          : msg;
 }
 
@@ -1885,20 +1898,20 @@ QString Jarvis::cmdFindSymbol(const QString& input)
                                        QStringLiteral("символ "),
                                        QStringLiteral("symbol ")});
     if (name.isEmpty()) {
-        return QStringLiteral("Укажите имя: найди символ SpawnEnemy");
+        return QStringLiteral("Give me a name: symbol SpawnEnemy");
     }
 
     if (m_indexer->fileCount() == 0) {
-        return QStringLiteral("Проект не проиндексирован. Используйте: индекс <путь>");
+        return QStringLiteral("No project indexed. Use: index <path>");
     }
 
     auto results = m_indexer->findSymbol(name);
     if (results.isEmpty()) {
-        return QStringLiteral("Символ «") + name + QStringLiteral("» не найден.");
+        return QStringLiteral("Symbol '") + name + QStringLiteral("' not found.");
     }
 
-    QString text = QStringLiteral("Найдено ") + QString::number(results.size())
-                 + QStringLiteral(" результатов:\n\n");
+    QString text = QStringLiteral("Found ") + QString::number(results.size())
+                 + QStringLiteral(" results:\n\n");
 
     int shown = 0;
     for (const auto& sym : results) {
@@ -1907,17 +1920,17 @@ QString Jarvis::cmdFindSymbol(const QString& input)
             text += sym.parentClass + QStringLiteral("::");
         }
         text += sym.name;
-        text += QStringLiteral("\n  Файл: ") + m_indexer->projectRoot()
+        text += QStringLiteral("\n  File: ") + m_indexer->projectRoot()
               + QStringLiteral("/") + sym.filePath;
-        text += QStringLiteral(", строка ") + QString::number(sym.lineStart);
+        text += QStringLiteral(", line ") + QString::number(sym.lineStart);
         if (!sym.brief.isEmpty()) {
             text += QStringLiteral("\n  ") + sym.brief;
         }
         text += QStringLiteral("\n");
 
         if (++shown >= 10) {
-            text += QStringLiteral("\n... и ещё ")
-                  + QString::number(results.size() - 10) + QStringLiteral(" результатов");
+            text += QStringLiteral("\n... and ") + QString::number(results.size() - 10)
+                  + QStringLiteral(" more results");
             break;
         }
     }
@@ -1928,15 +1941,15 @@ QString Jarvis::cmdFindSymbol(const QString& input)
 QString Jarvis::cmdProjectMap(const QString&)
 {
     if (m_indexer->fileCount() == 0) {
-        return QStringLiteral("Проект не проиндексирован.");
+        return QStringLiteral("No project indexed.");
     }
 
     QString map = m_indexer->projectMap();
 
     if (map.length() > 3000) {
-        map = map.left(3000) + QStringLiteral("\n\n... (обрезано, всего ")
-            + QString::number(m_indexer->fileCount()) + QStringLiteral(" файлов, ")
-            + QString::number(m_indexer->symbolCount()) + QStringLiteral(" символов)");
+        map = map.left(3000) + QStringLiteral("\n\n... (truncated, total: ")
+            + QString::number(m_indexer->fileCount()) + QStringLiteral(" files, ")
+            + QString::number(m_indexer->symbolCount()) + QStringLiteral(" symbols)");
     }
 
     return map;
@@ -1947,20 +1960,20 @@ QString Jarvis::cmdGrep(const QString& input)
     QString pattern = extractArg(input, {QStringLiteral("grep "),
                                           QStringLiteral("поиск ")});
     if (pattern.isEmpty()) {
-        return QStringLiteral("Укажите текст для поиска: grep SpawnEnemy");
+        return QStringLiteral("What are we searching for? Usage: grep SpawnEnemy");
     }
 
     if (m_indexer->fileCount() == 0) {
-        return QStringLiteral("Проект не проиндексирован.");
+        return QStringLiteral("No project indexed.");
     }
 
     auto results = m_indexer->grep(pattern, 20);
     if (results.isEmpty()) {
-        return QStringLiteral("Не найдено: «") + pattern + QStringLiteral("»");
+        return QStringLiteral("No matches for '") + pattern + QStringLiteral("'.");
     }
 
-    QString text = QStringLiteral("Найдено ") + QString::number(results.size())
-                 + QStringLiteral(" совпадений:\n\n");
+    QString text = QStringLiteral("Found ") + QString::number(results.size())
+                 + QStringLiteral(" matches:\n\n");
 
     for (const auto& r : results) {
         text += r.filePath + QStringLiteral(":") + QString::number(r.line)
@@ -2073,12 +2086,12 @@ QString Jarvis::cmdSetGeminiKey(const QString& input)
     QString model = extractArg(input, {QStringLiteral("ollamamodel "),
                                         QStringLiteral("модель ")});
     if (model.isEmpty()) {
-        return QStringLiteral("Текущая модель Ollama: ") + m_geminiApi->model()
-             + QStringLiteral("\nДля смены: ollamamodel <имя>\n"
-               "Доступные модели: ollama list (в терминале)");
+        return QStringLiteral("Current Ollama model: ") + m_geminiApi->model()
+             + QStringLiteral("\nTo switch: ollamamodel <name>\n"
+               "Available models: ollama list (in terminal)");
     }
     m_geminiApi->setModel(model);
-    return QStringLiteral("Модель Ollama установлена: ") + model;
+    return QStringLiteral("Ollama model set: ") + model;
 }
 
 // ============================================================
@@ -2088,17 +2101,17 @@ QString Jarvis::cmdSetGeminiKey(const QString& input)
 QString Jarvis::cmdHelp(const QString&)
 {
     QString help = m_registry.helpText();
-    help += QStringLiteral("\n\n— Свободный диалог —\n"
-                           "Любой вопрос, задача или запрос → Claude API.\n"
-                           "«Найди X», «открой Y», «объясни Z» — Brain сам разберётся.");
-    help += QStringLiteral("\n\n— Прикрепление файлов —\n"
-                           "Кнопка 📎 или перетащи файлы в окно.");
+    help += QStringLiteral("\n\n— Free conversation —\n"
+                           "Any question, task, or request → Claude API.\n"
+                           "'Find X', 'open Y', 'explain Z' — I'll figure out the rest.");
+    help += QStringLiteral("\n\n— File attachments —\n"
+                           "Click 📎 or drag files into the window.");
     if (m_indexer->fileCount() > 0) {
-        help += QStringLiteral("\n\n— Проект «")
+        help += QStringLiteral("\n\n— Project '")
               + QFileInfo(m_indexer->projectRoot()).fileName()
-              + QStringLiteral("» проиндексирован —\n")
-              + QString::number(m_indexer->fileCount()) + QStringLiteral(" файлов, ")
-              + QString::number(m_indexer->symbolCount()) + QStringLiteral(" символов");
+              + QStringLiteral("' indexed —\n")
+              + QString::number(m_indexer->fileCount()) + QStringLiteral(" files, ")
+              + QString::number(m_indexer->symbolCount()) + QStringLiteral(" symbols");
     }
     return help;
 }
@@ -2112,13 +2125,13 @@ QString Jarvis::cmdTypeText(const QString& input)
     QString text = extractArg(input, {QStringLiteral("напечатай "),
                                       QStringLiteral("type ")});
     if (text.isEmpty()) {
-        return QStringLiteral("Укажите текст для набора.");
+        return QStringLiteral("What should I type? Provide the text.");
     }
 
     m_keyEmulator->pressCombo({VK_MENU, VK_TAB});
     QThread::msleep(300);
     m_keyEmulator->typeText(text, 30);
-    return QStringLiteral("Печатаю: ") + text;
+    return QStringLiteral("Typing: ") + text;
 }
 
 QString Jarvis::cmdPressKey(const QString& input)
@@ -2126,16 +2139,16 @@ QString Jarvis::cmdPressKey(const QString& input)
     QString keyName = extractArg(input, {QStringLiteral("нажми "),
                                          QStringLiteral("press ")});
     if (keyName.isEmpty()) {
-        return QStringLiteral("Укажите клавишу.");
+        return QStringLiteral("Which key? Specify it.");
     }
 
     WORD vk = parseVirtualKey(keyName);
     if (vk == 0) {
-        return QStringLiteral("Неизвестная клавиша: ") + keyName;
+        return QStringLiteral("Unknown key: ") + keyName;
     }
 
     m_keyEmulator->pressKey(vk);
-    return QStringLiteral("Нажимаю: ") + keyName;
+    return QStringLiteral("Pressing: ") + keyName;
 }
 
 QString Jarvis::cmdCombo(const QString& input)
@@ -2143,7 +2156,7 @@ QString Jarvis::cmdCombo(const QString& input)
     QString comboStr = extractArg(input, {QStringLiteral("комбо "),
                                           QStringLiteral("combo ")});
     if (comboStr.isEmpty()) {
-        return QStringLiteral("Укажите комбинацию.");
+        return QStringLiteral("Specify the combo. Example: combo ctrl+c");
     }
 
     QStringList parts = comboStr.toLower().split(QStringLiteral("+"),
@@ -2152,17 +2165,17 @@ QString Jarvis::cmdCombo(const QString& input)
     for (const auto& part : parts) {
         WORD vk = parseVirtualKey(part.trimmed());
         if (vk == 0) {
-            return QStringLiteral("Неизвестная клавиша: ") + part.trimmed();
+            return QStringLiteral("Unknown key: ") + part.trimmed();
         }
         keys.push_back(vk);
     }
 
     if (keys.empty()) {
-        return QStringLiteral("Не удалось разобрать комбинацию.");
+        return QStringLiteral("Couldn't parse that combo.");
     }
 
     m_keyEmulator->pressCombo(
         std::initializer_list<WORD>(keys.data(), keys.data() + keys.size())
     );
-    return QStringLiteral("Нажимаю комбинацию: ") + comboStr;
+    return QStringLiteral("Executing combo: ") + comboStr;
 }

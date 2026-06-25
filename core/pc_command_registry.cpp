@@ -111,53 +111,53 @@ void PcCommandRegistry::registerMouseCommands(CommandRegistry& r)
     r.registerCommand({"кликни", "клик", "click"},
         [mouse](const QString&) -> QString {
             return mouse->click()
-                ? QStringLiteral("Клик")
-                : QStringLiteral("Ошибка клика");
+                ? QStringLiteral("Click")
+                : QStringLiteral("Click failed");
         },
-        QStringLiteral("кликни — левый клик мышью"));
+        QStringLiteral("click — left mouse click"));
 
     r.registerCommand({"правый клик", "правая кнопка", "right click", "контекстное меню"},
         [mouse](const QString&) -> QString {
             return mouse->rightClick()
-                ? QStringLiteral("Правый клик")
-                : QStringLiteral("Ошибка правого клика");
+                ? QStringLiteral("Right click")
+                : QStringLiteral("Right click failed");
         },
-        QStringLiteral("правый клик — контекстное меню"));
+        QStringLiteral("right click — context menu"));
 
     r.registerCommand({"двойной клик", "дабл клик", "double click"},
         [mouse](const QString&) -> QString {
             return mouse->doubleClick()
-                ? QStringLiteral("Двойной клик")
-                : QStringLiteral("Ошибка двойного клика");
+                ? QStringLiteral("Double click")
+                : QStringLiteral("Double click failed");
         },
-        QStringLiteral("двойной клик"));
+        QStringLiteral("double click"));
 
     r.registerCommand({"прокрути вверх", "скролл вверх", "scroll up"},
         [mouse](const QString& full) -> QString {
             const int n = extractNumber(full, 3);
             return mouse->scroll(ScrollDirection::Up, n)
-                ? QStringLiteral("Прокручено вверх")
-                : QStringLiteral("Ошибка скролла");
+                ? QStringLiteral("Scrolled up")
+                : QStringLiteral("Scroll failed");
         },
-        QStringLiteral("прокрути вверх [N] — прокрутить колесо вверх"));
+        QStringLiteral("scroll up [N] — scroll wheel up"));
 
     r.registerCommand({"прокрути вниз", "скролл вниз", "scroll down"},
         [mouse](const QString& full) -> QString {
             const int n = extractNumber(full, 3);
             return mouse->scroll(ScrollDirection::Down, n)
-                ? QStringLiteral("Прокручено вниз")
-                : QStringLiteral("Ошибка скролла");
+                ? QStringLiteral("Scrolled down")
+                : QStringLiteral("Scroll failed");
         },
-        QStringLiteral("прокрути вниз [N] — прокрутить колесо вниз"));
+        QStringLiteral("scroll down [N] — scroll wheel down"));
 
     r.registerCommand({"мышь в центр", "курсор в центр", "mouse center"},
         [mouse](const QString&) -> QString {
             const QSize sz = MouseController::screenSize();
             return mouse->moveTo(sz.width() / 2, sz.height() / 2)
-                ? QStringLiteral("Курсор в центре")
-                : QStringLiteral("Ошибка перемещения");
+                ? QStringLiteral("Cursor centered")
+                : QStringLiteral("Move failed");
         },
-        QStringLiteral("мышь в центр — курсор в центр экрана"));
+        QStringLiteral("mouse center — cursor to screen center"));
 
     struct GridPoint { QStringList names; float rx, ry; };
     static const GridPoint grid[] = {
@@ -176,10 +176,10 @@ void PcCommandRegistry::registerMouseCommands(CommandRegistry& r)
                 const int x = static_cast<int>(sz.width()  * rx);
                 const int y = static_cast<int>(sz.height() * ry);
                 return mouse->moveToSmooth(x, y, 200)
-                    ? QStringLiteral("Курсор перемещён")
-                    : QStringLiteral("Ошибка перемещения");
+                    ? QStringLiteral("Cursor moved")
+                    : QStringLiteral("Move failed");
             },
-            QStringLiteral("позиция курсора по сетке экрана"));
+            QStringLiteral("cursor grid position"));
     }
 }
 
@@ -193,8 +193,8 @@ void PcCommandRegistry::registerWindowCommands(CommandRegistry& r)
 
     r.registerCommand({"переключи окно", "другое окно", "switch window"},
         [wins](const QString&) -> QString {
-            return wins->switchToNext() ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("переключи окно — Alt+Tab"));
+            return wins->switchToNext() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("switch window — Alt+Tab"));
 
     struct AppCmd { QStringList tr; QString name; };
     static const AppCmd apps[] = {
@@ -216,43 +216,43 @@ void PcCommandRegistry::registerWindowCommands(CommandRegistry& r)
         r.registerCommand(a.tr,
             [wins, appName](const QString&) -> QString {
                 return wins->focusWindow(appName)
-                    ? QStringLiteral("Переключился на ") + appName
-                    : QStringLiteral("Окно не найдено: ") + appName;
+                    ? QStringLiteral("Switched to ") + appName
+                    : QStringLiteral("Window not found: ") + appName;
             },
-            QStringLiteral("переключиться на окно ") + appName);
+            QStringLiteral("switch to ") + appName);
     }
 
     r.registerCommand({"сверни окно", "сверни", "minimize window"},
         [wins](const QString&) -> QString {
-            return wins->minimizeActive() ? QStringLiteral("Свёрнуто") : QStringLiteral("Ошибка");
-        }, QStringLiteral("сверни окно — свернуть активное окно"));
+            return wins->minimizeActive() ? QStringLiteral("Minimized") : QStringLiteral("Error");
+        }, QStringLiteral("minimize window"));
 
     r.registerCommand({"разверни окно", "разверни на весь экран", "maximize window"},
         [wins](const QString&) -> QString {
-            return wins->maximizeActive() ? QStringLiteral("Развёрнуто") : QStringLiteral("Ошибка");
-        }, QStringLiteral("разверни окно — на весь экран"));
+            return wins->maximizeActive() ? QStringLiteral("Maximized") : QStringLiteral("Error");
+        }, QStringLiteral("maximize window — fullscreen"));
 
     r.registerCommand({"закрой окно", "close window"},
         [wins](const QString&) -> QString {
-            return wins->closeActive() ? QStringLiteral("Окно закрыто") : QStringLiteral("Ошибка");
-        }, QStringLiteral("закрой окно — закрыть активное окно"));
+            return wins->closeActive() ? QStringLiteral("Window closed") : QStringLiteral("Error");
+        }, QStringLiteral("close window"));
 
     r.registerCommand({"закрепи окно поверх", "окно поверх всех", "always on top"},
         [wins](const QString&) -> QString {
             return wins->alwaysOnTopActive(true)
-                ? QStringLiteral("Закреплено поверх остальных")
-                : QStringLiteral("Ошибка");
-        }, QStringLiteral("закрепи окно поверх — always on top"));
+                ? QStringLiteral("Pinned on top")
+                : QStringLiteral("Error");
+        }, QStringLiteral("pin window on top — always on top"));
 
     r.registerCommand({"открепи окно", "убери поверх всех"},
         [wins](const QString&) -> QString {
-            return wins->alwaysOnTopActive(false) ? QStringLiteral("Откреплено") : QStringLiteral("Ошибка");
-        }, QStringLiteral("открепи окно — снять always on top"));
+            return wins->alwaysOnTopActive(false) ? QStringLiteral("Unpinned") : QStringLiteral("Error");
+        }, QStringLiteral("unpin window — remove always on top"));
 
     r.registerCommand({"покажи рабочий стол", "show desktop"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->showDesktopCombo() ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("покажи рабочий стол — Win+D"));
+            return m_pc->keyboard()->showDesktopCombo() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("show desktop — Win+D"));
 }
 
 // ============================================================
@@ -265,77 +265,75 @@ void PcCommandRegistry::registerSystemCommands(CommandRegistry& r)
 
     r.registerCommand({"заблокируй компьютер", "заблокируй", "lock"},
         [sys](const QString&) -> QString {
-            return sys->lockWorkstation() ? QStringLiteral("Заблокировано") : QStringLiteral("Ошибка");
-        }, QStringLiteral("заблокируй компьютер"));
+            return sys->lockWorkstation() ? QStringLiteral("Locked") : QStringLiteral("Error");
+        }, QStringLiteral("lock computer"));
 
     r.registerCommand({"спящий режим", "уйди в сон", "sleep mode"},
         [sys](const QString&) -> QString {
-            return sys->sleepNow() ? QStringLiteral("Ухожу в сон") : QStringLiteral("Ошибка");
-        }, QStringLiteral("спящий режим"));
+            return sys->sleepNow() ? QStringLiteral("Going to sleep") : QStringLiteral("Error");
+        }, QStringLiteral("sleep mode"));
 
     r.registerCommand({"выключи компьютер", "shutdown"},
         [sys](const QString& full) -> QString {
             const int delay = extractNumber(full, 60);
             sys->shutdownIn(delay);
-            return QStringLiteral("Выключение через %1 секунд").arg(delay);
-        }, QStringLiteral("выключи компьютер [через N секунд]"));
+            return QStringLiteral("Shutting down in %1 seconds").arg(delay);
+        }, QStringLiteral("shutdown [in N seconds]"));
 
     r.registerCommand({"перезагрузи компьютер", "restart", "reboot"},
         [sys](const QString& full) -> QString {
             const int delay = extractNumber(full, 60);
             sys->restartIn(delay);
-            return QStringLiteral("Перезагрузка через %1 секунд").arg(delay);
-        }, QStringLiteral("перезагрузи компьютер [через N секунд]"));
+            return QStringLiteral("Restarting in %1 seconds").arg(delay);
+        }, QStringLiteral("restart [in N seconds]"));
 
     r.registerCommand({"отмени выключение", "cancel shutdown"},
         [sys](const QString&) -> QString {
             return sys->cancelShutdown()
-                ? QStringLiteral("Выключение отменено")
-                : QStringLiteral("Нечего отменять");
-        }, QStringLiteral("отмени выключение"));
+                ? QStringLiteral("Shutdown cancelled")
+                : QStringLiteral("Nothing to cancel");
+        }, QStringLiteral("cancel shutdown"));
 
-    // ВАЖНО: "запусти " у тебя свободно (не занято cmdTypeText/cmdPressKey/cmdCombo,
-    // которые используют "напечатай "/"нажми "/"комбо "), поэтому можно регистрировать.
     r.registerCommand({"запусти"},
         [sys](const QString& full) -> QString {
             const QString app = remainderAfter(full, QStringLiteral("запусти"));
-            if (app.isEmpty()) return QStringLiteral("Не указано приложение");
+            if (app.isEmpty()) return QStringLiteral("No app specified");
             return sys->launchApp(app)
-                ? QStringLiteral("Запускаю ") + app
-                : QStringLiteral("Не найдено: ") + app;
+                ? QStringLiteral("Launching ") + app
+                : QStringLiteral("Not found: ") + app;
         },
-        QStringLiteral("запусти <приложение> — например 'запусти notepad'"),
+        QStringLiteral("launch <app> — e.g. 'launch notepad'"),
         /*prefixMatch=*/true);
 
     r.registerCommand({"открой выполнить", "win r"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->openRunCombo() ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("открой выполнить — Win+R"));
+            return m_pc->keyboard()->openRunCombo() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("open Run — Win+R"));
 
     r.registerCommand({"поиск windows", "windows search"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->openSearchCombo() ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("поиск windows — Win+S"));
+            return m_pc->keyboard()->openSearchCombo() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("Windows search — Win+S"));
 
     r.registerCommand({"открой проводник", "file explorer"},
         [sys](const QString&) -> QString {
-            return sys->launchApp(QStringLiteral("explorer.exe")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("открой проводник"));
+            return sys->launchApp(QStringLiteral("explorer.exe")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("open File Explorer"));
 
     r.registerCommand({"открой калькулятор", "calculator"},
         [sys](const QString&) -> QString {
-            return sys->launchApp(QStringLiteral("calc.exe")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("открой калькулятор"));
+            return sys->launchApp(QStringLiteral("calc.exe")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("open Calculator"));
 
     r.registerCommand({"открой настройки windows", "settings"},
         [sys](const QString&) -> QString {
-            return sys->launchApp(QStringLiteral("ms-settings:")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("открой настройки windows"));
+            return sys->launchApp(QStringLiteral("ms-settings:")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("open Windows Settings"));
 
     r.registerCommand({"диспетчер задач", "task manager"},
         [sys](const QString&) -> QString {
-            return sys->openTaskManager() ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("диспетчер задач"));
+            return sys->openTaskManager() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("Task Manager"));
 }
 
 // ============================================================
@@ -348,50 +346,50 @@ void PcCommandRegistry::registerMediaCommands(CommandRegistry& r)
 
     r.registerCommand({"пауза музыка", "play pause", "плей"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressKey(QStringLiteral("MediaPlay")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("пауза музыка — play/pause"));
+            return m_pc->keyboard()->pressKey(QStringLiteral("MediaPlay")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("play/pause media"));
 
     r.registerCommand({"следующий трек", "next track"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressKey(QStringLiteral("MediaNext")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("следующий трек"));
+            return m_pc->keyboard()->pressKey(QStringLiteral("MediaNext")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("next track"));
 
     r.registerCommand({"предыдущий трек", "previous track"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressKey(QStringLiteral("MediaPrev")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("предыдущий трек"));
+            return m_pc->keyboard()->pressKey(QStringLiteral("MediaPrev")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("previous track"));
 
     r.registerCommand({"громче", "сделай громче", "volume up"},
         [sys](const QString& full) -> QString {
             const int step = extractNumber(full, 10);
             sys->increaseVolume(step);
-            return QStringLiteral("Громкость %1%").arg(sys->currentVolume());
-        }, QStringLiteral("громче [на N]"));
+            return QStringLiteral("Volume %1%").arg(sys->currentVolume());
+        }, QStringLiteral("volume up [by N]"));
 
     r.registerCommand({"тише", "сделай тише", "volume down"},
         [sys](const QString& full) -> QString {
             const int step = extractNumber(full, 10);
             sys->decreaseVolume(step);
-            return QStringLiteral("Громкость %1%").arg(sys->currentVolume());
-        }, QStringLiteral("тише [на N]"));
+            return QStringLiteral("Volume %1%").arg(sys->currentVolume());
+        }, QStringLiteral("volume down [by N]"));
 
     r.registerCommand({"заглуши звук", "mute"},
         [sys](const QString&) -> QString {
-            return sys->muteAudio(true) ? QStringLiteral("Звук выключен") : QStringLiteral("Ошибка");
-        }, QStringLiteral("заглуши звук"));
+            return sys->muteAudio(true) ? QStringLiteral("Muted") : QStringLiteral("Error");
+        }, QStringLiteral("mute audio"));
 
     r.registerCommand({"включи звук", "unmute"},
         [sys](const QString&) -> QString {
-            return sys->muteAudio(false) ? QStringLiteral("Звук включён") : QStringLiteral("Ошибка");
-        }, QStringLiteral("включи звук"));
+            return sys->muteAudio(false) ? QStringLiteral("Unmuted") : QStringLiteral("Error");
+        }, QStringLiteral("unmute audio"));
 
     r.registerCommand({"установи громкость", "громкость"},
         [sys](const QString& full) -> QString {
             const int n = extractNumber(full, -1);
-            if (n < 0) return QStringLiteral("Текущая громкость %1%").arg(sys->currentVolume());
+            if (n < 0) return QStringLiteral("Current volume %1%").arg(sys->currentVolume());
             sys->setVolume(n);
-            return QStringLiteral("Громкость %1%").arg(n);
-        }, QStringLiteral("установи громкость <N> — например 'установи громкость 50'"));
+            return QStringLiteral("Volume %1%").arg(n);
+        }, QStringLiteral("set volume <N> — e.g. 'set volume 50'"));
 }
 
 // ============================================================
@@ -404,46 +402,46 @@ void PcCommandRegistry::registerBrowserCommands(CommandRegistry& r)
 
     r.registerCommand({"обнови страницу", "refresh", "reload"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressKey(QStringLiteral("F5")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("обнови страницу — F5"));
+            return m_pc->keyboard()->pressKey(QStringLiteral("F5")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("refresh page — F5"));
 
     r.registerCommand({"страница назад", "browser back"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressKey(QStringLiteral("BrowserBack")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("страница назад"));
+            return m_pc->keyboard()->pressKey(QStringLiteral("BrowserBack")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("page back"));
 
     r.registerCommand({"страница вперёд", "browser forward"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressKey(QStringLiteral("BrowserForward")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("страница вперёд"));
+            return m_pc->keyboard()->pressKey(QStringLiteral("BrowserForward")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("page forward"));
 
     r.registerCommand({"открой адресную строку", "address bar"},
         [this](const QString&) -> QString {
-            return m_pc->keyboard()->pressCombo(QStringLiteral("Ctrl+L")) ? QString() : QStringLiteral("Ошибка");
-        }, QStringLiteral("открой адресную строку — Ctrl+L"));
+            return m_pc->keyboard()->pressCombo(QStringLiteral("Ctrl+L")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("open address bar — Ctrl+L"));
 
     r.registerCommand({"открой сайт"},
         [sys](const QString& full) -> QString {
             QString url = remainderAfter(full, QStringLiteral("сайт"));
-            if (url.isEmpty()) return QStringLiteral("Не указан адрес сайта");
+            if (url.isEmpty()) return QStringLiteral("No URL specified");
             if (!url.startsWith(QStringLiteral("http")))
                 url = QStringLiteral("https://") + url;
-            return sys->launchUrl(url) ? QStringLiteral("Открываю ") + url : QStringLiteral("Ошибка");
+            return sys->launchUrl(url) ? QStringLiteral("Opening ") + url : QStringLiteral("Error");
         },
-        QStringLiteral("открой сайт <адрес> — например 'открой сайт github.com'"),
+        QStringLiteral("open site <url> — e.g. 'open site github.com'"),
         /*prefixMatch=*/true);
 
     r.registerCommand({"открой ютуб", "youtube"},
         [sys](const QString&) -> QString {
             sys->launchUrl(QStringLiteral("https://youtube.com"));
-            return QStringLiteral("Открываю YouTube");
-        }, QStringLiteral("открой ютуб"));
+            return QStringLiteral("Opening YouTube");
+        }, QStringLiteral("open YouTube"));
 
     r.registerCommand({"открой гитхаб", "github"},
         [sys](const QString&) -> QString {
             sys->launchUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis"));
-            return QStringLiteral("Открываю репозиторий");
-        }, QStringLiteral("открой гитхаб"));
+            return QStringLiteral("Opening repository");
+        }, QStringLiteral("open GitHub"));
 }
 
 // ============================================================
@@ -457,14 +455,14 @@ void PcCommandRegistry::registerFileCommands(CommandRegistry& r)
     r.registerCommand({"найди файл"},
         [sys](const QString& full) -> QString {
             const QString name = remainderAfter(full, QStringLiteral("файл"));
-            if (name.isEmpty()) return QStringLiteral("Не указано имя файла");
+            if (name.isEmpty()) return QStringLiteral("No filename specified");
             const QString pattern = QStringLiteral("*%1*").arg(name);
             const QStringList found = sys->findFiles(pattern);
-            if (found.isEmpty()) return QStringLiteral("Файл не найден: ") + name;
-            return QStringLiteral("Найдено %1, первый: %2")
+            if (found.isEmpty()) return QStringLiteral("File not found: ") + name;
+            return QStringLiteral("Found %1, first: %2")
                        .arg(found.size()).arg(found.first());
         },
-        QStringLiteral("найди файл <имя> — например 'найди файл report.pdf'"),
+        QStringLiteral("find file <name> — e.g. 'find file report.pdf'"),
         /*prefixMatch=*/true);
 }
 
@@ -478,59 +476,59 @@ void PcCommandRegistry::registerMacroVoiceCommands(CommandRegistry& r)
     WindowController*   wins = m_pc->windows();
     MacroRecorder*      macros = m_macros;
 
-    r.registerCommand({"утренний режим", "доброе утро"},
+    r.registerCommand({"утренний режим", "доброе утро", "good morning"},
         [sys](const QString&) -> QString {
             sys->launchUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis"));
             QThread::msleep(1500);
             sys->launchApp(QStringLiteral("discord"));
             QThread::msleep(500);
             sys->setVolume(40);
-            return QStringLiteral("Доброе утро! Всё готово.");
-        }, QStringLiteral("утренний режим — запустить рабочие приложения"));
+            return QStringLiteral("Good morning! All set.");
+        }, QStringLiteral("morning mode — launch work apps"));
 
-    r.registerCommand({"ночной режим", "спокойной ночи"},
+    r.registerCommand({"ночной режим", "спокойной ночи", "good night"},
         [sys, wins](const QString&) -> QString {
             wins->closeWindow(QStringLiteral("Chrome"));
             wins->closeWindow(QStringLiteral("Firefox"));
             sys->setVolume(0);
             sys->lockWorkstation();
-            return QStringLiteral("Спокойной ночи!");
-        }, QStringLiteral("ночной режим — закрыть браузеры, заглушить, заблокировать"));
+            return QStringLiteral("Good night!");
+        }, QStringLiteral("night mode — close browsers, mute, lock"));
 
-    r.registerCommand({"режим разработки", "начать работу над проектом"},
+    r.registerCommand({"режим разработки", "начать работу над проектом", "dev mode"},
         [sys](const QString&) -> QString {
             sys->launchApp(QStringLiteral("clion64.exe"));
             QThread::msleep(500);
             sys->launchApp(QStringLiteral("discord"));
             QThread::msleep(500);
             sys->setVolume(25);
-            return QStringLiteral("Режим разработки. CLion и Discord запущены.");
-        }, QStringLiteral("режим разработки — запустить рабочее окружение"));
+            return QStringLiteral("Dev mode. CLion and Discord launched.");
+        }, QStringLiteral("dev mode — launch work environment"));
 
-    r.registerCommand({"запиши макрос", "начни запись макроса"},
+    r.registerCommand({"запиши макрос", "начни запись макроса", "record macro"},
         [macros](const QString& full) -> QString {
             QString name = remainderAfter(full, QStringLiteral("макрос"));
-            if (name.isEmpty()) name = QStringLiteral("Безымянный");
+            if (name.isEmpty()) name = QStringLiteral("Unnamed");
             macros->startRecording(name);
-            return QStringLiteral("Записываю макрос «%1»").arg(name);
+            return QStringLiteral("Recording macro '%1'").arg(name);
         },
-        QStringLiteral("запиши макрос <имя> — начать запись действий мыши/клавиатуры"),
+        QStringLiteral("record macro <name> — start recording mouse/keyboard actions"),
         /*prefixMatch=*/true);
 
-    r.registerCommand({"останови запись макроса", "стоп запись"},
+    r.registerCommand({"останови запись макроса", "стоп запись", "stop recording"},
         [macros](const QString&) -> QString {
             macros->stopRecording();
-            return QStringLiteral("Запись остановлена");
-        }, QStringLiteral("останови запись макроса"));
+            return QStringLiteral("Recording stopped");
+        }, QStringLiteral("stop macro recording"));
 
-    r.registerCommand({"запусти макрос", "воспроизведи макрос"},
+    r.registerCommand({"запусти макрос", "воспроизведи макрос", "play macro"},
         [macros](const QString& full) -> QString {
             const QString name = remainderAfter(full, QStringLiteral("макрос"));
-            if (name.isEmpty()) return QStringLiteral("Не указано имя макроса");
+            if (name.isEmpty()) return QStringLiteral("No macro name specified");
             return macros->play(name)
-                ? QStringLiteral("Выполняю макрос «%1»").arg(name)
-                : QStringLiteral("Макрос не найден: ") + name;
+                ? QStringLiteral("Playing macro '%1'").arg(name)
+                : QStringLiteral("Macro not found: ") + name;
         },
-        QStringLiteral("запусти макрос <имя>"),
+        QStringLiteral("play macro <name>"),
         /*prefixMatch=*/true);
 }

@@ -57,13 +57,13 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
 
     if (reply->error() != QNetworkReply::NoError) {
         if (!silent)
-            emit updateError(QStringLiteral("Не удалось проверить обновления: ") + reply->errorString());
+            emit updateError(QStringLiteral("Failed to check for updates: ") + reply->errorString());
         return;
     }
 
     QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
     if (!doc.isObject()) {
-        if (!silent) emit updateError(QStringLiteral("Некорректный ответ от GitHub."));
+        if (!silent) emit updateError(QStringLiteral("Invalid response from GitHub."));
         return;
     }
 
@@ -106,8 +106,8 @@ void AutoUpdater::onCheckFinished(QNetworkReply* reply, bool silent)
 
     if (installerUrl.isEmpty()) {
         if (!silent)
-            emit updateError(QStringLiteral("Обновление v") + remoteVersion
-                             + QStringLiteral(" найдено, но установщик отсутствует."));
+            emit updateError(QStringLiteral("Update v") + remoteVersion
+                             + QStringLiteral(" found, but no installer available."));
         return;
     }
 
@@ -151,13 +151,13 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
     m_downloadReply = nullptr;
 
     if (reply->error() != QNetworkReply::NoError) {
-        emit updateError(QStringLiteral("Ошибка скачивания: ") + reply->errorString());
+        emit updateError(QStringLiteral("Download error: ") + reply->errorString());
         return;
     }
 
     QByteArray data = reply->readAll();
     if (data.isEmpty()) {
-        emit updateError(QStringLiteral("Скачанный файл пуст."));
+        emit updateError(QStringLiteral("Downloaded file is empty."));
         return;
     }
 
@@ -168,7 +168,7 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
 
     QFile file(installerPath);
     if (!file.open(QIODevice::WriteOnly)) {
-        emit updateError(QStringLiteral("Не удалось сохранить: ") + installerPath);
+        emit updateError(QStringLiteral("Failed to save: ") + installerPath);
         return;
     }
     file.write(data);
@@ -210,8 +210,8 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
             QCoreApplication::quit();
         });
     } else {
-        emit updateError(QStringLiteral("Не удалось запустить установщик.\n"
-                                        "Откройте вручную: ") + installerPath);
+        emit updateError(QStringLiteral("Failed to launch installer.\n"
+                                        "Open manually: ") + installerPath);
     }
 }
 
