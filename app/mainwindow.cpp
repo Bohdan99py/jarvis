@@ -90,12 +90,13 @@ MainWindow::MainWindow(QWidget* parent)
 
     // Загружаем язык из настроек (для UI-строк)
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
-    bool english = cfg.value(QStringLiteral("ui/english"), false).toBool();
+    bool english = cfg.value(QStringLiteral("ui/english"), true).toBool();
     gUiLanguage() = english ? UiLanguage::English : UiLanguage::Russian;
     // Синхронизируем детектор языка с настройкой
     // (дефолт — русский, совпадает с конструктором LanguageDetector)
 
     m_jarvis = new Jarvis(this);
+    m_jarvis->setUiLanguage(english);
 
     // Restore last active user
     {
@@ -361,6 +362,7 @@ MainWindow::MainWindow(QWidget* parent)
 void MainWindow::applyLanguage(bool english)
 {
     gUiLanguage() = english ? UiLanguage::English : UiLanguage::Russian;
+    m_jarvis->setUiLanguage(english);
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
     cfg.setValue(QStringLiteral("ui/english"), english);
 

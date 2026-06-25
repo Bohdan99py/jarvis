@@ -197,7 +197,7 @@ private:
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 
     bool              m_multiAgentMode    = false;
-    bool              m_uiEnglish         = false;  // синхронизируется из MainWindow
+    bool              m_uiEnglish         = true;   // synced from MainWindow
     bool              m_ideOpenedThisSession = false; // CLion открыт авто-режимом в этой сессии
     std::atomic<bool> m_speaking{false};
     QMutex            m_ttsMutex;
