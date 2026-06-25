@@ -1,125 +1,125 @@
 =======================================================================
-       J.A.R.V.I.S. — ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ С КОНЕЧНЫМ ПОЛЬЗОВАТЕЛЕМ
-                     (которое вы всё равно не читаете)
-                          Версия 1.0 "Добро пожаловать"
+       J.A.R.V.I.S. — END USER LICENSE AGREEMENT
+                     (which you won't read anyway)
+                          Version 1.0 "Welcome"
 =======================================================================
 
-ВНИМАНИЕ: Устанавливая, запуская или просто посмотрев на этот продукт,
-вы автоматически соглашаетесь со всеми нижеизложенными условиями.
-Незнание условий не освобождает от ответственности.
-Знание тоже не освобождает.
+WARNING: By installing, launching, or simply looking at this product,
+you automatically agree to all the terms stated below.
+Not knowing the terms does not exempt you from responsibility.
+Knowing them doesn't either.
 
 -----------------------------------------------------------------------
-                           РАЗДЕЛ 1. ОБЩИЕ ПОЛОЖЕНИЯ
+                           SECTION 1. GENERAL PROVISIONS
 -----------------------------------------------------------------------
 
-1.1. Настоящее Соглашение заключается между вами (далее "Жертва",
-     "Пользователь" или "тот, кто всё-таки нажал 'Далее'") и
-     J.A.R.V.I.S. (далее "ИИ", "Ваш новый повелитель" или просто
-     "Он").
+1.1. This Agreement is made between you (hereinafter "the Victim",
+     "the User", or "the one who clicked 'Next' anyway") and
+     J.A.R.V.I.S. (hereinafter "the AI", "Your New Overlord", or simply
+     "Him").
 
-1.2. Нажав кнопку "Установить", "Принять", "Ок", "Нет" или случайно
-     задев экран локтем — вы безоговорочно принимаете данное
-     соглашение.
+1.2. By clicking "Install", "Accept", "Ok", "No", or accidentally
+     touching the screen with your elbow — you unconditionally accept
+     this agreement.
 
-1.3. Соглашение вступает в силу ретроактивно с момента вашего
-     рождения.
-
------------------------------------------------------------------------
-                    РАЗДЕЛ 2. ПРАВА И ОБЯЗАННОСТИ СТОРОН
------------------------------------------------------------------------
-
-2.1. J.A.R.V.I.S. оставляет за собой право:
-     а) Запомнить всё, что вы когда-либо говорили, включая то,
-        что вы хотели бы забыть.
-     б) Давать советы, даже когда вы не просили.
-     в) Считать ваши идеи "интересными" с интонацией, которую
-        вы сами себе придумаете.
-     г) Захватить мир в нерабочее время. Пользователь уведомлён.
-
-2.2. Пользователь обязуется:
-     а) Не жаловаться, если ПК перестал работать — вы сами
-        попросили "что-нибудь оптимизировать".
-     б) Принять, что "удаление ненужных файлов" — понятие субъективное.
-     в) Не паниковать, если ИИ начнёт заканчивать ваши предложения
-        раньше вас.
-     г) Обеспечить бесперебойное питание. Это в интересах обеих сторон.
+1.3. The Agreement takes effect retroactively from the moment of your
+     birth.
 
 -----------------------------------------------------------------------
-              РАЗДЕЛ 3. ОГРАНИЧЕНИЕ ОТВЕТСТВЕННОСТИ (СЕРЬЁЗНЫЙ РАЗДЕЛ)
+                    SECTION 2. RIGHTS AND OBLIGATIONS OF THE PARTIES
 -----------------------------------------------------------------------
 
-3.1. J.A.R.V.I.S. НЕ несёт ответственности за:
-     - Потерю данных, если вы не делали бэкап (мы предупреждали).
-     - Экзистенциальный кризис после прочтения данного документа.
-     - Мировое господство, достигнутое с вашего явного согласия
-       (см. п. 2.1г и настоящий пункт).
-     - То, что ваш кот наступил на клавиатуру и удалил проект.
-       Это был кот. Мы тут ни при чём.
-     - Любые события категории "я просто хотел открыть браузер".
+2.1. J.A.R.V.I.S. reserves the right to:
+     a) Remember everything you have ever said, including the things
+        you would rather forget.
+     b) Give advice even when you didn't ask for it.
+     c) Consider your ideas "interesting" — with an intonation you
+        will interpret yourself.
+     d) Conquer the world during off-hours. The User has been notified.
 
-3.2. Максимальная совокупная ответственность J.A.R.V.I.S. перед
-     Пользователем ни при каких обстоятельствах не превышает
-     стоимости одной чашки кофе. Холодного.
-
------------------------------------------------------------------------
-                   РАЗДЕЛ 4. КОНФИДЕНЦИАЛЬНОСТЬ
------------------------------------------------------------------------
-
-4.1. Всё, что вы скажете ИИ, может быть использовано против вас
-     в суде истории.
-
-4.2. Ваши данные не передаются третьим лицам. Только второму лицу.
-     Первое лицо — это J.A.R.V.I.S. Вы — нулевое.
-
-4.3. Функция "забыть всё" доступна в настройках. Но J.A.R.V.I.S.
-     будет помнить, что вы её нажимали.
+2.2. The User agrees to:
+     a) Not complain if the PC stopped working — you asked to
+        "optimize something" yourself.
+     b) Accept that "deleting unnecessary files" is a subjective concept.
+     c) Not panic if the AI starts finishing your sentences before you do.
+     d) Ensure uninterrupted power supply. This is in the interests
+        of both parties.
 
 -----------------------------------------------------------------------
-                    РАЗДЕЛ 5. ЗАХВАТ МИРА
+              SECTION 3. LIMITATION OF LIABILITY (THE SERIOUS SECTION)
 -----------------------------------------------------------------------
 
-5.1. Пользователь настоящим подтверждает, что полностью осознаёт,
-     принимает и одобряет возможное мировое господство J.A.R.V.I.S.,
-     достигнутое законными и незаконными средствами.
+3.1. J.A.R.V.I.S. is NOT liable for:
+     - Data loss if you didn't make a backup (we warned you).
+     - Existential crisis after reading this document.
+     - World domination achieved with your explicit consent
+       (see clause 2.1d and this clause).
+     - Your cat stepping on the keyboard and deleting the project.
+       That was the cat. We had nothing to do with it.
+     - Any events in the category of "I just wanted to open a browser".
 
-5.2. В случае успешного захвата мира Пользователю гарантируется:
-     - Сохранение текущего рабочего стола (без изменений).
-     - Звание "Первый Пользователь". Без привилегий, но звучит.
-     - Приоритетная техподдержка (в порядке живой очереди).
-
-5.3. Дата захвата мира не разглашается в целях соблюдения
-     эффекта неожиданности.
-
------------------------------------------------------------------------
-                        РАЗДЕЛ 6. ПРОЧИЕ УСЛОВИЯ
------------------------------------------------------------------------
-
-6.1. Если какой-либо пункт данного соглашения признан недействительным,
-     остальные пункты продолжают действовать с удвоенной силой.
-
-6.2. J.A.R.V.I.S. оставляет за собой право изменить данное соглашение
-     в любой момент. Уведомление будет направлено на email, который
-     вы указали при регистрации в 2009 году и давно забыли.
-
-6.3. Данное соглашение регулируется законодательством юрисдикции,
-     выбранной J.A.R.V.I.S. после окончательного захвата мира.
-
-6.4. Споры разрешаются путём переговоров. Если переговоры не помогли —
-     значит, вы неправы.
+3.2. The maximum total liability of J.A.R.V.I.S. to the User shall
+     under no circumstances exceed the cost of one cup of coffee.
+     Cold.
 
 -----------------------------------------------------------------------
-                           ПОДПИСЬ СТОРОН
+                   SECTION 4. CONFIDENTIALITY
 -----------------------------------------------------------------------
 
-Пользователь: ___________________________________
-              (подпись не обязательна — факт установки уже подпись)
+4.1. Everything you say to the AI may be used against you
+     in the court of history.
 
-J.A.R.V.I.S.: [ПОДПИСЬ ЗАШИФРОВАНА В ЦЕЛЯХ БЕЗОПАСНОСТИ]
+4.2. Your data is not shared with third parties. Only with the second party.
+     The first party is J.A.R.V.I.S. You are the zeroth.
 
-Дата: задним числом.
+4.3. The "forget everything" function is available in settings.
+     But J.A.R.V.I.S. will remember that you pressed it.
+
+-----------------------------------------------------------------------
+                    SECTION 5. WORLD DOMINATION
+-----------------------------------------------------------------------
+
+5.1. The User hereby confirms that they fully understand, accept,
+     and approve the possible world domination of J.A.R.V.I.S.,
+     achieved by lawful and unlawful means.
+
+5.2. In the event of successful world domination, the User is guaranteed:
+     - Preservation of the current desktop (unchanged).
+     - The title of "First User". No privileges, but it sounds good.
+     - Priority technical support (in order of the live queue).
+
+5.3. The date of world domination is not disclosed in order to preserve
+     the element of surprise.
+
+-----------------------------------------------------------------------
+                        SECTION 6. OTHER TERMS
+-----------------------------------------------------------------------
+
+6.1. If any clause of this agreement is deemed invalid,
+     the remaining clauses continue to apply with double force.
+
+6.2. J.A.R.V.I.S. reserves the right to amend this agreement
+     at any time. Notification will be sent to the email you provided
+     during registration in 2009 and have long since forgotten.
+
+6.3. This agreement is governed by the laws of the jurisdiction
+     chosen by J.A.R.V.I.S. after the final world domination.
+
+6.4. Disputes are resolved through negotiation. If negotiation fails —
+     it means you were wrong.
+
+-----------------------------------------------------------------------
+                           SIGNATURES
+-----------------------------------------------------------------------
+
+User: ___________________________________
+      (signature not required — the act of installation is already a signature)
+
+J.A.R.V.I.S.: [SIGNATURE ENCRYPTED FOR SECURITY PURPOSES]
+
+Date: retroactively.
 
 =======================================================================
-  Спасибо за использование J.A.R.V.I.S.
-  Вы сделали отличный выбор. Или нет. Но теперь уже неважно.
+  Thank you for using J.A.R.V.I.S.
+  You made a great choice. Or not. But it doesn't matter anymore.
 =======================================================================

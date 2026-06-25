@@ -1,167 +1,148 @@
-═══════════════════════════════════════════════════════════════
-   J.A.R.V.I.S. — Политика конфиденциальности / Privacy Policy
-   Версия 3.1 · Дата: 2026
-═══════════════════════════════════════════════════════════════
+===================================================================
+   J.A.R.V.I.S. — Privacy Policy
+   Version 3.1 · 2026
+===================================================================
 
-КРАТКОЕ РЕЗЮМЕ (TL;DR)
-───────────────────────
-• Голосовой ввод работает ЛОКАЛЬНО — интернет не нужен для распознавания.
-• Микрофон включается АВТОМАТИЧЕСКИ при запуске голосового ввода,
-  но запись активируется ТОЛЬКО при обнаружении звука выше порога VAD.
-• Аудиоданные не сохраняются на диск и не отправляются на серверы.
-• Claude / Gemini API: текстовые запросы отправляются в облако
-  ТОЛЬКО для обработки ИИ-запросов — НЕ аудио.
-• Никакой телеметрии, аналитики, рекламы.
-
-
-1. ГОЛОСОВОЙ ВВОД И ЗАПИСЬ МИКРОФОНА
-──────────────────────────────────────
-
-1.1. АВТОМАТИЧЕСКАЯ АКТИВАЦИЯ
-   J.A.R.V.I.S. использует НЕПРЕРЫВНОЕ прослушивание микрофона (wake-word mode)
-   при включённом голосовом вводе. Это означает:
-   - После команды «Запустить голосовой ввод» / нажатия кнопки в UI
-     программа ПОСТОЯННО анализирует аудиопоток с микрофона.
-   - Анализ выполняется ЛОКАЛЬНО на вашем устройстве.
-   - Полная ЗАПИСЬ (буферизация для распознавания) начинается только
-     когда уровень звука превысит порог VAD (по умолчанию -45 dB).
-
-1.2. ЧТО ЗАПИСЫВАЕТСЯ
-   - Только фрагменты с голосовой активностью (речь, громкие звуки).
-   - Тишина и фоновый шум ниже порога VAD НЕ записываются и НЕ обрабатываются.
-   - Запись хранится в оперативной памяти только во время обработки (~1–15 сек).
-   - После распознавания аудиобуфер немедленно освобождается.
-
-1.3. ЧТО НЕ ДЕЛАЕТСЯ С АУДИО
-   - Аудио НЕ сохраняется в файлы на диске.
-   - Аудио НЕ передаётся на внешние серверы.
-   - Аудио НЕ используется для обучения моделей.
-   - История разговоров хранится как ТЕКСТ (транскрипт), не как аудио.
-
-1.4. УПРАВЛЕНИЕ ГОЛОСОВЫМ ВВОДОМ
-   Вы можете в любой момент:
-   - Выключить голосовой ввод: кнопка 🎤 в главном окне / команда «Стоп».
-   - Отозвать разрешение на микрофон: Настройки Windows → Конфиденциальность
-     → Микрофон → J.A.R.V.I.S.
-   - Удалить установленные голосовые модели: Settings → Голос → [Удалить].
+TL;DR
+------
+  * Voice input runs LOCALLY — no internet needed for recognition.
+  * Microphone activates automatically when voice input is started,
+    but audio is only CAPTURED when sound exceeds the VAD threshold.
+  * Audio is never saved to disk or sent to servers.
+  * Claude / Gemini API: only TEXT is sent to the cloud
+    for AI processing — NEVER audio.
+  * No telemetry, analytics, or advertising.
 
 
-2. ГОЛОСОВЫЕ МОДЕЛИ
-────────────────────
+1. VOICE INPUT AND MICROPHONE RECORDING
+-----------------------------------------
 
-2.1. Модели Vosk скачиваются с серверов alphacephei.com / Hugging Face
-     ТОЛЬКО по вашему явному запросу (диалог первого запуска или Settings).
+1.1. AUTOMATIC ACTIVATION
+   J.A.R.V.I.S. uses CONTINUOUS microphone monitoring (wake-word mode)
+   when voice input is enabled. This means:
+   - After enabling voice input via the UI button or command,
+     the app CONTINUOUSLY analyzes the audio stream from the mic.
+   - Analysis is performed LOCALLY on your device.
+   - Full RECORDING (buffering for recognition) begins only when
+     sound level exceeds the VAD threshold (default -45 dB).
 
-2.2. После скачивания модели работают ПОЛНОСТЬЮ ОФЛАЙН.
-     Интернет для распознавания не требуется.
+1.2. WHAT IS RECORDED
+   - Only segments with voice activity (speech, loud sounds).
+   - Silence and background noise below the VAD threshold are
+     NOT recorded and NOT processed.
+   - Recordings are kept in RAM only during processing (~1-15 sec).
+   - After recognition, the audio buffer is immediately released.
 
-2.3. Модели хранятся в: %APPDATA%\Bohdan99py\JARVIS\vosk\
-     Вы можете удалить их вручную или через Settings.
+1.3. WHAT IS NOT DONE WITH AUDIO
+   - Audio is NOT saved to files on disk.
+   - Audio is NOT transmitted to external servers.
+   - Audio is NOT used to train models.
+   - Conversation history is stored as TEXT (transcript), not audio.
+
+1.4. CONTROLLING VOICE INPUT
+   You can at any time:
+   - Disable voice input: microphone button in the main window
+     or say "Stop".
+   - Revoke microphone permission: Windows Settings -> Privacy
+     -> Microphone -> J.A.R.V.I.S.
+   - Delete installed voice models: Settings -> Voice -> [Delete].
 
 
-3. ИИ-ЗАПРОСЫ (Claude / Gemini API)
-────────────────────────────────────
+2. VOICE MODELS
+----------------
 
-3.1. ТОЛЬКО ТЕКСТ отправляется в API Claude (Anthropic) и Gemini (Google).
-     Аудио никогда не передаётся в облако.
+2.1. Vosk models are downloaded from alphacephei.com / Hugging Face
+     ONLY at your explicit request (first-launch dialog or Settings).
 
-3.2. Запросы отправляются только когда JARVIS обращается к ИИ для ответа
-     (код, сложные вопросы, анализ). Системные команды выполняются локально.
+2.2. Once downloaded, models work FULLY OFFLINE.
+     No internet required for recognition.
 
-3.3. Содержимое запросов подчиняется политикам конфиденциальности Anthropic
-     и Google соответственно:
+2.3. Models are stored in: %APPDATA%\Bohdan99py\JARVIS\vosk\
+     You can delete them manually or via Settings.
+
+
+3. AI REQUESTS (Claude / Gemini API)
+--------------------------------------
+
+3.1. ONLY TEXT is sent to Claude API (Anthropic) and Gemini API (Google).
+     Audio is never transmitted to the cloud.
+
+3.2. Requests are sent only when JARVIS calls the AI for a response
+     (code, complex questions, analysis). System commands run locally.
+
+3.3. Request content is subject to the privacy policies of Anthropic
+     and Google respectively:
      - Anthropic: https://www.anthropic.com/privacy
      - Google:    https://policies.google.com/privacy
 
-3.4. API-ключи хранятся в реестре Windows в зашифрованном виде и никуда
-     не передаются, кроме соответствующих API-серверов.
+3.4. API keys are stored encrypted in the Windows registry and are
+     never transmitted anywhere except the corresponding API servers.
 
 
-4. ЛОКАЛЬНЫЕ ДАННЫЕ
-────────────────────
+4. LOCAL DATA
+--------------
 
-4.1. История чатов (SQLite, локально):
+4.1. Chat history (SQLite, local):
      %APPDATA%\Bohdan99py\JARVIS\jarvis.db
-     Хранит текстовые диалоги. Не покидает устройство.
+     Stores text conversations. Never leaves the device.
 
-4.2. Голосовой журнал (voice_journal):
-     Текстовые транскрипты голосовых сессий. Только локально.
+4.2. Voice journal (voice_journal):
+     Text transcripts of voice sessions. Local only.
 
-4.3. Настройки:
-     Реестр Windows: HKCU\Software\Bohdan99py\JARVIS
+4.3. Settings:
+     Windows Registry: HKCU\Software\Bohdan99py\JARVIS
 
-4.4. Для удаления всех данных:
-     - Удалите приложение через «Программы и компоненты» Windows.
-     - Папку %APPDATA%\Bohdan99py\JARVIS можно удалить вручную
-       (модели и история не удаляются автоматически при деинсталляции).
-
-
-5. СЕТЕВАЯ АКТИВНОСТЬ
-──────────────────────
-
-J.A.R.V.I.S. обращается к сети ТОЛЬКО для:
-  ✓ Скачивания голосовых моделей (alphacephei.com) — по запросу пользователя
-  ✓ Запросов к Claude API (api.anthropic.com) — при работе с ИИ
-  ✓ Запросов к Gemini API (generativelanguage.googleapis.com) — при работе с ИИ
-  ✓ Проверки обновлений (github.com/Bohdan99py/jarvis) — при запуске
-
-JARVIS НЕ обращается к сети для:
-  ✗ Телеметрии и аналитики
-  ✗ Рекламы
-  ✗ Передачи аудио
-  ✗ Синхронизации данных
+4.4. To delete all data:
+     - Uninstall the app via Windows "Apps & Features".
+     - The folder %APPDATA%\Bohdan99py\JARVIS can be deleted manually
+       (models and history are not removed automatically on uninstall).
 
 
-6. ТРЕТЬИ СТОРОНЫ
-──────────────────
+5. NETWORK ACTIVITY
+---------------------
 
-  Vosk ASR     — офлайн библиотека, без передачи данных.
-                 Лицензия: Apache 2.0.
-  Qt Framework — системная библиотека, без телеметрии.
-                 Лицензия: LGPL 3.0.
-  SQLite       — встроенная БД, без сети.
-                 Лицензия: Public Domain.
-  Anthropic    — Claude API, только текстовые запросы.
-  Google       — Gemini API, только текстовые запросы (fallback).
+J.A.R.V.I.S. connects to the network ONLY for:
+  [Y] Downloading voice models (alphacephei.com) — at user request
+  [Y] Claude API requests (api.anthropic.com) — for AI processing
+  [Y] Gemini API requests (generativelanguage.googleapis.com) — for AI
+  [Y] Checking for updates (github.com/Bohdan99py/jarvis) — on launch
 
-
-7. ДЕТИ
-────────
-   J.A.R.V.I.S. не предназначен для детей до 13 лет.
-   Мы намеренно не собираем данные о несовершеннолетних.
+JARVIS does NOT connect for:
+  [N] Telemetry or analytics
+  [N] Advertising
+  [N] Audio transmission
+  [N] Data synchronization
 
 
-8. ИЗМЕНЕНИЯ ПОЛИТИКИ
-──────────────────────
-   При существенных изменениях политики мы уведомим вас через
-   примечания к релизу на GitHub.
+6. THIRD PARTIES
+-----------------
+
+  Vosk ASR     — offline library, no data transmission.
+                 License: Apache 2.0.
+  Qt Framework — system library, no telemetry.
+                 License: LGPL 3.0.
+  SQLite       — embedded database, no network.
+                 License: Public Domain.
+  Anthropic    — Claude API, text requests only.
+  Google       — Gemini API, text requests only (fallback).
 
 
-9. КОНТАКТЫ
-────────────
-   Вопросы по приватности: https://github.com/Bohdan99py/jarvis/issues
-   Автор: Bohdan99py
+7. CHILDREN
+------------
+   J.A.R.V.I.S. is not intended for children under 13.
+   We do not knowingly collect data from minors.
 
 
-═══════════════════════════════════════════════════════════════
-ENGLISH SUMMARY
+8. POLICY CHANGES
+------------------
+   If significant changes are made to this policy, we will notify you
+   through release notes on GitHub.
 
-J.A.R.V.I.S. Privacy Policy — Key Points:
 
-VOICE RECORDING:
-  The microphone is continuously monitored while voice input is active.
-  However, audio is only CAPTURED (buffered) when sound exceeds the
-  Voice Activity Detection threshold (-45 dB by default).
-  Silence is never recorded. Audio is never saved to disk or sent to servers.
-  All speech recognition runs locally via Vosk (offline AI).
+9. CONTACT
+-----------
+   Privacy questions: https://github.com/Bohdan99py/jarvis/issues
+   Author: Bohdan99py
 
-AI REQUESTS:
-  Only TEXT is sent to Claude API / Gemini API — never audio.
-  Requests are made only when you ask JARVIS to use AI for complex tasks.
 
-LOCAL DATA:
-  Chat history and voice transcripts are stored locally in SQLite.
-  No telemetry, analytics, or advertising.
-
-You can disable the microphone at any time via the 🎤 button.
-═══════════════════════════════════════════════════════════════
+===================================================================

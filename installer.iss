@@ -1,14 +1,14 @@
 ; =====================================================================
 ; Inno Setup script for J.A.R.V.I.S. v3.x
 ;
-; Что нового v3.x:
-;   - Vosk DLL включена в installer (не нужно скачивать при первом запуске)
-;   - Голосовые модели скачиваются по выбору пользователя при первом старте
-;   - Политика приватности: запись только при обнаружении голоса (VAD)
-;   - Удалён дублированный раздел multimedia/audio
-;   - Исправлен UninstallRun (skipifdoesntexist → nowait)
+; What's new in v3.x:
+;   - Vosk DLL included in installer (no download needed on first run)
+;   - Voice models downloaded by user choice on first launch
+;   - Privacy: recording only on voice activity detection (VAD)
+;   - Removed duplicate multimedia/audio section
+;   - Fixed UninstallRun (skipifdoesntexist -> nowait)
 ;
-; Версия и MyAppBuildDir подставляются GitHub Actions при сборке.
+; Version and MyAppBuildDir are set by GitHub Actions during build.
 ; =====================================================================
 
 #define MyAppName "JARVIS"
@@ -43,8 +43,8 @@ LicenseFile=EULA_JARVIS.txt
 InfoBeforeFile=JARVIS_INSTALL_NOTES.txt
 
 [Languages]
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [Tasks]
 Name: "desktopicon"; \
@@ -53,21 +53,21 @@ Name: "desktopicon"; \
   Flags: unchecked
 
 Name: "autostart"; \
-  Description: "Запускать J.A.R.V.I.S. при старте Windows / Launch on startup"; \
-  GroupDescription: "Параметры запуска / Startup"; \
+  Description: "Launch J.A.R.V.I.S. on Windows startup"; \
+  GroupDescription: "Startup options"; \
   Flags: unchecked
 
 [Files]
-; ---- Основной исполняемый файл ----
+; ---- Main executable ----
 Source: "{#MyAppBuildDir}\{#MyAppExeName}"; \
   DestDir: "{app}"; Flags: ignoreversion
 
-; ---- Qt DLL и runtime ----
+; ---- Qt DLL and runtime ----
 Source: "{#MyAppBuildDir}\*.dll"; \
   DestDir: "{app}"; \
   Flags: ignoreversion skipifsourcedoesntexist
 
-; ---- Qt плагины (обязательные) ----
+; ---- Qt plugins (required) ----
 Source: "{#MyAppBuildDir}\platforms\*"; \
   DestDir: "{app}\platforms"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
@@ -96,17 +96,17 @@ Source: "{#MyAppBuildDir}\generic\*"; \
   DestDir: "{app}\generic"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ---- Qt SQL (КРИТИЧНО: без этого jarvis.db не открывается!) ----
-; qsqlite.dll — SQLite-драйвер Qt. Без него DatabaseManager::open()
-; падает с "driver not loaded", все счётчики Training = 0, лайки
-; не сохраняются, история не пишется. windeployqt иногда пропускает
-; его если не видит явного QSqlDatabase в main.cpp, поэтому
-; копируем явно и в CI (build.yml), и здесь в инсталляторе.
+; ---- Qt SQL (CRITICAL: without this jarvis.db won't open!) ----
+; qsqlite.dll is the Qt SQLite driver. Without it DatabaseManager::open()
+; fails with "driver not loaded", training counters stay 0, likes aren't
+; saved, history isn't written. windeployqt sometimes skips it if it
+; doesn't see an explicit QSqlDatabase in main.cpp, so we copy it
+; explicitly both in CI (build.yml) and here in the installer.
 Source: "{#MyAppBuildDir}\sqldrivers\*"; \
   DestDir: "{app}\sqldrivers"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ---- Qt Multimedia (голосовой ввод) ----
+; ---- Qt Multimedia (voice input) ----
 Source: "{#MyAppBuildDir}\multimedia\*"; \
   DestDir: "{app}\multimedia"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
@@ -115,8 +115,8 @@ Source: "{#MyAppBuildDir}\audio\*"; \
   DestDir: "{app}\audio"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ---- Vosk runtime DLL (голосовой ввод, офлайн ASR) ----
-; Эти DLL включены в installer — модели качаются отдельно при первом запуске
+; ---- Vosk runtime DLL (voice input, offline ASR) ----
+; These DLLs are included in the installer — models are downloaded separately on first launch
 Source: "{#MyAppBuildDir}\libvosk.dll"; \
   DestDir: "{app}"; \
   Flags: ignoreversion skipifsourcedoesntexist
@@ -133,17 +133,17 @@ Source: "{#MyAppBuildDir}\libwinpthread-1.dll"; \
   DestDir: "{app}"; \
   Flags: ignoreversion skipifsourcedoesntexist
 
-; ---- OCR (опционально) ----
+; ---- OCR (optional) ----
 Source: "{#MyAppBuildDir}\Tesseract-OCR\*"; \
   DestDir: "{app}\Tesseract-OCR"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ---- Плагины JARVIS ----
+; ---- JARVIS plugins ----
 Source: "{#MyAppBuildDir}\plugins\*"; \
   DestDir: "{app}\plugins"; \
   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ---- Документация ----
+; ---- Documentation ----
 Source: "EULA_JARVIS.txt"; \
   DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
@@ -171,7 +171,7 @@ Name: "{autodesktop}\{#MyAppName}"; \
   Tasks: desktopicon
 
 [Registry]
-; Автозапуск (только если пользователь выбрал)
+; Autostart (only if user selected the task)
 Root: HKCU; \
   Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   ValueType: string; \
@@ -186,7 +186,7 @@ Filename: "{app}\{#MyAppExeName}"; \
   Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; nowait + runhidden — не «skipifdoesntexist», так как это не флаг [UninstallRun]
+; nowait + runhidden — not "skipifdoesntexist" since that's not a valid [UninstallRun] flag
 Filename: "taskkill.exe"; \
   Parameters: "/F /IM {#MyAppExeName}"; \
   Flags: runhidden nowait
@@ -195,5 +195,5 @@ Filename: "taskkill.exe"; \
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{userappdata}\JARVIS"
 Type: filesandordirs; Name: "{userappdata}\Bohdan99py\JARVIS"
-; Голосовые модели НЕ удаляются автоматически (большие файлы, пользователь решает сам)
-; Чтобы удалить: %APPDATA%\Bohdan99py\JARVIS\vosk\
+; Voice models are NOT deleted automatically (large files — user decides)
+; To delete manually: %APPDATA%\Bohdan99py\JARVIS\vosk\
