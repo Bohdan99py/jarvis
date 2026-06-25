@@ -38,6 +38,7 @@ class QDropEvent;
 #include "passive_listener.h"
 #include "VoskSetupDialog.h"
 #include "screenshot_learner.h"
+#include "activity_tracker.h"
 
 class MainWindow : public QMainWindow
 {

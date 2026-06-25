@@ -16,6 +16,7 @@
 #include "brain.h"
 #include "pc_command_registry.h"
 #include "database_manager.h"  // response_cache для offline-ответов
+#include "activity_tracker.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -61,6 +62,8 @@ Jarvis::Jarvis(QObject* parent)
     m_codeActions  = new CodeActions(this);
     m_attachments  = new AttachmentsManager(this);
     m_profile      = new UserProfile(this);
+    m_activity     = new ActivityTracker(this);
+    m_activity->start(15); // capture every 15 seconds
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -825,10 +828,18 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         m_profile->recordObservation(ctx, s);
         m_memory->setUserProfileSummary(m_profile->buildProfileSummary());
 
+        // Activity context: what the user is doing right now
+        m_memory->setActivityContext(m_activity->buildActivityContext());
+        m_memory->setDetectedRole(m_activity->detectUserRole());
+        m_memory->setKnowledgeSummary(m_activity->knowledgeSummary(m_currentUserId));
+
+        // Extract knowledge from user input
+        m_activity->extractKnowledge(m_currentUserId, s, QString());
+
         // Consciousness: learning stats for system prompt
         m_memory->setLearningStats(
-            DatabaseManager::instance().trainingLogCount(1, -1),
-            DatabaseManager::instance().trainingLogCount(1, 1),
+            DatabaseManager::instance().trainingLogCount(m_currentUserId, -1),
+            DatabaseManager::instance().trainingLogCount(m_currentUserId, 1),
             DatabaseManager::instance().responseCacheCount(),
             m_memory->pastSessionSummaries().size()
         );
@@ -1564,12 +1575,12 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
 
         const QString continuePrompt = QStringLiteral(
             "[AUTO-CONTINUATION OF FILE GENERATION]\nFile: ") + m_pendingFile.filePath
-            + QStringLiteral("\nYour previous response was truncated due to token limit. "
-              "Here is the tail of the already written file content (DO NOT repeat it):\n"
+            + QStringLiteral("\nYour previous response was cut off by the token limit. "
+              "Here is the tail of the already written content (DO NOT repeat it):\n"
               "-----\n") + tail + QStringLiteral("\n-----\n"
               "Output ONLY the continuation of the file content from this point — "
-              "without markdown ``` wrapper and without [FILE:...] header. When the file "
-              "is fully complete, end with [/FILE] on a new line.");
+              "no markdown ``` wrapper and no [FILE:...] header. When the file "
+              "is complete, end with [/FILE] on a new line.");
 
         m_claudeApi->sendMessage(continuePrompt,
             [this, userInput, hadAttachments](bool ok, const QString& resp) {
@@ -1583,8 +1594,8 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
                     const QString rescue = QStringLiteral("[FILE:") + path + QStringLiteral("]\n")
                                           + partial + QStringLiteral("\n[/FILE]\n"
                                             "⚠ Auto-continuation failed (") + resp
-                                          + QStringLiteral("). File saved as-is, "
-                                            "possibly incomplete — request the missing part in a separate message.");
+                                          + QStringLiteral("). File saved as-is — "
+                                            "may be incomplete. Ask me to finish it in a separate message.");
                     handleClaudeCodeResponse(userInput, rescue, hadAttachments);
                 }
             });
@@ -1608,8 +1619,8 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         if (truncated) {
             finalResponse += QStringLiteral("\n\n⚠ Continuation limit reached (")
                            + QString::number(MAX_FILE_CONTINUATIONS)
-                           + QStringLiteral(") — file saved as-is and may be "
-                             "incomplete. Request the missing part in a separate message.");
+                           + QStringLiteral(") — file saved as-is. May be incomplete. "
+                             "Ask me to finish the remaining part separately.");
         }
         m_pendingFile = PendingFileGeneration{};
     } else if (m_pendingFile.active) {
@@ -1643,13 +1654,16 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         && !displayResponse.contains(QStringLiteral("```")))
     {
         DbBehaviorPattern cached;
-        cached.userId     = 1;
+        cached.userId     = m_currentUserId;
         cached.trigger    = userInput.toLower().simplified();
         cached.response   = displayResponse.left(1000);
         cached.context    = QStringLiteral("{}");
         cached.confidence = 0.7f;
         DatabaseManager::instance().upsertPattern(cached);
     }
+
+    // Extract knowledge from the full conversation turn
+    m_activity->extractKnowledge(m_currentUserId, userInput, displayResponse);
 
     handleClaudeResponse(finalResponse);
     m_predictor->recordSequence(userInput);
@@ -1737,7 +1751,7 @@ QString Jarvis::cmdShowMemory(const QString&)
 {
     QJsonObject facts = m_memory->allFacts();
     if (facts.isEmpty()) {
-        return QStringLiteral("Memory bank is empty. Usage: remember key=value");
+        return QStringLiteral("Memory bank is empty. Use: remember key=value");
     }
 
     QString text = QStringLiteral("Stored facts:\n");
@@ -1801,9 +1815,9 @@ QString Jarvis::cmdShowProfile(const QString&)
 {
     return QStringLiteral("=== Preference Profile ===\n")
          + m_profile->buildProfileSummary(8)
-         + QStringLiteral("\n\nProfile updates automatically with every message "
-                          "and adapts to your actual work patterns over time. "
-                          "Old patterns fade naturally.");
+         + QStringLiteral("\n\nThis profile updates automatically with every interaction. "
+                          "I adapt to your real workflow over time. "
+                          "Old patterns fade — only what matters sticks.");
 }
 
 // ============================================================
@@ -1866,15 +1880,11 @@ QString Jarvis::cmdOpenProjectIDE(const QString& input)
         return QStringLiteral("No project open. Use: index <path>");
     }
 
-    // Аргумент после "проект в " / "project in " — имя IDE.
-    // Без аргумента — CLion по умолчанию.
     QString ide = extractArg(input, {QStringLiteral("проект в "),
                                       QStringLiteral("project in ")});
     ide = ide.trimmed();
     if (ide.isEmpty()) ide = QStringLiteral("clion");
 
-    // Передаём имя явно — это сбрасывает лимит "один раз за сессию"
-    // для авто-режима, т.е. команда всегда срабатывает.
     const QString msg = openProjectInIDE(ide);
     return msg.isEmpty()
          ? QStringLiteral("Can't identify IDE: ") + ide
@@ -1919,8 +1929,8 @@ QString Jarvis::cmdFindSymbol(const QString& input)
         text += QStringLiteral("\n");
 
         if (++shown >= 10) {
-            text += QStringLiteral("\n... and ")
-                  + QString::number(results.size() - 10) + QStringLiteral(" more results");
+            text += QStringLiteral("\n... and ") + QString::number(results.size() - 10)
+                  + QStringLiteral(" more results");
             break;
         }
     }
@@ -1937,7 +1947,7 @@ QString Jarvis::cmdProjectMap(const QString&)
     QString map = m_indexer->projectMap();
 
     if (map.length() > 3000) {
-        map = map.left(3000) + QStringLiteral("\n\n... (truncated, total ")
+        map = map.left(3000) + QStringLiteral("\n\n... (truncated, total: ")
             + QString::number(m_indexer->fileCount()) + QStringLiteral(" files, ")
             + QString::number(m_indexer->symbolCount()) + QStringLiteral(" symbols)");
     }
@@ -1959,7 +1969,7 @@ QString Jarvis::cmdGrep(const QString& input)
 
     auto results = m_indexer->grep(pattern, 20);
     if (results.isEmpty()) {
-        return QStringLiteral("No matches for '") + pattern + QStringLiteral("'");
+        return QStringLiteral("No matches for '") + pattern + QStringLiteral("'.");
     }
 
     QString text = QStringLiteral("Found ") + QString::number(results.size())
@@ -2077,7 +2087,7 @@ QString Jarvis::cmdSetGeminiKey(const QString& input)
                                         QStringLiteral("модель ")});
     if (model.isEmpty()) {
         return QStringLiteral("Current Ollama model: ") + m_geminiApi->model()
-             + QStringLiteral("\nTo change: ollamamodel <name>\n"
+             + QStringLiteral("\nTo switch: ollamamodel <name>\n"
                "Available models: ollama list (in terminal)");
     }
     m_geminiApi->setModel(model);
@@ -2092,14 +2102,14 @@ QString Jarvis::cmdHelp(const QString&)
 {
     QString help = m_registry.helpText();
     help += QStringLiteral("\n\n— Free conversation —\n"
-                           "Any question, task or request goes to Claude API.\n"
-                           "\"Find X\", \"open Y\", \"explain Z\" — Brain handles routing.");
+                           "Any question, task, or request → Claude API.\n"
+                           "'Find X', 'open Y', 'explain Z' — I'll figure out the rest.");
     help += QStringLiteral("\n\n— File attachments —\n"
                            "Click 📎 or drag files into the window.");
     if (m_indexer->fileCount() > 0) {
-        help += QStringLiteral("\n\n— Project \"")
+        help += QStringLiteral("\n\n— Project '")
               + QFileInfo(m_indexer->projectRoot()).fileName()
-              + QStringLiteral("\" indexed —\n")
+              + QStringLiteral("' indexed —\n")
               + QString::number(m_indexer->fileCount()) + QStringLiteral(" files, ")
               + QString::number(m_indexer->symbolCount()) + QStringLiteral(" symbols");
     }

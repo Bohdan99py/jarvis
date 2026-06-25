@@ -224,5 +224,5 @@ private:
     QString        m_lastError;
     mutable QMutex m_mutex;
 
-    static constexpr int k_schemaVersion = 5;
+    static constexpr int k_schemaVersion = 6;
 };

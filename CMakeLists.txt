@@ -168,6 +168,9 @@ add_library(JarvisCore STATIC
         core/local_trainer.cpp
         core/screenshot_learner.h
         core/screenshot_learner.cpp
+        # Activity tracking + knowledge base
+        core/activity_tracker.h
+        core/activity_tracker.cpp
         # Прикрепления файлов
         core/attachments_manager.h
         core/attachments_manager.cpp

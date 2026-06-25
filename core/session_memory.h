@@ -98,6 +98,15 @@ public:
     void setUserProfileSummary(const QString& summary) { m_userProfileSummary = summary; }
     QString userProfileSummary() const   { return m_userProfileSummary; }
 
+    // Activity context: what the user is doing right now
+    void setActivityContext(const QString& ctx) { m_activityContext = ctx; }
+    // Detected user role based on activity patterns
+    void setDetectedRole(const QString& role) { m_detectedRole = role; }
+    // Knowledge base summary
+    void setKnowledgeSummary(const QString& kb) { m_knowledgeSummary = kb; }
+    // Active user name (for multi-user prompts)
+    void setActiveUserName(const QString& name) { m_activeUserName = name; }
+
     // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
     void setLearningStats(int totalInteractions, int likedResponses,
                           int cachedResponses, int sessionsRecorded);
@@ -130,6 +139,10 @@ private:
     QJsonArray  m_pastSessions;
 
     QString m_userProfileSummary;
+    QString m_activityContext;
+    QString m_detectedRole;
+    QString m_knowledgeSummary;
+    QString m_activeUserName;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;

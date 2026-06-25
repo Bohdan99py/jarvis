@@ -33,7 +33,6 @@ ActionPredictor::ActionPredictor(SessionMemory* memory, QObject* parent)
 void ActionPredictor::initDefaultRules()
 {
     m_rules = {
-        // После запуска IDE → вероятно, нужен поиск или файл
         {QStringLiteral("rider"),
          QStringLiteral("open_app:Rider"),
          QStringLiteral("Open Rider?"), 0},
@@ -42,37 +41,30 @@ void ActionPredictor::initDefaultRules()
          QStringLiteral("open_app:CLion"),
          QStringLiteral("Open CLion?"), 0},
 
-        // После Steam → вероятно, хочет поиграть
         {QStringLiteral("steam"),
          QStringLiteral("open_app:Steam"),
          QStringLiteral("Open Steam?"), 0},
 
-        // После Discord → вероятно, хочет общаться
         {QStringLiteral("discord"),
          QStringLiteral("open_app:Discord"),
          QStringLiteral("Open Discord?"), 0},
 
-        // После Chrome/браузера → вероятно, нужен YouTube
         {QStringLiteral("chrome"),
          QStringLiteral("open_app:YouTube"),
          QStringLiteral("Open YouTube?"), 0},
 
-        // После блокнота → возможно, нужно напечатать
         {QStringLiteral("notepad"),
          QStringLiteral("напечатай "),
          QStringLiteral("Type some text?"), 0},
 
-        // После поиска → возможно, нужен YouTube
         {QStringLiteral("найди"),
          QStringLiteral("open_app:YouTube"),
          QStringLiteral("Search on YouTube?"), 0},
 
-        // Вечер → предложить заблокировать
         {QStringLiteral("время"),
          QStringLiteral("заблокируй"),
          QStringLiteral("Lock the screen?"), 0},
 
-        // После нескольких команд → предложить статистику
         {QStringLiteral("помощь"),
          QStringLiteral("статистика"),
          QStringLiteral("Check usage stats?"), 0},

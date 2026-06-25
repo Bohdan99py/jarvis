@@ -6,7 +6,6 @@
 #include <QString>
 #include <QDateTime>
 
-// Глобальный язык (изменяется через Настройки/Settings → Language)
 enum class UiLanguage { Russian, English };
 
 inline UiLanguage& gUiLanguage()
@@ -15,22 +14,21 @@ inline UiLanguage& gUiLanguage()
     return lang;
 }
 
-// Макрос для удобства
 #define IS_EN (gUiLanguage() == UiLanguage::English)
 
 // -------------------------------------------------------
-// Все строки интерфейса
+// All UI strings
 // -------------------------------------------------------
 namespace Str {
 
-// --- Меню: Файл / File ---
+// --- Menu: File ---
 inline QString menuFile()           { return IS_EN ? "File"             : "Файл"; }
 inline QString menuAttach()         { return IS_EN ? "Attach files..."  : "Прикрепить файлы..."; }
 inline QString menuClearAttach()    { return IS_EN ? "Clear attachments": "Очистить прикрепления"; }
 inline QString menuClearLog()       { return IS_EN ? "Clear log"        : "Очистить лог"; }
 inline QString menuExit()           { return IS_EN ? "Exit"             : "Выход"; }
 
-// --- Меню: Настройки / Settings ---
+// --- Menu: Settings ---
 inline QString menuSettings()       { return IS_EN ? "Settings"                 : "Настройки"; }
 inline QString menuApiKey()         { return IS_EN ? "Claude API key..."         : "Claude API-ключ..."; }
 inline QString menuGeminiKey()      { return IS_EN ? "Gemini API key..."         : "Gemini API-ключ..."; }
@@ -42,25 +40,25 @@ inline QString menuLanguage()       { return IS_EN ? "Language / Язык"      
 inline QString menuLangRu()         { return IS_EN ? "Russian (Русский)"         : "Русский (Russian)"; }
 inline QString menuLangEn()         { return IS_EN ? "English"                   : "English"; }
 
-// --- Меню: Проект / Project ---
+// --- Menu: Project ---
 inline QString menuProject()        { return IS_EN ? "Project"              : "Проект"; }
 inline QString menuIndexFolder()    { return IS_EN ? "Index folder..."      : "Индексировать папку..."; }
 inline QString menuProjectMap()     { return IS_EN ? "Project map"          : "Карта проекта"; }
 inline QString menuReindex()        { return IS_EN ? "Re-index"             : "Переиндексировать"; }
 inline QString menuProjectInfo()    { return IS_EN ? "Project info"         : "Информация о проекте"; }
 
-// --- Меню: Обновление / Update ---
+// --- Menu: Update ---
 inline QString menuUpdate()         { return IS_EN ? "Update"              : "Обновление"; }
 inline QString menuCheckUpdate()    { return IS_EN ? "Check for updates"   : "Проверить обновления"; }
 inline QString menuDownloadUpdate() { return IS_EN ? "Download update"     : "Скачать обновление"; }
 inline QString menuReleasePage()    { return IS_EN ? "Releases page"       : "Страница релизов"; }
 
-// --- Меню: Помощь / Help ---
+// --- Menu: Help ---
 inline QString menuHelp()           { return IS_EN ? "Help"            : "Помощь"; }
 inline QString menuAbout()          { return IS_EN ? "About"           : "О программе"; }
 inline QString menuCommands()       { return IS_EN ? "Command list"    : "Список команд"; }
 
-// --- Диалоги ---
+// --- Dialogs ---
 inline QString dlgApiKeyTitle()     { return IS_EN ? "Claude API Key"             : "API-ключ Claude"; }
 inline QString dlgApiKeyLabel()     { return IS_EN ? "Enter your Anthropic API key:" : "Введите ваш Anthropic API-ключ:"; }
 inline QString dlgGeminiKeyTitle()  { return IS_EN ? "Gemini API Key"             : "Gemini API-ключ"; }
@@ -70,7 +68,7 @@ inline QString dlgChooseFolder()    { return IS_EN ? "Select project folder"    
 inline QString dlgRestartNeeded()   { return IS_EN ? "Language changed. Some UI elements will update on next launch."
                                                    : "Язык изменён. Часть элементов обновится при следующем запуске."; }
 
-// --- Приветствие ---
+// --- Greetings ---
 inline QString greetNight() {
     return IS_EN ? "Still up? Bold move. JARVIS online — let's make it count."
                  : "Ещё не спишь? Уважаю. JARVIS в сети";
@@ -91,33 +89,33 @@ inline QString greetReady() {
     return IS_EN ? "Online. v" : "В сети. v";
 }
 
-// --- Статусы ---
+// --- Status ---
 inline QString statusThinking()     { return IS_EN ? "Processing..."              : "Думаю..."; }
 inline QString statusReady()        { return IS_EN ? "Standing by"                : "Готово"; }
 inline QString statusIndexing()     { return IS_EN ? "Indexing: "               : "Индексирую: "; }
 inline QString statusDownload()     { return IS_EN ? "Downloading: %1%"         : "Скачивание: %1%"; }
-inline QString statusAttached()     { return IS_EN ? "Attached files: "         : "Прикреплено файлов: "; }
+inline QString statusAttached()     { return IS_EN ? "Files attached: "         : "Прикреплено файлов: "; }
 inline QString statusAttachCleared(){ return IS_EN ? "Attachments cleared. Slate wiped clean." : "Прикрепления очищены."; }
 inline QString statusAttachKept()   { return IS_EN ? "Attachments persist between requests." : "Прикрепления сохраняются между запросами."; }
 inline QString statusAttachOneShot(){ return IS_EN ? "Attachments cleared after each send." : "Прикрепления очищаются после каждой отправки."; }
 
-// --- Лог ---
+// --- Log labels ---
 inline QString logSender()          { return IS_EN ? "YOU"    : "ВЫ"; }
 inline QString logJarvis()          { return QStringLiteral("JARVIS"); }
 inline QString logSystem()          { return IS_EN ? "SYSTEM" : "СИСТЕМА"; }
 inline QString logError()           { return IS_EN ? "ERROR"  : "ОШИБКА"; }
 
-// --- Агент инфо ---
+// --- Agent info ---
 inline QString agentClaude()        { return IS_EN ? "🤖 Claude (code)"    : "🤖 Claude (код)"; }
 inline QString agentGemini()        { return IS_EN ? "💬 Gemini (chat)"    : "💬 Gemini (чат)"; }
 inline QString agentModeOn()        { return IS_EN ? "Multi-agent mode ON. Coding → Claude, Chat → Gemini."
                                                    : "Мультиагентный режим ВКЛ. Код → Claude, Беседа → Gemini."; }
 inline QString agentModeOff()       { return IS_EN ? "Multi-agent mode OFF. All queries → Claude."
                                                    : "Мультиагентный режим ВЫКЛ. Все запросы → Claude."; }
-inline QString agentNoGeminiKey()   { return IS_EN ? "Gemini key not set. Set it in Settings → Gemini API key."
+inline QString agentNoGeminiKey()   { return IS_EN ? "Gemini key not set. Configure it in Settings → Gemini API key."
                                                    : "Ключ Gemini не установлен. Настройки → Gemini API-ключ."; }
 
-// --- API статусы ---
+// --- API status ---
 inline QString apiClaudeConnected() { return IS_EN ? "Claude API connected. Attach files via 📎 or drag & drop."
                                                    : "Claude API подключён. Прикрепляйте файлы кнопкой 📎 или перетаскиванием в окно."; }
 inline QString apiNoKey()           { return IS_EN ? "Enter a command or 'help'. For AI mode: apikey <your-key>"
@@ -125,20 +123,20 @@ inline QString apiNoKey()           { return IS_EN ? "Enter a command or 'help'.
 inline QString apiKeySaved()        { return IS_EN ? "API key locked in. Claude API connected — at your service." : "API-ключ сохранён. Claude API подключён."; }
 inline QString apiGeminiKeySaved()  { return IS_EN ? "Gemini key saved. Ready to route." : "Gemini ключ сохранён."; }
 
-// --- Вайбкодинг ---
-inline QString vibeModeOn()         { return IS_EN ? "Vibecoding ON. Code will be pulled from the index or attached files."
+// --- Vibecoding ---
+inline QString vibeModeOn()         { return IS_EN ? "Vibecoding ON. I'll pull the code from the index or attachments."
                                                    : "Вайбкодинг включён. Нужный код я возьму из индекса либо из прикреплённых файлов."; }
 inline QString vibeModeOff()        { return IS_EN ? "Vibecoding OFF. Back to standard ops." : "Вайбкодинг выключен. Обычный режим."; }
 inline QString vibePlaceholder()    { return IS_EN ? "Describe what to do: 'optimize X', 'add Y', 'fix Z'..."
                                                    : "Опиши что сделать: «оптимизируй X», «добавь Y», «исправь Z»..."; }
 
-// --- Инпут-плейсхолдер ---
+// --- Input placeholder ---
 inline QString inputPlaceholder()   { return IS_EN ? "Talk to me — command, question, anything..." : "Введите команду или вопрос..."; }
 
-// --- Проект ---
+// --- Project ---
 inline QString projLoaded()         { return IS_EN ? "Project loaded from cache: " : "Проект загружен из кэша: "; }
 inline QString projFiles()          { return IS_EN ? " files)"    : " файлов)"; }
-inline QString projIndexed()        { return IS_EN ? "Project indexed!\nFiles: " : "Проект проиндексирован!\nФайлов: "; }
+inline QString projIndexed()        { return IS_EN ? "Project indexed.\nFiles: " : "Проект проиндексирован!\nФайлов: "; }
 inline QString projSymbols()        { return IS_EN ? ", Symbols: "              : ", Символов: "; }
 inline QString projNotIndexed()     { return IS_EN ? "No project indexed yet."  : "Проект не проиндексирован."; }
 inline QString projChooseFirst()    { return IS_EN ? "Pick a folder first."     : "Сначала выберите папку."; }
@@ -149,19 +147,19 @@ inline QString projFilesLabel()     { return IS_EN ? "\nFiles: "                
 inline QString projSymbolsLabel()   { return IS_EN ? "\nSymbols: "              : "\nСимволов: "; }
 inline QString projClassesLabel()   { return IS_EN ? "\n\nClasses:\n"           : "\n\nКлассы:\n"; }
 
-// --- Обновление ---
+// --- Update ---
 inline QString updChecking()        { return IS_EN ? "Checking for updates..."  : "Проверяю обновления..."; }
-inline QString updLatest()          { return IS_EN ? "You have the latest version (" : "У вас последняя версия ("; }
+inline QString updLatest()          { return IS_EN ? "You're running the latest (" : "У вас последняя версия ("; }
 inline QString updDownloaded()      { return IS_EN ? "Update downloaded. Launching installer..." : "Обновление скачано. Запускаю установщик..."; }
 
-// --- О программе ---
+// --- About ---
 inline QString aboutText()          {
     return IS_EN
         ? "J.A.R.V.I.S. — Just A Rather Very Intelligent System\n\nVersion: v%1\nEngines: Claude API + Gemini API\nAuthor: Bohdan99py"
         : "J.A.R.V.I.S. — Personal AI Assistant\n\nВерсия: v%1\nДвижки: Claude API + Gemini API\nАвтор: Bohdan99py";
 }
 
-// --- Что нового ---
+// --- What's New ---
 inline QString whatsNew() {
     return IS_EN
         ? "What's new in v%1:\n"
@@ -180,7 +178,7 @@ inline QString whatsNew() {
           "• Фикс обновления — установщик теперь запускается корректно";
 }
 
-// --- Советы при запуске ---
+// --- Startup tips ---
 inline QString startupTip() {
     static const char* tipsRU[] = {
         "Совет: нажми 👍 на ответы которые нравятся — JARVIS учится на них.",
@@ -204,7 +202,7 @@ inline QString startupTip() {
     return IS_EN ? QString::fromUtf8(tipsEN[idx]) : QString::fromUtf8(tipsRU[idx]);
 }
 
-// --- Fallback команды ---
+// --- Fallback ---
 inline QString fallbackNoCmd()      {
     return IS_EN
         ? "Didn't catch that. Type 'help' to see what I can do.\nFor free conversation, set an API key first."

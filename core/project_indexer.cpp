@@ -658,7 +658,7 @@ QString ProjectIndexer::projectMap() const
     QString map;
     map += QStringLiteral("Project: ") + QFileInfo(m_projectRoot).fileName() + QStringLiteral("\n");
     map += QStringLiteral("Files: ") + QString::number(m_files.size())
-         + QStringLiteral(", Символов: ") + QString::number(symbolCount()) + QStringLiteral("\n\n");
+         + QStringLiteral(", Symbols: ") + QString::number(symbolCount()) + QStringLiteral("\n\n");
 
     // Группируем по файлам
     for (const auto& file : m_files) {

@@ -19,6 +19,7 @@
 #include "command_registry.h"
 #include "applauncher.h"
 #include "user_profile.h"
+#include "activity_tracker.h"
 
 class KeyEmulator;
 class SessionMemory;
@@ -77,6 +78,11 @@ public:
     AttachmentsManager* attachments()        const { return m_attachments; }
     UserProfile*        userProfile()        const { return m_profile; }
     PcCommandRegistry*  pcCommands()         const { return m_pcCommands; }
+    ActivityTracker*    activityTracker()    const { return m_activity; }
+
+    // Multi-user: switch active user (all data scoped to userId)
+    void setCurrentUserId(qint64 id) { m_currentUserId = id; }
+    qint64 currentUserId() const     { return m_currentUserId; }
 
     // Мультиагентный режим: true = Claude для кода, Gemini для бесед
     void setMultiAgentMode(bool enabled);
@@ -186,6 +192,8 @@ private:
     AppLauncher         m_appLauncher;             // запуск приложений/IDE
     UserProfile*        m_profile      = nullptr;  // обучение паттернов/сценариев
     PcCommandRegistry*  m_pcCommands   = nullptr;  // голосовое управление ПК (мышь/окна/система/макросы)
+    ActivityTracker*    m_activity     = nullptr;  // deep context awareness + knowledge base
+    qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 
     bool              m_multiAgentMode    = false;

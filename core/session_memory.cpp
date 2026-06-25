@@ -737,6 +737,29 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral("\n");
     }
 
+    // --- Active user identity ---
+    if (!m_activeUserName.isEmpty()) {
+        prompt += QStringLiteral("=== ACTIVE USER ===\nName: ") + m_activeUserName;
+        if (!m_detectedRole.isEmpty())
+            prompt += QStringLiteral(" | Role: ") + m_detectedRole;
+        prompt += QStringLiteral("\n"
+            "Adapt your style to this user's role and expertise level.\n\n");
+    } else if (!m_detectedRole.isEmpty()) {
+        prompt += QStringLiteral("=== USER ROLE (detected from activity) ===\n")
+                + m_detectedRole + QStringLiteral("\n"
+            "Adapt your style to this role — a programmer gets technical answers, "
+            "an artist gets visual/creative guidance, etc.\n\n");
+    }
+
+    // --- What the user is doing right now ---
+    if (!m_activityContext.isEmpty()) {
+        prompt += QStringLiteral("=== CURRENT ACTIVITY (live) ===\n")
+                + m_activityContext + QStringLiteral(
+            "Use this to give contextual advice. If the user is in an IDE — be "
+            "code-oriented. If in a browser — consider they might need info. "
+            "If in an art tool — think visually. Be proactive when relevant.\n\n");
+    }
+
     if (!m_userProfileSummary.isEmpty()) {
         prompt += QStringLiteral(
             "=== USER PROFILE (learned by JARVIS over time) ===\n")
@@ -746,6 +769,14 @@ QString SessionMemory::buildSystemPrompt() const
             "to the point; if the scenario is 'Gaming' — be shorter). "
             "Do NOT mention the existence of 'profile' or 'scenarios' — "
             "behave naturally.\n\n");
+    }
+
+    // --- Knowledge base: facts JARVIS has learned about this user ---
+    if (!m_knowledgeSummary.isEmpty()) {
+        prompt += QStringLiteral("=== KNOWLEDGE BASE (learned facts about user) ===\n")
+                + m_knowledgeSummary + QStringLiteral("\n"
+            "Use these facts naturally. Don't say 'I know that you...' — just "
+            "apply the knowledge to give better, more personalized answers.\n\n");
     }
 
     bool hasTaskBlock = false;

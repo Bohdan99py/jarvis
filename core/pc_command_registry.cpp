@@ -294,8 +294,6 @@ void PcCommandRegistry::registerSystemCommands(CommandRegistry& r)
                 : QStringLiteral("Nothing to cancel");
         }, QStringLiteral("cancel shutdown"));
 
-    // ВАЖНО: "запусти " у тебя свободно (не занято cmdTypeText/cmdPressKey/cmdCombo,
-    // которые используют "напечатай "/"нажми "/"комбо "), поэтому можно регистрировать.
     r.registerCommand({"запусти"},
         [sys](const QString& full) -> QString {
             const QString app = remainderAfter(full, QStringLiteral("запусти"));
