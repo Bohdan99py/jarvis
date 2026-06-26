@@ -28,6 +28,7 @@
 #include "jarvis_paths.h"
 #include "jarvis_response.h"
 #include "voice_synthesis_manager.h"
+#include "llm_cache_manager.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -1780,6 +1781,18 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
 
     // Extract knowledge from the full conversation turn
     m_activity->extractKnowledge(m_currentUserId, userInput, displayResponse);
+
+    // Automated offline training: cache conversational responses for local replay.
+    // Non-code responses under 3000 chars are good candidates for offline learning.
+    if (!displayResponse.contains(QStringLiteral("```"))
+        && !displayResponse.contains(QStringLiteral("[FILE:"))
+        && displayResponse.length() > 20
+        && displayResponse.length() < 3000)
+    {
+        LlmCacheManager::instance().saveResponse(userInput, displayResponse);
+        qDebug() << "[Jarvis] Auto-cached response for offline learning:"
+                 << userInput.left(60);
+    }
 
     handleClaudeResponse(finalResponse);
     m_predictor->recordSequence(userInput);

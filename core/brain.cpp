@@ -3,6 +3,7 @@
 // -------------------------------------------------------
 
 #include "brain.h"
+#include "llm_cache_manager.h"
 
 #include <QClipboard>
 #include <QApplication>
@@ -126,6 +127,10 @@ Intent Brain::analyze(const QString& input, const ContextSnapshot& ctx) const
 {
     const QString lower = input.trimmed().toLower();
     Intent intent;
+
+    // --- Уровень 0: локальный offline-ответ из кэша ---
+    if (tryLocalAnswer(lower, intent))
+        return intent;
 
     // --- Уровень 1: лингвистика ---
     intent.action = detectAction(lower);
@@ -311,6 +316,26 @@ Intent::Domain Brain::detectDomainByKeywords(const QString& lower) const
         QStringLiteral("clipboard"),     QStringLiteral("скопированное"),
     })) return Intent::Domain::Clipboard;
 
+    // Philosophy, chitchat, moral/ethical questions, open-ended discussion
+    if (containsAny(lower, {
+        QStringLiteral("философ"),       QStringLiteral("морал"),
+        QStringLiteral("этик"),          QStringLiteral("смысл жизни"),
+        QStringLiteral("что такое добро"),QStringLiteral("что такое зло"),
+        QStringLiteral("свобода воли"),  QStringLiteral("сознани"),
+        QStringLiteral("искусственный интеллект"), QStringLiteral("ии "),
+        QStringLiteral("надзор"),        QStringLiteral("контроль"),
+        QStringLiteral("samaritan"),     QStringLiteral("machine"),
+        QStringLiteral("математик"),     QStringLiteral("бесконечност"),
+        QStringLiteral("вселенн"),       QStringLiteral("существован"),
+        QStringLiteral("как ты считаешь"),QStringLiteral("как думаешь"),
+        QStringLiteral("что ты думаешь"),QStringLiteral("твоё мнение"),
+        QStringLiteral("what do you think"), QStringLiteral("your opinion"),
+        QStringLiteral("philosophy"),    QStringLiteral("meaning of life"),
+        QStringLiteral("consciousness"), QStringLiteral("free will"),
+        QStringLiteral("хорошо или плохо"), QStringLiteral("good or bad"),
+        QStringLiteral("правильно или нет"), QStringLiteral("справедливо"),
+    })) return Intent::Domain::Philosophy_Chitchat;
+
     return Intent::Domain::None;  // не определён — уточним через контекст
 }
 
@@ -358,6 +383,22 @@ Intent::Domain Brain::refineDomainByContext(
 {
     // Если домен уже явно определён ключевым словом — не трогаем
     if (preliminary != Intent::Domain::None) return preliminary;
+
+    // Detect philosophy/chitchat for open-ended questions that lack
+    // explicit keywords but are clearly conversational (short, no file refs)
+    {
+        const int wordCount = lower.split(QLatin1Char(' '),
+                                          Qt::SkipEmptyParts).size();
+        const bool hasQuestionMark = lower.contains(QLatin1Char('?'));
+        const bool noFileHints = !lower.contains(QLatin1Char('.'))
+                              && !lower.contains(QLatin1Char('/'))
+                              && !lower.contains(QLatin1Char('\\'));
+        if (hasQuestionMark && noFileHints && wordCount <= 15
+            && !ctx.isInCodingContext() && !ctx.isInUE5Context())
+        {
+            return Intent::Domain::Philosophy_Chitchat;
+        }
+    }
 
     // --- Подсказки от контекста ---
 
@@ -804,4 +845,29 @@ QString Brain::suggestWebTarget(const QString& lower) const
         }
     }
     return QString();
+}
+
+// ============================================================
+//  tryLocalAnswer — check local LLM cache before API dispatch
+// ============================================================
+
+bool Brain::tryLocalAnswer(const QString& lower, Intent& intent) const
+{
+    if (lower.length() < 5) return false;
+
+    const QString cached = LlmCacheManager::instance()
+                               .findLocalLearnedResponse(lower);
+    if (cached.isEmpty()) return false;
+
+    intent.action        = Intent::Action::Ask;
+    intent.domain        = Intent::Domain::Philosophy_Chitchat;
+    intent.query         = lower;
+    intent.confidence    = 0.95f;
+    intent.localResponse = cached;
+    intent.fromHistory   = true;
+
+    qDebug() << "[Brain] Local offline match found. Bypassing remote LLM."
+             << lower.left(60);
+
+    return true;
 }

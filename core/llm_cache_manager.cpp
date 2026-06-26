@@ -128,6 +128,58 @@ void LlmCacheManager::saveResponse(const QString& query, const QString& response
 }
 
 // ============================================================
+//  Fuzzy local lookup (substring matching for offline learning)
+// ============================================================
+
+QString LlmCacheManager::findLocalLearnedResponse(const QString& query)
+{
+    const QString norm = normalizeQuery(query);
+    if (norm.length() < 5) return {};
+
+    // 1. Try exact hash match first (fastest path)
+    const QString exact = getValidCachedResponse(query);
+    if (!exact.isEmpty()) return exact;
+
+    // 2. Substring match against stored original_query values
+    auto db = DatabaseManager::instance().isOpen()
+            ? QSqlDatabase::database(QStringLiteral("jarvis_main"))
+            : QSqlDatabase();
+    if (!db.isOpen()) return {};
+
+    // Extract significant keywords (3+ chars) from the query
+    const QStringList words = norm.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    QStringList keywords;
+    for (const QString& w : words) {
+        if (w.length() >= 3)
+            keywords.append(w);
+    }
+    if (keywords.isEmpty()) return {};
+
+    // Build LIKE clause: all keywords must appear in original_query
+    QString whereClause;
+    QStringList bindKeys;
+    for (int i = 0; i < keywords.size(); ++i) {
+        if (i > 0) whereClause += QStringLiteral(" AND ");
+        const QString key = QStringLiteral(":k%1").arg(i);
+        whereClause += QStringLiteral("original_query LIKE %1").arg(key);
+        bindKeys.append(key);
+    }
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT response_text FROM llm_cache WHERE %1 "
+        "ORDER BY timestamp DESC LIMIT 1").arg(whereClause));
+
+    for (int i = 0; i < keywords.size(); ++i)
+        q.bindValue(bindKeys[i], QStringLiteral("%%1%").arg(keywords[i]));
+
+    if (!q.exec() || !q.next()) return {};
+
+    qDebug() << "[LlmCache] Fuzzy match found for:" << norm.left(60);
+    return q.value(0).toString();
+}
+
+// ============================================================
 //  Stats
 // ============================================================
 

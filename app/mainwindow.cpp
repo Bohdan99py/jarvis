@@ -3753,8 +3753,9 @@ void MainWindow::onSend()
             case Intent::Domain::Web:            return QStringLiteral("Web");
             case Intent::Domain::Clipboard:      return QStringLiteral("Clipboard");
             case Intent::Domain::Memory:         return QStringLiteral("Memory");
-            case Intent::Domain::Code:           return QStringLiteral("Code");
-            default:                             return QStringLiteral("None");
+            case Intent::Domain::Code:               return QStringLiteral("Code");
+            case Intent::Domain::Philosophy_Chitchat: return QStringLiteral("Philosophy");
+            default:                                 return QStringLiteral("None");
             }
         };
         appendLog(QStringLiteral("🧠 Brain"),

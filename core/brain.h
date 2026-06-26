@@ -40,17 +40,18 @@ struct Intent
 
     // --- Над чем / где ---
     enum class Domain {
-        ProjectFiles,    // файлы текущего проекта
-        Filesystem,      // весь компьютер
-        BrowserHistory,  // история / закладки браузера
-        ChatHistory,     // история разговора
-        UE5Logs,         // логи Unreal Engine
-        Web,             // интернет
-        Clipboard,       // буфер обмена
-        Memory,          // память о пользователе
-        Code,            // работа с кодом
-        System,          // системные функции ОС (open app, lock, etc.)
-        None             // не применимо
+        ProjectFiles,        // файлы текущего проекта
+        Filesystem,          // весь компьютер
+        BrowserHistory,      // история / закладки браузера
+        ChatHistory,         // история разговора
+        UE5Logs,             // логи Unreal Engine
+        Web,                 // интернет
+        Clipboard,           // буфер обмена
+        Memory,              // память о пользователе
+        Code,                // работа с кодом
+        System,              // системные функции ОС (open app, lock, etc.)
+        Philosophy_Chitchat, // философия, мораль, открытые вопросы, болталка
+        None                 // не применимо
     };
 
     Action  action     = Action::Unknown;

@@ -25,6 +25,8 @@ public:
     QString getValidCachedResponse(const QString& query);
     void    saveResponse(const QString& query, const QString& response);
 
+    QString findLocalLearnedResponse(const QString& query);
+
     int     cacheEntryCount();
 
 private:
