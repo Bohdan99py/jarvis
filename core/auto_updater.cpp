@@ -155,8 +155,14 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
         return;
     }
 
-    QString fileName = reply->url().fileName();
-    if (fileName.isEmpty()) fileName = QStringLiteral("JARVIS-Setup.exe");
+    QString ext = QStringLiteral(".exe");
+    QString urlName = reply->url().fileName();
+    if (urlName.endsWith(QStringLiteral(".zip"), Qt::CaseInsensitive))
+        ext = QStringLiteral(".zip");
+
+    QString fileName = m_pendingVersion.isEmpty()
+        ? QStringLiteral("Jarvis_Setup") + ext
+        : QStringLiteral("Jarvis_Setup_v%1%2").arg(m_pendingVersion, ext);
 
     QString installerPath = m_downloadPath + QDir::separator() + fileName;
 

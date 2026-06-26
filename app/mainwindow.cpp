@@ -4062,13 +4062,13 @@ void MainWindow::buildUI()
         QStringLiteral("color: #2a4a60; font-size: 11px; border: none; background: transparent;"));
     modeLabel->setFixedHeight(26);
 
-    const QString btnPadStyle = QStringLiteral("padding: 0px 2px; margin: 0px;");
+    const QString barBtnStyle = QStringLiteral(
+        "padding: 0px; margin: 0px; border: none; "
+        "font-size: 15px; background: transparent;");
 
     m_audioModeBtn = new QPushButton(m_audioManager->modeLabel(), this);
     m_audioModeBtn->setObjectName(QStringLiteral("audioModeBtn"));
-    m_audioModeBtn->setFixedHeight(26);
-    m_audioModeBtn->setMinimumWidth(40);
-    m_audioModeBtn->setStyleSheet(btnPadStyle);
+    m_audioModeBtn->setStyleSheet(barBtnStyle);
     m_audioModeBtn->setToolTip(m_audioManager->modeTooltip());
     connect(m_audioModeBtn, &QPushButton::clicked, this, [this]() {
         m_audioManager->cycleMode();
@@ -4078,13 +4078,10 @@ void MainWindow::buildUI()
 
     auto* kbBtn = new QPushButton(QStringLiteral("⌨"), this);
     kbBtn->setObjectName(QStringLiteral("kbToggleBtn"));
-    kbBtn->setFixedHeight(26);
-    kbBtn->setMinimumWidth(40);
-    kbBtn->setStyleSheet(btnPadStyle);
+    kbBtn->setStyleSheet(barBtnStyle);
     kbBtn->setToolTip(Str::menuKeyboard());
 
-    m_likeBtn->setFixedHeight(26);
-    m_likeBtn->setMinimumWidth(40);
+    m_likeBtn->setStyleSheet(barBtnStyle);
 
     auto* bSpacer = new QWidget(this);
     bSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
