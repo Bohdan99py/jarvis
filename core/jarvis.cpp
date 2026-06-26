@@ -19,6 +19,7 @@
 #include "activity_tracker.h"
 #include "user_profile_manager.h"
 #include "training_processing_worker.h"
+#include "system_manifest.h"
 #include "jarvis_paths.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
@@ -117,6 +118,23 @@ Jarvis::Jarvis(QObject* parent)
 
     if (m_indexer->fileCount() > 0) {
         syncProjectInfoToMemory();
+    }
+
+    // System Manifest: inject capabilities into LLM context + version check
+    m_memory->setCapabilitiesContext(SystemManifest::buildCapabilitiesContext());
+    {
+        auto vr = SystemManifest::checkAndUpdateVersion(
+            QStringLiteral(JARVIS_VERSION));
+        if (vr.isUpgrade) {
+            const QString note = SystemManifest::buildUpgradeNotification(
+                vr, m_uiEnglish);
+            if (!note.isEmpty()) {
+                m_memory->addMessage(QStringLiteral("assistant"), note);
+                QMetaObject::invokeMethod(this, [this, note]() {
+                    emit asyncResponseReady(note);
+                }, Qt::QueuedConnection);
+            }
+        }
     }
 }
 

@@ -132,6 +132,7 @@ add_library(JarvisCore STATIC
         core/theme_manager.h
         core/audio_manager.h
         core/user_profile_manager.h
+        core/system_manifest.h
         core/virtual_keyboard.h
         core/virtual_keyboard.cpp
 

@@ -113,6 +113,9 @@ public:
     // Adaptive focus state from UserProfileManager
     void setAdaptiveFocusContext(const QString& ctx) { m_adaptiveFocusContext = ctx; }
 
+    // System capabilities manifest (active modules)
+    void setCapabilitiesContext(const QString& ctx) { m_capabilitiesContext = ctx; }
+
     // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
     void setLearningStats(int totalInteractions, int likedResponses,
                           int cachedResponses, int sessionsRecorded);
@@ -151,6 +154,7 @@ private:
     QString m_activeUserName;
     QString m_memoryStreamContext;
     QString m_adaptiveFocusContext;
+    QString m_capabilitiesContext;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;

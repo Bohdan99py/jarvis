@@ -794,6 +794,11 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += m_adaptiveFocusContext;
     }
 
+    // --- System capabilities manifest ---
+    if (!m_capabilitiesContext.isEmpty()) {
+        prompt += m_capabilitiesContext;
+    }
+
     bool hasTaskBlock = false;
     QString taskBlock;
     if (!m_taskContext.currentTask.isEmpty()) {
