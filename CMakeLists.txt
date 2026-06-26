@@ -143,6 +143,8 @@ add_library(JarvisCore STATIC
         core/j2j_telegram_gateway.cpp
         core/telegram_access_manager.h
         core/telegram_access_manager.cpp
+        core/command_dispatcher_tg.h
+        core/command_dispatcher_tg.cpp
         core/translation_engine.h
         core/translation_engine.cpp
         core/virtual_keyboard.h

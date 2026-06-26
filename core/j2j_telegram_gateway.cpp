@@ -5,6 +5,7 @@
 #include "j2j_telegram_gateway.h"
 #include "mobile_pairing_manager.h"
 #include "telegram_access_manager.h"
+#include "command_dispatcher_tg.h"
 #include "database_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
@@ -179,6 +180,7 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
             this, &J2JTelegramGateway::onTypingTimer);
 
     m_accessMgr = new TelegramAccessManager(this);
+    m_dispatcher = new CommandDispatcherTg(this, m_accessMgr, this);
 
     // Ensure the qa_artifacts table exists
     {
@@ -419,6 +421,19 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
         }
 
         m_accessMgr->logActivity(chatId, QStringLiteral("command"), cmd);
+
+        // Try the command dispatcher first (sandboxed system actions)
+        {
+            TgChatSession& ds = getOrCreateSession(chatId);
+            DispatchResult dr = m_dispatcher->dispatch(chatId, text, ds.isEnglish);
+            if (dr.handled) {
+                if (!dr.response.isEmpty())
+                    sendMessage(chatId, dr.response);
+                if (!dr.imagePath.isEmpty())
+                    sendImageToMobile(chatId, dr.imagePath, QString());
+                return;
+            }
+        }
 
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
             TgChatSession& session = getOrCreateSession(chatId);
@@ -1112,7 +1127,7 @@ void J2JTelegramGateway::saveWorkspaceAsset(const QString& filename,
                                               const QString& companionMarkdown)
 {
     // Offload file I/O to a background thread
-    QtConcurrent::run([filename, data, companionMarkdown]() {
+    (void)QtConcurrent::run([filename, data, companionMarkdown]() {
         const QString dir = workspaceOutputDir();
         const QString filePath = dir + QStringLiteral("/") + filename;
 
@@ -1146,7 +1161,7 @@ void J2JTelegramGateway::saveWorkspaceAsset(const QString& filename,
 
 void J2JTelegramGateway::handlePhotoMessage(qint64 chatId,
                                               const QJsonArray& photos,
-                                              const QString& caption,
+                                              const QString& /*caption*/,
                                               bool isEnglish)
 {
     if (photos.isEmpty()) return;
@@ -1287,7 +1302,7 @@ void J2JTelegramGateway::sendImageToMobile(qint64 chatId,
     }
 
     // Read file in a background thread, then post from the main thread
-    QtConcurrent::run([this, chatId, filePath, caption, fi]() {
+    (void)QtConcurrent::run([this, chatId, filePath, caption, fi]() {
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly)) {
             qWarning() << "[TelegramGW] Cannot open image for sending:" << filePath;

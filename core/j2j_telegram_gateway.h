@@ -32,6 +32,7 @@ class Jarvis;
 class TranslationEngine;
 class MobilePairingManager;
 class TelegramAccessManager;
+class CommandDispatcherTg;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -212,6 +213,7 @@ private:
     TranslationEngine*     m_translator = nullptr;
     MobilePairingManager*  m_pairing    = nullptr;
     TelegramAccessManager* m_accessMgr  = nullptr;
+    CommandDispatcherTg*   m_dispatcher = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator
