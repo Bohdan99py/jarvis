@@ -30,6 +30,9 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/screen_analyze"), TelegramRole::User },
         { QStringLiteral("/stop_voice"),     TelegramRole::User },
         { QStringLiteral("/cache_stats"),    TelegramRole::User },
+        { QStringLiteral("/fridge"),         TelegramRole::User },
+        { QStringLiteral("/summarize"),      TelegramRole::User },
+        { QStringLiteral("/remind"),         TelegramRole::User },
 
         // Tester-level
         { QStringLiteral("/bug"),        TelegramRole::Tester },

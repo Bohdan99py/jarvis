@@ -8,6 +8,9 @@
 #include "database_manager.h"
 #include "llm_cache_manager.h"
 #include "voice_synthesis_manager.h"
+#include "gourmet_module.h"
+#include "media_analyzer_module.h"
+#include "proactive_reminder_manager.h"
 #include "jarvis_paths.h"
 
 #include <QSysInfo>
@@ -37,10 +40,12 @@ CommandDispatcherTg::CommandDispatcherTg(J2JTelegramGateway* gateway,
     : QObject(parent)
     , m_gateway(gateway)
     , m_accessMgr(accessMgr)
+    , m_gourmet(new GourmetModule(this))
+    , m_mediaAnalyzer(new MediaAnalyzerModule(this))
     , m_startTime(QDateTime::currentDateTime())
 {
     qDebug() << "[CommandDispatcher] Initialized with"
-             << 10 << "registered commands";
+             << 13 << "registered commands";
 }
 
 // ============================================================
@@ -83,6 +88,15 @@ DispatchResult CommandDispatcherTg::dispatch(qint64 chatId,
 
     if (cmd == QStringLiteral("/cache_stats"))
         return cmdCacheStats(english);
+
+    if (cmd == QStringLiteral("/fridge"))
+        return cmdFridge(chatId, args, english);
+
+    if (cmd == QStringLiteral("/summarize"))
+        return cmdSummarize(chatId, args, english);
+
+    if (cmd == QStringLiteral("/remind"))
+        return cmdRemind(chatId, args, english);
 
     return {};  // not handled
 }
@@ -462,5 +476,90 @@ DispatchResult CommandDispatcherTg::cmdCacheStats(bool english)
 
     qDebug() << "[CommandDispatcher] /cache_stats — LLM:" << cacheCount
              << "offline:" << offlineCount;
+    return r;
+}
+
+// ============================================================
+//  /fridge — User+, gourmet recipe from ingredients
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdFridge(qint64 /*chatId*/,
+                                              const QString& args,
+                                              bool english)
+{
+    DispatchResult r;
+    r.handled  = true;
+    r.response = m_gourmet->processIngredients(args, english);
+    qDebug() << "[CommandDispatcher] /fridge dispatched";
+    return r;
+}
+
+// ============================================================
+//  /summarize — User+, media/article summary
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdSummarize(qint64 /*chatId*/,
+                                                  const QString& args,
+                                                  bool english)
+{
+    DispatchResult r;
+    r.handled  = true;
+    r.response = m_mediaAnalyzer->summarize(args, english);
+    qDebug() << "[CommandDispatcher] /summarize dispatched";
+    return r;
+}
+
+// ============================================================
+//  /remind — User+, set a contextual reminder
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdRemind(qint64 chatId,
+                                               const QString& args,
+                                               bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    if (args.trimmed().isEmpty()) {
+        r.response = english
+            ? QStringLiteral("Usage: `/remind 30 Take laundry out`\n"
+                             "First number is delay in minutes.")
+            : QStringLiteral("Использование: `/remind 30 Развесить стирку`\n"
+                             "Первое число — задержка в минутах.");
+        return r;
+    }
+
+    // Parse: /remind <minutes> <text>
+    const QString firstToken = args.section(QLatin1Char(' '), 0, 0);
+    bool ok = false;
+    int minutes = firstToken.toInt(&ok);
+    QString reminderText;
+
+    if (ok && minutes > 0) {
+        reminderText = args.section(QLatin1Char(' '), 1).trimmed();
+        if (reminderText.isEmpty())
+            reminderText = english ? QStringLiteral("General reminder")
+                                   : QStringLiteral("Напоминание");
+    } else {
+        minutes = 30;
+        reminderText = args.trimmed();
+    }
+
+    if (minutes > 1440) minutes = 1440;
+
+    ProactiveReminderManager::instance().addReminder(
+        chatId, reminderText, minutes, english);
+
+    r.response = english
+        ? QStringLiteral("⏰ Reminder set for *%1 min*: %2\n"
+                         "Active reminders: %3")
+            .arg(minutes).arg(reminderText)
+            .arg(ProactiveReminderManager::instance().activeCount())
+        : QStringLiteral("⏰ Напоминание через *%1 мин*: %2\n"
+                         "Активных напоминаний: %3")
+            .arg(minutes).arg(reminderText)
+            .arg(ProactiveReminderManager::instance().activeCount());
+
+    qDebug() << "[CommandDispatcher] /remind set:" << minutes << "min —" << reminderText;
     return r;
 }

@@ -37,6 +37,7 @@
 #include "j2j_telegram_gateway.h"
 #include "jarvis_response.h"
 #include "voice_synthesis_manager.h"
+#include "llm_cache_manager.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -2043,6 +2044,11 @@ void MainWindow::buildMenuBar()
              QStringLiteral("Developer")},
             {IS_EN ? QStringLiteral("QA Tester") : QStringLiteral("QA Тестировщик"),
              QStringLiteral("QA_Tester")},
+            {IS_EN ? QStringLiteral("Digital Artist / Illustrator")
+                   : QStringLiteral("Цифровой художник / Иллюстратор"),
+             QStringLiteral("Digital_Artist")},
+            {IS_EN ? QStringLiteral("Casual / Friend") : QStringLiteral("Дружеский / Casual"),
+             QStringLiteral("Casual_Friend")},
             {IS_EN ? QStringLiteral("Student / Academic") : QStringLiteral("Студент / Академия"),
              QStringLiteral("Student_Academic")},
         };
@@ -2066,6 +2072,85 @@ void MainWindow::buildMenuBar()
                     Theme::LogColors::system);
             });
         }
+
+        toolsMenu->addSeparator();
+
+        // User Analytics & Statistics
+        auto* actAnalytics = toolsMenu->addAction(
+            IS_EN ? QStringLiteral("📊 User Analytics & Statistics")
+                  : QStringLiteral("📊 Аналитика и статистика"));
+        connect(actAnalytics, &QAction::triggered, this, [this]() {
+            auto& db = DatabaseManager::instance();
+            auto dbConn = QSqlDatabase::database(QStringLiteral("jarvis_main"));
+            if (!dbConn.isOpen()) return;
+
+            // Aggregate Telegram activity by chat_id
+            QSqlQuery q(dbConn);
+            q.exec(QStringLiteral(
+                "SELECT chat_id, action_type, COUNT(*) as cnt "
+                "FROM activity_log_tg "
+                "GROUP BY chat_id, action_type "
+                "ORDER BY chat_id, cnt DESC"));
+
+            QString report = IS_EN
+                ? QStringLiteral("📊 <b>User Analytics Dashboard</b><br><br>")
+                : QStringLiteral("📊 <b>Дашборд аналитики пользователей</b><br><br>");
+
+            QMap<qint64, QMap<QString, int>> userData;
+            while (q.next()) {
+                qint64 cid = q.value(0).toLongLong();
+                QString actionType = q.value(1).toString();
+                int count = q.value(2).toInt();
+                userData[cid][actionType] = count;
+            }
+
+            if (userData.isEmpty()) {
+                report += IS_EN ? QStringLiteral("<i>No activity data yet.</i>")
+                                : QStringLiteral("<i>Данных об активности пока нет.</i>");
+            } else {
+                for (auto it = userData.begin(); it != userData.end(); ++it) {
+                    report += QStringLiteral("<b>Chat ID: %1</b><br>").arg(it.key());
+                    for (auto jt = it.value().begin(); jt != it.value().end(); ++jt)
+                        report += QStringLiteral("  • %1: %2<br>").arg(jt.key()).arg(jt.value());
+                    report += QStringLiteral("<br>");
+                }
+            }
+
+            // Total DB stats
+            int chatCount = 0;
+            {
+                QSqlQuery q2(dbConn);
+                q2.exec(QStringLiteral("SELECT COUNT(*) FROM chat_history"));
+                if (q2.next()) chatCount = q2.value(0).toInt();
+            }
+            int cacheCount = LlmCacheManager::instance().cacheEntryCount();
+
+            report += IS_EN
+                ? QStringLiteral("<b>Global Stats:</b><br>"
+                                 "  • Total messages: %1<br>"
+                                 "  • LLM cache entries: %2<br>")
+                    .arg(chatCount).arg(cacheCount)
+                : QStringLiteral("<b>Общая статистика:</b><br>"
+                                 "  • Всего сообщений: %1<br>"
+                                 "  • Записей в кэше LLM: %2<br>")
+                    .arg(chatCount).arg(cacheCount);
+
+            auto* dlg = new QDialog(this);
+            dlg->setWindowTitle(IS_EN ? QStringLiteral("User Analytics")
+                                      : QStringLiteral("Аналитика"));
+            dlg->setMinimumSize(520, 400);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            auto* lay = new QVBoxLayout(dlg);
+            auto* browser = new QTextEdit(dlg);
+            browser->setReadOnly(true);
+            browser->setHtml(report);
+            lay->addWidget(browser);
+            auto* closeBtn = new QPushButton(IS_EN ? QStringLiteral("Close")
+                                                    : QStringLiteral("Закрыть"), dlg);
+            connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::accept);
+            lay->addWidget(closeBtn);
+            dlg->show();
+        });
 
         // --- Mobile Sync (zero-config pairing) ---
         toolsMenu->addSeparator();

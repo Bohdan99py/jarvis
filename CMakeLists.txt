@@ -238,6 +238,16 @@ add_library(JarvisCore STATIC
         core/clipboard_watcher.h
         core/clipboard_watcher.cpp
 
+        # Lifestyle & Proactive Modules (v3.5.6)
+        core/gourmet_module.h
+        core/gourmet_module.cpp
+        core/media_analyzer_module.h
+        core/media_analyzer_module.cpp
+        core/proactive_reminder_manager.h
+        core/proactive_reminder_manager.cpp
+        core/curiosity_engine.h
+        core/curiosity_engine.cpp
+
         # Фоновое обучение — индексация проекта + анализ паттернов чата
         core/background_learner.h
         core/background_learner.cpp

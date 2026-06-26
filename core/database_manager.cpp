@@ -306,6 +306,16 @@ bool DatabaseManager::createTables()
         timestamp      TEXT NOT NULL DEFAULT (datetime('now'))
     ))")) return false;
 
+    // user_personality_matrix — CuriosityEngine personality profiling
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS user_personality_matrix (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id    INTEGER NOT NULL,
+        question   TEXT NOT NULL,
+        answer     TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_personality_chat ON user_personality_matrix(chat_id)");
+
     return true;
 }
 
@@ -446,6 +456,18 @@ bool DatabaseManager::runMigrations()
         ))");
         execQuery("UPDATE schema_version SET version=11");
         ver = 11;
+    }
+    if (ver < 12) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS user_personality_matrix (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id    INTEGER NOT NULL,
+            question   TEXT NOT NULL,
+            answer     TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_personality_chat ON user_personality_matrix(chat_id)");
+        execQuery("UPDATE schema_version SET version=12");
+        ver = 12;
     }
     return true;
 }
