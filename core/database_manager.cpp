@@ -2,6 +2,7 @@
 // database_manager.cpp — J.A.R.V.I.S. SQLite storage
 // ============================================================
 #include "database_manager.h"
+#include "llm_cache_manager.h"
 #include "jarvis_paths.h"
 
 #include <QSqlQuery>
@@ -297,6 +298,14 @@ bool DatabaseManager::createTables()
     execQuery("CREATE INDEX IF NOT EXISTS idx_task_user   ON tasks(user_id, status)");
     execQuery("CREATE INDEX IF NOT EXISTS idx_task_dead   ON tasks(user_id, deadline)");
 
+    // llm_cache — Local-First Offline Fallback Cache for LLM responses
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS llm_cache (
+        query_hash     TEXT PRIMARY KEY,
+        original_query TEXT NOT NULL,
+        response_text  TEXT NOT NULL,
+        timestamp      TEXT NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+
     return true;
 }
 
@@ -427,6 +436,16 @@ bool DatabaseManager::runMigrations()
         execQuery("CREATE INDEX IF NOT EXISTS idx_kb_origin ON knowledge_base(origin_profile_role)");
         execQuery("UPDATE schema_version SET version=10");
         ver = 10;
+    }
+    if (ver < 11) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS llm_cache (
+            query_hash     TEXT PRIMARY KEY,
+            original_query TEXT NOT NULL,
+            response_text  TEXT NOT NULL,
+            timestamp      TEXT NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("UPDATE schema_version SET version=11");
+        ver = 11;
     }
     return true;
 }

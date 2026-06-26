@@ -8,6 +8,7 @@
 #include "command_dispatcher_tg.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
+#include "llm_cache_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
 #include "jarvis_paths.h"
@@ -864,6 +865,20 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         return;
     }
 
+    // ── Step 6a: Local-First Offline Cache — check before any network I/O ──
+    {
+        const QString cached = LlmCacheManager::instance()
+                                   .getValidCachedResponse(text);
+        if (!cached.isEmpty()) {
+            const QString tagged = cached
+                + QStringLiteral("\n\n💾 *Served from local cache*");
+            sendMessage(chatId, tagged);
+            emit conversationResponse(chatId, tagged);
+            qDebug() << "[TelegramGW] LLM cache HIT for chat" << chatId;
+            return;
+        }
+    }
+
     session.awaitingLlm = true;
     startTypingIndicator(chatId);
 
@@ -896,35 +911,68 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         finishLlmRequest(chatId);
     };
 
+    // Capture original query for cache save on success
+    const QString originalQuery = text;
+
     *conn = connect(m_jarvis, &Jarvis::asyncResponseReady, this,
-                    [this, chatId, cleanup](const QString& response) {
+                    [this, chatId, cleanup, originalQuery](const QString& response) {
         cleanup();
         sendMessage(chatId, response);
         emit conversationResponse(chatId, response);
+
+        // ── Step 6b: Cache the successful LLM response asynchronously ──
+        LlmCacheManager::instance().saveResponse(originalQuery, response);
+
         qDebug() << "[TelegramGW] LLM response delivered to chat" << chatId
                  << "(" << response.length() << "chars)";
     });
 
     *errConn = connect(m_jarvis, &Jarvis::asyncResponseError, this,
-                       [this, chatId, cleanup](const QString& error) {
+                       [this, chatId, cleanup, originalQuery, english](const QString& error) {
         cleanup();
-        bool en = m_sessions.contains(chatId) && m_sessions[chatId].isEnglish;
-        sendMessage(chatId, en
-            ? QStringLiteral("⚠ Error: %1").arg(error)
-            : QStringLiteral("⚠ Ошибка: %1").arg(error));
+
+        // ── Step 6c: Network failure — try cache fallback, then static message ──
+        const QString fallback = LlmCacheManager::instance()
+                                     .getValidCachedResponse(originalQuery);
+        if (!fallback.isEmpty()) {
+            const QString tagged = fallback
+                + QStringLiteral("\n\n💾 *Served from local cache*");
+            sendMessage(chatId, tagged);
+            qDebug() << "[TelegramGW] Error fallback: cache HIT for chat" << chatId;
+        } else {
+            sendMessage(chatId, english
+                ? QStringLiteral("📡 *System Offline:* Network timeout, "
+                                 "and no local cache available for this query.")
+                : QStringLiteral("📡 *Система офлайн:* Таймаут сети, "
+                                 "и для этого запроса нет локального кэша."));
+            qDebug() << "[TelegramGW] Error fallback: no cache, static offline msg."
+                     << "Error:" << error;
+        }
     });
 
     // Safety timeout: if neither signal fires within 90 seconds,
     // force-release the lock so the chat isn't stuck forever.
-    QTimer::singleShot(90000, this, [this, chatId, cleanup]() {
+    QTimer::singleShot(90000, this, [this, chatId, cleanup, originalQuery, english]() {
         cleanup();
         if (m_sessions.contains(chatId) && !m_sessions[chatId].awaitingLlm)
             return;  // already cleaned up by a signal
-        bool en = m_sessions.contains(chatId) && m_sessions[chatId].isEnglish;
-        sendMessage(chatId, en
-            ? QStringLiteral("⏱ Request timed out. Please try again.")
-            : QStringLiteral("⏱ Запрос превысил время ожидания. Попробуйте снова."));
-        qDebug() << "[TelegramGW] LLM timeout for chat" << chatId;
+
+        // ── Timeout fallback: same cache-then-static logic ──
+        const QString fallback = LlmCacheManager::instance()
+                                     .getValidCachedResponse(originalQuery);
+        if (!fallback.isEmpty()) {
+            const QString tagged = fallback
+                + QStringLiteral("\n\n💾 *Served from local cache (timeout fallback)*");
+            sendMessage(chatId, tagged);
+            qDebug() << "[TelegramGW] Timeout fallback: cache HIT for chat" << chatId;
+        } else {
+            sendMessage(chatId, english
+                ? QStringLiteral("📡 *System Offline:* Request timed out, "
+                                 "and no local cache available for this query.")
+                : QStringLiteral("📡 *Система офлайн:* Запрос превысил время ожидания, "
+                                 "и для этого запроса нет локального кэша."));
+            qDebug() << "[TelegramGW] Timeout fallback: no cache for chat" << chatId;
+        }
     });
 }
 

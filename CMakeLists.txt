@@ -219,6 +219,10 @@ add_library(JarvisCore STATIC
         core/database_manager.h
         core/database_manager.cpp
 
+        # LLM Response Cache — Local-First Offline Fallback
+        core/llm_cache_manager.h
+        core/llm_cache_manager.cpp
+
         # Фоновое обучение — индексация проекта + анализ паттернов чата
         core/background_learner.h
         core/background_learner.cpp
