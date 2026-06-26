@@ -32,6 +32,8 @@
 #include <QClipboard>
 #include "activity_tracker.h"
 #include "user_profile.h"
+#include "mobile_pairing_manager.h"
+#include "j2j_mesh_connector.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -2061,6 +2063,333 @@ void MainWindow::buildMenuBar()
                     Theme::LogColors::system);
             });
         }
+
+        // --- Mobile Sync (zero-config pairing) ---
+        toolsMenu->addSeparator();
+
+        auto* actMobileSync = toolsMenu->addAction(
+            IS_EN ? QStringLiteral("📱 Mobile Sync...")
+                  : QStringLiteral("📱 Мобильная синхронизация..."));
+        connect(actMobileSync, &QAction::triggered, this, [this]() {
+            auto* mesh = m_jarvis->meshConnector();
+            if (!mesh) return;
+            mesh->initMobilePairing();
+            auto* pairing = mesh->mobilePairing();
+            if (!pairing) return;
+
+            // Generate a fresh PIN
+            PairingSession session = pairing->generatePairingPin(
+                QStringLiteral("Developer"));
+            pairing->startGatewayPolling();
+
+            QString deepLink = pairing->buildDeepLinkUri(session);
+
+            // Build the cyberpunk-themed pairing dialog
+            auto* dlg = new QDialog(this);
+            dlg->setWindowTitle(IS_EN ? QStringLiteral("Mobile Sync — Zero Config Pairing")
+                                      : QStringLiteral("Мобильная синхронизация — Без настройки"));
+            dlg->setMinimumSize(520, 480);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            dlg->setStyleSheet(QStringLiteral(
+                "QDialog { background: rgba(8,10,18,245); }"
+                "QLabel { color: #c0c8d8; font-size: 13px; }"
+                "QComboBox { background: rgba(14,18,30,180); color: #e0e8f0; "
+                "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 6px; }"
+                "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
+                "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
+                "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                "  stop:0 #33e0ff, stop:1 #9b6dff); }"
+                "QTextEdit { background: rgba(14,18,30,180); color: #66FCF1;"
+                "  border: 1px solid rgba(0,212,255,35); border-radius: 8px;"
+                "  font-family: 'Consolas'; font-size: 12px; padding: 8px; }"));
+
+            auto* layout = new QVBoxLayout(dlg);
+            layout->setSpacing(12);
+            layout->setContentsMargins(24, 20, 24, 20);
+
+            // Title
+            auto* title = new QLabel(IS_EN ? QStringLiteral("📱 MOBILE SYNC")
+                                           : QStringLiteral("📱 МОБИЛЬНАЯ СИНХРОНИЗАЦИЯ"));
+            title->setStyleSheet(QStringLiteral(
+                "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
+            title->setAlignment(Qt::AlignCenter);
+            layout->addWidget(title);
+
+            auto* subtitle = new QLabel(IS_EN
+                ? QStringLiteral("Pair your phone — no bots, no tokens, no setup")
+                : QStringLiteral("Подключите телефон — без ботов, токенов и настройки"));
+            subtitle->setStyleSheet(QStringLiteral(
+                "color: rgba(0,212,255,150); font-size: 12px;"));
+            subtitle->setAlignment(Qt::AlignCenter);
+            layout->addWidget(subtitle);
+
+            // Separator
+            auto* sep1 = new QFrame(dlg);
+            sep1->setFrameShape(QFrame::HLine);
+            sep1->setStyleSheet(QStringLiteral(
+                "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                "stop:0 transparent, stop:0.2 #00d4ff, stop:0.8 #7c4dff, stop:1 transparent);"
+                "max-height: 1px;"));
+            layout->addWidget(sep1);
+
+            // PIN display
+            auto* pinLabel = new QLabel(IS_EN ? QStringLiteral("YOUR PAIRING PIN:")
+                                              : QStringLiteral("ВАШ PIN-КОД:"));
+            pinLabel->setAlignment(Qt::AlignCenter);
+            pinLabel->setStyleSheet(QStringLiteral("color: #8892a4; font-size: 11px; letter-spacing: 2px;"));
+            layout->addWidget(pinLabel);
+
+            auto* pinDisplay = new QLabel(session.pin);
+            pinDisplay->setAlignment(Qt::AlignCenter);
+            pinDisplay->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            pinDisplay->setStyleSheet(QStringLiteral(
+                "color: #00d4ff; font-size: 42px; font-weight: bold; font-family: 'Consolas';"
+                "letter-spacing: 12px; padding: 16px;"
+                "background: rgba(0,212,255,8); border: 2px solid rgba(0,212,255,60);"
+                "border-radius: 12px;"));
+            layout->addWidget(pinDisplay);
+
+            // Timer countdown
+            auto* timerLabel = new QLabel();
+            timerLabel->setAlignment(Qt::AlignCenter);
+            timerLabel->setStyleSheet(QStringLiteral("color: #ff6b6b; font-size: 11px;"));
+            layout->addWidget(timerLabel);
+
+            auto* countdownTimer = new QTimer(dlg);
+            countdownTimer->setInterval(1000);
+            QDateTime expires = session.expiresAt;
+            connect(countdownTimer, &QTimer::timeout, dlg, [timerLabel, expires]() {
+                int remaining = static_cast<int>(QDateTime::currentDateTimeUtc().secsTo(expires));
+                if (remaining <= 0) {
+                    timerLabel->setText(IS_EN ? QStringLiteral("⚠ PIN expired — generate a new one")
+                                             : QStringLiteral("⚠ PIN истёк — сгенерируйте новый"));
+                } else {
+                    timerLabel->setText(
+                        (IS_EN ? QStringLiteral("Expires in %1:%2")
+                               : QStringLiteral("Истекает через %1:%2"))
+                        .arg(remaining / 60, 2, 10, QLatin1Char('0'))
+                        .arg(remaining % 60, 2, 10, QLatin1Char('0')));
+                }
+            });
+            countdownTimer->start();
+            // Trigger immediately via manual invoke
+            QMetaObject::invokeMethod(countdownTimer, "timeout", Qt::QueuedConnection);
+
+            // Deep link
+            auto* linkLabel = new QLabel(
+                QStringLiteral("<span style='color:#8892a4;'>%1</span><br>"
+                               "<a href='%2' style='color:#7c4dff;'>%2</a>")
+                .arg(IS_EN ? QStringLiteral("Deep Link:")
+                           : QStringLiteral("Ссылка:"),
+                     deepLink));
+            linkLabel->setAlignment(Qt::AlignCenter);
+            linkLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
+            linkLabel->setOpenExternalLinks(false);
+            layout->addWidget(linkLabel);
+
+            // Role selector
+            auto* roleRow = new QHBoxLayout();
+            auto* roleLbl = new QLabel(IS_EN ? QStringLiteral("Bind to role:")
+                                             : QStringLiteral("Привязать к роли:"));
+            auto* roleCombo = new QComboBox(dlg);
+            roleCombo->addItem(QStringLiteral("Developer"));
+            roleCombo->addItem(QStringLiteral("QA_Tester"));
+            roleCombo->addItem(QStringLiteral("Student_Academic"));
+            roleCombo->addItem(QStringLiteral("Creative"));
+            roleCombo->addItem(QStringLiteral("Hardware"));
+            roleRow->addWidget(roleLbl);
+            roleRow->addWidget(roleCombo, 1);
+            layout->addLayout(roleRow);
+
+            // Regenerate PIN button
+            auto* regenBtn = new QPushButton(
+                IS_EN ? QStringLiteral("🔄 Generate New PIN")
+                      : QStringLiteral("🔄 Новый PIN"));
+            connect(regenBtn, &QPushButton::clicked, dlg,
+                    [this, pairing, roleCombo, pinDisplay, countdownTimer, timerLabel, dlg]() {
+                QString role = roleCombo->currentText();
+                PairingSession newSession = pairing->generatePairingPin(role);
+                pairing->startGatewayPolling();
+                pinDisplay->setText(newSession.pin);
+                QDateTime exp = newSession.expiresAt;
+                disconnect(countdownTimer, &QTimer::timeout, nullptr, nullptr);
+                connect(countdownTimer, &QTimer::timeout, dlg, [timerLabel, exp]() {
+                    int rem = static_cast<int>(QDateTime::currentDateTimeUtc().secsTo(exp));
+                    if (rem <= 0)
+                        timerLabel->setText(IS_EN ? QStringLiteral("⚠ PIN expired")
+                                                  : QStringLiteral("⚠ PIN истёк"));
+                    else
+                        timerLabel->setText(
+                            (IS_EN ? QStringLiteral("Expires in %1:%2")
+                                   : QStringLiteral("Истекает через %1:%2"))
+                            .arg(rem / 60, 2, 10, QLatin1Char('0'))
+                            .arg(rem % 60, 2, 10, QLatin1Char('0')));
+                });
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    QStringLiteral("New PIN: %1 → role: %2").arg(newSession.pin, role),
+                    Theme::LogColors::system);
+            });
+            layout->addWidget(regenBtn);
+
+            // Separator
+            auto* sep2 = new QFrame(dlg);
+            sep2->setFrameShape(QFrame::HLine);
+            sep2->setStyleSheet(sep1->styleSheet());
+            layout->addWidget(sep2);
+
+            // Paired devices list
+            auto* devicesLabel = new QLabel(IS_EN ? QStringLiteral("PAIRED DEVICES:")
+                                                  : QStringLiteral("ПОДКЛЮЧЁННЫЕ УСТРОЙСТВА:"));
+            devicesLabel->setStyleSheet(QStringLiteral(
+                "color: #8892a4; font-size: 11px; letter-spacing: 2px;"));
+            layout->addWidget(devicesLabel);
+
+            auto* devicesList = new QTextEdit(dlg);
+            devicesList->setReadOnly(true);
+            devicesList->setMaximumHeight(100);
+            auto devices = pairing->pairedDevices();
+            if (devices.isEmpty()) {
+                devicesList->setPlainText(IS_EN ? QStringLiteral("No devices paired yet.")
+                                                : QStringLiteral("Нет подключённых устройств."));
+            } else {
+                QString devText;
+                for (const auto& d : devices) {
+                    devText += QStringLiteral("• %1 [%2] → %3  (%4)\n")
+                        .arg(d.displayName, d.platform, d.boundRole,
+                             d.pairedAt.toString(QStringLiteral("yyyy-MM-dd")));
+                }
+                devicesList->setPlainText(devText);
+            }
+            layout->addWidget(devicesList);
+
+            // Pairing success handler
+            connect(pairing, &MobilePairingManager::devicePaired, dlg,
+                    [this, devicesList, dlg](const QString& name, const QString& role) {
+                devicesList->append(QStringLiteral("✓ %1 → %2  (just now)").arg(name, role));
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    (IS_EN ? QStringLiteral("📱 Device paired: %1 → role: %2")
+                           : QStringLiteral("📱 Устройство подключено: %1 → роль: %2"))
+                    .arg(name, role),
+                    QStringLiteral("#66FCF1"));
+            });
+
+            // Cleanup on close
+            connect(dlg, &QDialog::finished, this, [pairing]() {
+                pairing->stopGatewayPolling();
+            });
+
+            dlg->show();
+        });
+
+        // Wake-on-LAN Shortcut Generator
+        auto* actWol = toolsMenu->addAction(
+            IS_EN ? QStringLiteral("⚡ Generate WoL Shortcut")
+                  : QStringLiteral("⚡ Сгенерировать WoL ярлык"));
+        connect(actWol, &QAction::triggered, this, [this]() {
+            auto* mesh = m_jarvis->meshConnector();
+            if (!mesh) return;
+            mesh->initMobilePairing();
+            auto* pairing = mesh->mobilePairing();
+            if (!pairing) return;
+
+            auto interfaces = pairing->discoverNetworkInterfaces();
+            if (interfaces.isEmpty()) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("No active network interfaces found for Wake-on-LAN.")
+                          : QStringLiteral("Активные сетевые интерфейсы для WoL не найдены."),
+                    Theme::LogColors::error);
+                return;
+            }
+
+            // Build WoL dialog
+            auto* dlg = new QDialog(this);
+            dlg->setWindowTitle(IS_EN ? QStringLiteral("Wake-on-LAN Shortcut Generator")
+                                      : QStringLiteral("Генератор WoL ярлыков"));
+            dlg->setMinimumSize(560, 440);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            dlg->setStyleSheet(QStringLiteral(
+                "QDialog { background: rgba(8,10,18,245); }"
+                "QLabel { color: #c0c8d8; font-size: 13px; }"
+                "QComboBox { background: rgba(14,18,30,180); color: #e0e8f0; "
+                "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 6px; }"
+                "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
+                "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
+                "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                "  stop:0 #33e0ff, stop:1 #9b6dff); }"
+                "QTextEdit { background: rgba(14,18,30,180); color: #66FCF1;"
+                "  border: 1px solid rgba(0,212,255,35); border-radius: 8px;"
+                "  font-family: 'Consolas'; font-size: 12px; padding: 8px; }"));
+
+            auto* layout = new QVBoxLayout(dlg);
+            layout->setSpacing(12);
+            layout->setContentsMargins(24, 20, 24, 20);
+
+            auto* wolTitle = new QLabel(IS_EN ? QStringLiteral("⚡ WAKE-ON-LAN EXPORTER")
+                                              : QStringLiteral("⚡ ЭКСПОРТ WAKE-ON-LAN"));
+            wolTitle->setStyleSheet(QStringLiteral(
+                "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
+            wolTitle->setAlignment(Qt::AlignCenter);
+            layout->addWidget(wolTitle);
+
+            auto* wolSub = new QLabel(IS_EN
+                ? QStringLiteral("One-click WoL shortcuts for iOS & Android")
+                : QStringLiteral("WoL ярлыки для iOS и Android в один клик"));
+            wolSub->setStyleSheet(QStringLiteral("color: rgba(0,212,255,150); font-size: 12px;"));
+            wolSub->setAlignment(Qt::AlignCenter);
+            layout->addWidget(wolSub);
+
+            // Interface selector
+            auto* ifaceRow = new QHBoxLayout();
+            auto* ifaceLbl = new QLabel(IS_EN ? QStringLiteral("Network Interface:")
+                                              : QStringLiteral("Сетевой интерфейс:"));
+            auto* ifaceCombo = new QComboBox(dlg);
+            for (const auto& iface : interfaces) {
+                ifaceCombo->addItem(QStringLiteral("%1  [%2] — %3")
+                    .arg(iface.interfaceName, iface.macAddress, iface.ipv4Address));
+            }
+            ifaceRow->addWidget(ifaceLbl);
+            ifaceRow->addWidget(ifaceCombo, 1);
+            layout->addLayout(ifaceRow);
+
+            // Output text area
+            auto* output = new QTextEdit(dlg);
+            output->setReadOnly(true);
+
+            // Generate button
+            auto* genBtn = new QPushButton(
+                IS_EN ? QStringLiteral("⚡ Generate iOS/Android Shortcut")
+                      : QStringLiteral("⚡ Сгенерировать ярлык iOS/Android"));
+            connect(genBtn, &QPushButton::clicked, dlg,
+                    [this, pairing, ifaceCombo, output, interfaces]() {
+                int idx = ifaceCombo->currentIndex();
+                if (idx < 0 || idx >= interfaces.size()) return;
+
+                const auto& iface = interfaces[idx];
+                QString report = pairing->exportAllWolProfiles();
+                output->setPlainText(report);
+
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    (IS_EN ? QStringLiteral("⚡ WoL profile generated for %1 [%2]")
+                           : QStringLiteral("⚡ WoL профиль для %1 [%2]"))
+                    .arg(iface.interfaceName, iface.macAddress),
+                    QStringLiteral("#66FCF1"));
+            });
+            layout->addWidget(genBtn);
+            layout->addWidget(output);
+
+            // Copy to clipboard
+            auto* copyBtn = new QPushButton(
+                IS_EN ? QStringLiteral("📋 Copy to Clipboard")
+                      : QStringLiteral("📋 Скопировать"));
+            connect(copyBtn, &QPushButton::clicked, dlg, [output]() {
+                QApplication::clipboard()->setText(output->toPlainText());
+            });
+            layout->addWidget(copyBtn);
+
+            dlg->show();
+        });
     }
 
     // --- Обновление ---

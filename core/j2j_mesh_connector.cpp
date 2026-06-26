@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "j2j_mesh_connector.h"
+#include "mobile_pairing_manager.h"
 #include "database_manager.h"
 #include "system_manifest.h"
 #include "activity_tracker.h"
@@ -534,4 +535,11 @@ QList<J2JPeer> J2JMeshConnector::activePeers() const
 int J2JMeshConnector::peerCount() const
 {
     return m_peers.size();
+}
+
+void J2JMeshConnector::initMobilePairing()
+{
+    if (m_mobilePairing) return;
+    m_mobilePairing = new MobilePairingManager(m_nodeId, this);
+    qDebug() << "[J2J] Mobile pairing coordinator initialized";
 }

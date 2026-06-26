@@ -75,6 +75,12 @@ inline QVector<Capability> activeCapabilities()
           QStringLiteral("Peer-to-peer mesh protocol for multi-instance JARVIS communication. "
                          "UDP beacon discovery, TCP command channel, knowledge sync, "
                          "and task delegation across LAN peers") },
+        { QStringLiteral("mobile_sync"),
+          QStringLiteral("Mobile Sync & Wake-on-LAN"),
+          QStringLiteral("Zero-config mobile pairing via dynamic 6-char PIN codes. "
+                         "No manual bot creation or token setup — pair like WhatsApp Web. "
+                         "Gateway polling auto-binds smartphones to role profiles. "
+                         "One-click Wake-on-LAN shortcut export for iOS/Android") },
     };
 }
 

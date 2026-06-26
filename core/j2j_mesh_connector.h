@@ -17,6 +17,8 @@
 #include <QDateTime>
 #include <QJsonObject>
 
+class MobilePairingManager;
+
 struct J2JPeer {
     QString   nodeId;
     QString   nodeName;
@@ -49,6 +51,10 @@ public:
 
     void broadcastKnowledge(const QJsonArray& facts);
     void delegateTask(const QString& peerId, const QJsonObject& task);
+
+    // Mobile pairing coordinator
+    MobilePairingManager* mobilePairing() const { return m_mobilePairing; }
+    void initMobilePairing();
 
 signals:
     void peerDiscovered(const QString& nodeName, const QString& address);
@@ -86,6 +92,7 @@ private:
 
     QMap<QString, J2JPeer>         m_peers;
     QMap<QTcpSocket*, QByteArray>  m_socketBuffers;
+    MobilePairingManager*          m_mobilePairing = nullptr;
 
     QString  m_nodeId;
     QString  m_nodeName;
