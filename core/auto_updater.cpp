@@ -26,7 +26,7 @@ AutoUpdater::AutoUpdater(const QString& currentVersion,
     , m_githubRepo(githubRepo)
 {
     m_network = new QNetworkAccessManager(this);
-    m_downloadPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    m_downloadPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
 }
 
 void AutoUpdater::checkForUpdates(bool silent)
