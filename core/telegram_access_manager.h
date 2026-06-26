@@ -17,6 +17,7 @@
 #include <QMap>
 #include <QSet>
 #include <QMutex>
+#include <QList>
 #include <QDateTime>
 
 // ── Access roles (ordered by privilege) ──────────────────────
@@ -80,6 +81,9 @@ public:
 
     // Command → minimum role mapping
     static TelegramRole minimumRoleFor(const QString& command);
+
+    // All registered command names (for layout fixer lookups)
+    static QSet<QString> knownCommands();
 
 signals:
     void accessDenied(qint64 chatId, const QString& command);

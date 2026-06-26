@@ -6,6 +6,7 @@
 #include "mobile_pairing_manager.h"
 #include "telegram_access_manager.h"
 #include "command_dispatcher_tg.h"
+#include "layout_fixer.h"
 #include "database_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
@@ -400,9 +401,21 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
     if (handlePairing(chatId, text, firstName))
         return;
 
-    // ── 2. Slash commands (RBAC-gated) ──────────────────────
+    // ── 1.5. Layout auto-correction for slash commands ──────
+    QString effectiveText = text;
+    bool layoutFixed = false;
     if (text.startsWith(QLatin1Char('/'))) {
-        const QString cmd = text.section(QLatin1Char(' '), 0, 0).toLower();
+        auto fix = LayoutFixer::tryFixCommand(text, TelegramAccessManager::knownCommands());
+        if (fix.changed) {
+            effectiveText = fix.text;
+            layoutFixed = true;
+            qDebug() << "[TelegramGW] Layout fix:" << text << "→" << effectiveText;
+        }
+    }
+
+    // ── 2. Slash commands (RBAC-gated) ──────────────────────
+    if (effectiveText.startsWith(QLatin1Char('/'))) {
+        const QString cmd = effectiveText.section(QLatin1Char(' '), 0, 0).toLower();
 
         // RBAC check — deny before any processing
         if (!m_accessMgr->hasAccess(chatId, cmd)) {
@@ -422,13 +435,19 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
 
         m_accessMgr->logActivity(chatId, QStringLiteral("command"), cmd);
 
+        // Diagnostic prefix for layout-corrected commands
+        QString fixPrefix;
+        if (layoutFixed)
+            fixPrefix = QStringLiteral("🔧 *Layout fixed:* `%1` → `%2`\n\n")
+                .arg(text, effectiveText);
+
         // Try the command dispatcher first (sandboxed system actions)
         {
             TgChatSession& ds = getOrCreateSession(chatId);
-            DispatchResult dr = m_dispatcher->dispatch(chatId, text, ds.isEnglish);
+            DispatchResult dr = m_dispatcher->dispatch(chatId, effectiveText, ds.isEnglish);
             if (dr.handled) {
                 if (!dr.response.isEmpty())
-                    sendMessage(chatId, dr.response);
+                    sendMessage(chatId, fixPrefix + dr.response);
                 if (!dr.imagePath.isEmpty())
                     sendImageToMobile(chatId, dr.imagePath, QString());
                 return;
@@ -438,6 +457,8 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
             TgChatSession& session = getOrCreateSession(chatId);
             session.wizardStep = QaWizardStep::Idle;
+            if (layoutFixed)
+                sendMessage(chatId, fixPrefix.trimmed());
             sendMainMenu(chatId, session.isEnglish);
             return;
         }
@@ -446,27 +467,26 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             if (session.wizardStep != QaWizardStep::Idle) {
                 session.wizardStep = QaWizardStep::Idle;
                 session.pendingBug = QaBugReport();
-                sendMessage(chatId, localized(TgStringId::BugCancelled, session.isEnglish));
+                sendMessage(chatId, fixPrefix + localized(TgStringId::BugCancelled, session.isEnglish));
             }
             sendMainMenu(chatId, session.isEnglish);
             return;
         }
         if (cmd == QStringLiteral("/help")) {
             TgChatSession& session = getOrCreateSession(chatId);
-            sendMessage(chatId, localized(TgStringId::HelpText, session.isEnglish));
+            sendMessage(chatId, fixPrefix + localized(TgStringId::HelpText, session.isEnglish));
             return;
         }
 
         // ── Admin commands ──────────────────────────────────
         if (cmd == QStringLiteral("/admin_stats")) {
-            sendMessage(chatId, m_accessMgr->buildStatsReport());
+            sendMessage(chatId, fixPrefix + m_accessMgr->buildStatsReport());
             return;
         }
         if (cmd == QStringLiteral("/admin_grant")) {
-            // /admin_grant <chat_id> <Role>
-            const QString args = text.section(QLatin1Char(' '), 1).trimmed();
-            const QString targetIdStr = args.section(QLatin1Char(' '), 0, 0);
-            const QString roleName = args.section(QLatin1Char(' '), 1, 1);
+            const QString cmdArgs = effectiveText.section(QLatin1Char(' '), 1).trimmed();
+            const QString targetIdStr = cmdArgs.section(QLatin1Char(' '), 0, 0);
+            const QString roleName = cmdArgs.section(QLatin1Char(' '), 1, 1);
             bool ok = false;
             qint64 targetId = targetIdStr.toLongLong(&ok);
             if (!ok || roleName.isEmpty()) {
@@ -475,12 +495,12 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             }
             TelegramRole newRole = telegramRoleFromString(roleName);
             m_accessMgr->setRole(targetId, newRole);
-            sendMessage(chatId, QStringLiteral("✅ Chat %1 → role *%2*")
+            sendMessage(chatId, fixPrefix + QStringLiteral("✅ Chat %1 → role *%2*")
                 .arg(targetId).arg(telegramRoleToString(newRole)));
             return;
         }
         if (cmd == QStringLiteral("/admin_revoke")) {
-            const QString targetIdStr = text.section(QLatin1Char(' '), 1, 1).trimmed();
+            const QString targetIdStr = effectiveText.section(QLatin1Char(' '), 1, 1).trimmed();
             bool ok = false;
             qint64 targetId = targetIdStr.toLongLong(&ok);
             if (!ok) {
@@ -488,7 +508,7 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
                 return;
             }
             m_accessMgr->setRole(targetId, TelegramRole::User);
-            sendMessage(chatId, QStringLiteral("✅ Chat %1 → role *User*").arg(targetId));
+            sendMessage(chatId, fixPrefix + QStringLiteral("✅ Chat %1 → role *User*").arg(targetId));
             return;
         }
 

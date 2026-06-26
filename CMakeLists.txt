@@ -145,6 +145,8 @@ add_library(JarvisCore STATIC
         core/telegram_access_manager.cpp
         core/command_dispatcher_tg.h
         core/command_dispatcher_tg.cpp
+        core/layout_fixer.h
+        core/layout_fixer.cpp
         core/translation_engine.h
         core/translation_engine.cpp
         core/virtual_keyboard.h

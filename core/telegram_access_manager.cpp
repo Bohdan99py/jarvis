@@ -48,6 +48,15 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
 const QMap<QString, TelegramRole> TelegramAccessManager::s_commandAcl =
     TelegramAccessManager::buildCommandAcl();
 
+QSet<QString> TelegramAccessManager::knownCommands()
+{
+    const auto& acl = s_commandAcl;
+    QSet<QString> cmds;
+    for (auto it = acl.begin(); it != acl.end(); ++it)
+        cmds.insert(it.key());
+    return cmds;
+}
+
 // ============================================================
 //  Construction
 // ============================================================
