@@ -65,6 +65,11 @@ inline QVector<Capability> activeCapabilities()
           QStringLiteral("Cyberpunk Kanban board with categories (UE5, KiCad, Blender, General), "
                          "priority levels, deadlines, and automatic overdue notifications. "
                          "Tasks manageable via voice/text commands") },
+        { QStringLiteral("j2j_mesh"),
+          QStringLiteral("J2J Mesh Network"),
+          QStringLiteral("Peer-to-peer mesh protocol for multi-instance JARVIS communication. "
+                         "UDP beacon discovery, TCP command channel, knowledge sync, "
+                         "and task delegation across LAN peers") },
     };
 }
 

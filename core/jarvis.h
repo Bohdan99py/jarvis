@@ -33,6 +33,7 @@ class CodeActions;
 class AttachmentsManager;
 class PcCommandRegistry;
 class TrainingPipelineController;
+class J2JMeshConnector;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -80,6 +81,7 @@ public:
     UserProfile*        userProfile()        const { return m_profile; }
     PcCommandRegistry*  pcCommands()         const { return m_pcCommands; }
     ActivityTracker*    activityTracker()    const { return m_activity; }
+    J2JMeshConnector*   meshConnector()      const { return m_mesh; }
 
     // Multi-user: switch active user (all data scoped to userId)
     void setCurrentUserId(qint64 id) { m_currentUserId = id; }
@@ -129,6 +131,7 @@ signals:
     void attachmentsConsumed();
     void agentSelected(const QString& agentName);
     void ideOpened(const QString& message);   // JARVIS открыл проект в IDE
+    void meshEvent(const QString& message);  // J2J mesh network event
 
 private:
     void registerCommands();
@@ -203,6 +206,7 @@ private:
     PcCommandRegistry*  m_pcCommands   = nullptr;  // голосовое управление ПК (мышь/окна/система/макросы)
     ActivityTracker*    m_activity     = nullptr;  // deep context awareness + knowledge base
     TrainingPipelineController* m_trainingPipeline = nullptr; // background voice→training data
+    J2JMeshConnector*   m_mesh             = nullptr;  // P2P mesh network
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 

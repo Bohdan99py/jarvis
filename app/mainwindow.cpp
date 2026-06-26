@@ -140,6 +140,11 @@ MainWindow::MainWindow(QWidget* parent)
                 appendLog(Str::logJarvis(), message, Theme::LogColors::system);
             });
 
+    connect(m_jarvis, &Jarvis::meshEvent,
+            this, [this](const QString& message) {
+                appendLog(QStringLiteral("J.A.R.V.I.S."), message, "#66FCF1");
+            });
+
     connect(m_jarvis->attachments(), &AttachmentsManager::changed,
             this, &MainWindow::onAttachmentsChanged);
     connect(m_jarvis, &Jarvis::attachmentsConsumed,

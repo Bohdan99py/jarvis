@@ -23,6 +23,7 @@
 #include "training_processing_worker.h"
 #include "system_manifest.h"
 #include "task_manager_dialog.h"
+#include "j2j_mesh_connector.h"
 #include "jarvis_paths.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
@@ -77,6 +78,37 @@ Jarvis::Jarvis(QObject* parent)
     m_trainingPipeline->setUserId(m_currentUserId);
     m_trainingPipeline->setDatasetPath(JarvisPaths::subPath(QStringLiteral("training_export")));
     m_trainingPipeline->start(10);
+
+    // J2J Mesh: peer-to-peer network for multi-instance knowledge sync
+    m_mesh = new J2JMeshConnector(this);
+    connect(m_mesh, &J2JMeshConnector::peerAuthorized, this,
+            [this](const QString& name, const QString& addr) {
+        const QString msg = QStringLiteral("[MESH LINK]: Established secure link with peer '%1' (%2). "
+                                           "Synchronizing shared knowledge matrices...")
+                                .arg(name, addr);
+        emit meshEvent(msg);
+    });
+    connect(m_mesh, &J2JMeshConnector::peerDiscovered, this,
+            [this](const QString& name, const QString& addr) {
+        const QString msg = QStringLiteral("[MESH]: Discovered peer '%1' at %2")
+                                .arg(name, addr);
+        emit meshEvent(msg);
+    });
+    connect(m_mesh, &J2JMeshConnector::peerLost, this,
+            [this](const QString& name) {
+        emit meshEvent(QStringLiteral("[MESH]: Peer '%1' went offline").arg(name));
+    });
+    connect(m_mesh, &J2JMeshConnector::knowledgeReceived, this,
+            [this](const QString& node, int count) {
+        emit meshEvent(QStringLiteral("[MESH SYNC]: Received %1 knowledge entries from '%2'")
+                           .arg(count).arg(node));
+    });
+    connect(m_mesh, &J2JMeshConnector::taskReceived, this,
+            [this](const QString& node, const QString& title) {
+        emit meshEvent(QStringLiteral("[MESH TASK]: '%1' delegated task: %2")
+                           .arg(node, title));
+    });
+    m_mesh->start();
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -143,6 +175,7 @@ Jarvis::Jarvis(QObject* parent)
 
 Jarvis::~Jarvis()
 {
+    m_mesh->stop();
     m_trainingPipeline->stop();
     m_predictor->savePatterns();
     m_memory->savePersistent();
