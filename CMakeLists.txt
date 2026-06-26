@@ -139,6 +139,8 @@ add_library(JarvisCore STATIC
         core/j2j_mesh_connector.cpp
         core/mobile_pairing_manager.h
         core/mobile_pairing_manager.cpp
+        core/j2j_telegram_gateway.h
+        core/j2j_telegram_gateway.cpp
         core/translation_engine.h
         core/translation_engine.cpp
         core/virtual_keyboard.h

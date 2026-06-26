@@ -34,6 +34,7 @@
 #include "user_profile.h"
 #include "mobile_pairing_manager.h"
 #include "j2j_mesh_connector.h"
+#include "j2j_telegram_gateway.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -2388,6 +2389,120 @@ void MainWindow::buildMenuBar()
             });
             layout->addWidget(copyBtn);
 
+            dlg->show();
+        });
+
+        // Telegram QA Gateway toggle
+        toolsMenu->addSeparator();
+        auto* actTelegram = toolsMenu->addAction(
+            IS_EN ? QStringLiteral("🤖 Telegram QA Gateway...")
+                  : QStringLiteral("🤖 Telegram QA Шлюз..."));
+        connect(actTelegram, &QAction::triggered, this, [this]() {
+            auto* mesh = m_jarvis->meshConnector();
+            if (!mesh) return;
+            mesh->initTelegramGateway();
+            auto* gw = mesh->telegramGateway();
+            if (!gw) return;
+
+            auto* dlg = new QDialog(this);
+            dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
+                                      : QStringLiteral("Telegram QA Шлюз"));
+            dlg->setMinimumSize(480, 320);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            dlg->setStyleSheet(QStringLiteral(
+                "QDialog { background: rgba(8,10,18,245); }"
+                "QLabel { color: #c0c8d8; font-size: 13px; }"
+                "QLineEdit { background: rgba(14,18,30,180); color: #e0e8f0; "
+                "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 8px; }"
+                "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
+                "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
+                "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                "  stop:0 #33e0ff, stop:1 #9b6dff); }"));
+
+            auto* layout = new QVBoxLayout(dlg);
+            layout->setSpacing(12);
+            layout->setContentsMargins(24, 20, 24, 20);
+
+            auto* title = new QLabel(IS_EN ? QStringLiteral("🤖 TELEGRAM QA GATEWAY")
+                                           : QStringLiteral("🤖 TELEGRAM QA ШЛЮЗ"));
+            title->setStyleSheet(QStringLiteral(
+                "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
+            title->setAlignment(Qt::AlignCenter);
+            layout->addWidget(title);
+
+            auto* desc = new QLabel(IS_EN
+                ? QStringLiteral("QA_Tester devices get full English UI.\n"
+                                 "Main user devices default to Russian.")
+                : QStringLiteral("QA_Tester устройства получают английский интерфейс.\n"
+                                 "Основной пользователь — русский."));
+            desc->setAlignment(Qt::AlignCenter);
+            desc->setStyleSheet(QStringLiteral("color: rgba(0,212,255,150); font-size: 12px;"));
+            layout->addWidget(desc);
+
+            // Token input
+            auto* tokenLbl = new QLabel(IS_EN ? QStringLiteral("Bot Token (auto-provisioned or manual):")
+                                              : QStringLiteral("Токен бота (авто или вручную):"));
+            layout->addWidget(tokenLbl);
+
+            auto* tokenInput = new QLineEdit(dlg);
+            tokenInput->setPlaceholderText(QStringLiteral("123456:ABC-DEF..."));
+            tokenInput->setText(gw->botToken());
+            tokenInput->setEchoMode(QLineEdit::Password);
+            layout->addWidget(tokenInput);
+
+            // Status indicator
+            auto* statusLbl = new QLabel();
+            statusLbl->setAlignment(Qt::AlignCenter);
+            auto updateStatus = [gw, statusLbl]() {
+                if (gw->isRunning()) {
+                    statusLbl->setText(QStringLiteral("🟢 Gateway ACTIVE — polling Telegram"));
+                    statusLbl->setStyleSheet(QStringLiteral("color: #66FCF1; font-weight: bold;"));
+                } else {
+                    statusLbl->setText(QStringLiteral("🔴 Gateway STOPPED"));
+                    statusLbl->setStyleSheet(QStringLiteral("color: #ff6b6b; font-weight: bold;"));
+                }
+            };
+            updateStatus();
+            layout->addWidget(statusLbl);
+
+            // Start/Stop button
+            auto* toggleBtn = new QPushButton(
+                gw->isRunning()
+                    ? (IS_EN ? QStringLiteral("⏹ Stop Gateway") : QStringLiteral("⏹ Остановить"))
+                    : (IS_EN ? QStringLiteral("▶ Start Gateway") : QStringLiteral("▶ Запустить")));
+            connect(toggleBtn, &QPushButton::clicked, dlg,
+                    [this, gw, tokenInput, toggleBtn, updateStatus]() {
+                if (gw->isRunning()) {
+                    gw->stop();
+                    toggleBtn->setText(IS_EN ? QStringLiteral("▶ Start Gateway")
+                                            : QStringLiteral("▶ Запустить"));
+                } else {
+                    QString token = tokenInput->text().trimmed();
+                    if (!token.isEmpty())
+                        gw->setBotToken(token);
+                    gw->start();
+                    toggleBtn->setText(IS_EN ? QStringLiteral("⏹ Stop Gateway")
+                                            : QStringLiteral("⏹ Остановить"));
+                    appendLog(QStringLiteral("J.A.R.V.I.S."),
+                        IS_EN ? QStringLiteral("🤖 Telegram QA Gateway started")
+                              : QStringLiteral("🤖 Telegram QA Шлюз запущен"),
+                        QStringLiteral("#66FCF1"));
+                }
+                updateStatus();
+            });
+            layout->addWidget(toggleBtn);
+
+            // Bug report notifications
+            connect(gw, &J2JTelegramGateway::bugReportFiled, dlg,
+                    [this](const QaBugReport& report) {
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    QStringLiteral("🐛 QA Bug: [%1] %2 — %3")
+                        .arg(report.severity, report.title, report.reporterRole),
+                    QStringLiteral("#ff9800"));
+            });
+
+            layout->addStretch(1);
             dlg->show();
         });
     }

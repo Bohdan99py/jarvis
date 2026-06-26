@@ -81,6 +81,13 @@ inline QVector<Capability> activeCapabilities()
                          "No manual bot creation or token setup — pair like WhatsApp Web. "
                          "Gateway polling auto-binds smartphones to role profiles. "
                          "One-click Wake-on-LAN shortcut export for iOS/Android") },
+        { QStringLiteral("telegram_gateway"),
+          QStringLiteral("Telegram QA Gateway"),
+          QStringLiteral("Multi-tenant Telegram bot bridge with per-chat localization. "
+                         "QA_Tester profiles get full English UI — interactive bug wizard, "
+                         "severity selection, and professional Markdown export for Jira/GitHub. "
+                         "Main user profiles default to Russian. Inline keyboards for "
+                         "system telemetry, Kanban board, and Wake-on-LAN") },
     };
 }
 

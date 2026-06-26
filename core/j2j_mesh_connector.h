@@ -18,6 +18,7 @@
 #include <QJsonObject>
 
 class MobilePairingManager;
+class J2JTelegramGateway;
 
 struct J2JPeer {
     QString   nodeId;
@@ -56,6 +57,10 @@ public:
     MobilePairingManager* mobilePairing() const { return m_mobilePairing; }
     void initMobilePairing();
 
+    // Telegram gateway
+    J2JTelegramGateway* telegramGateway() const { return m_telegramGw; }
+    void initTelegramGateway();
+
 signals:
     void peerDiscovered(const QString& nodeName, const QString& address);
     void peerLost(const QString& nodeName);
@@ -93,6 +98,7 @@ private:
     QMap<QString, J2JPeer>         m_peers;
     QMap<QTcpSocket*, QByteArray>  m_socketBuffers;
     MobilePairingManager*          m_mobilePairing = nullptr;
+    J2JTelegramGateway*            m_telegramGw    = nullptr;
 
     QString  m_nodeId;
     QString  m_nodeName;

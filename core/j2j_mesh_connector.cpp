@@ -4,6 +4,7 @@
 
 #include "j2j_mesh_connector.h"
 #include "mobile_pairing_manager.h"
+#include "j2j_telegram_gateway.h"
 #include "database_manager.h"
 #include "system_manifest.h"
 #include "activity_tracker.h"
@@ -542,4 +543,11 @@ void J2JMeshConnector::initMobilePairing()
     if (m_mobilePairing) return;
     m_mobilePairing = new MobilePairingManager(m_nodeId, this);
     qDebug() << "[J2J] Mobile pairing coordinator initialized";
+}
+
+void J2JMeshConnector::initTelegramGateway()
+{
+    if (m_telegramGw) return;
+    m_telegramGw = new J2JTelegramGateway(this);
+    qDebug() << "[J2J] Telegram gateway initialized";
 }
