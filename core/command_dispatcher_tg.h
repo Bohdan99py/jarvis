@@ -3,13 +3,16 @@
 // command_dispatcher_tg.h — Sandboxed Telegram Command Executor
 //
 // Maps Telegram slash commands to safe local actions:
-//   • /screenshot  — capture + send back (Admin only)
-//   • /sysinfo     — CPU, RAM, uptime report (Admin only)
-//   • /tasks       — Kanban board summary (Tester+)
-//   • /note <text> — save a personal note (User+)
-//   • /notes       — list recent notes (User+)
-//   • /uptime      — how long JARVIS has been running (User+)
-//   • /disk        — disk usage summary (Admin only)
+//   • /screenshot      — capture + send back (Admin only)
+//   • /sysinfo         — CPU, RAM, uptime report (Admin only)
+//   • /tasks           — Kanban board summary (Tester+)
+//   • /note <text>     — save a personal note (User+)
+//   • /notes           — list recent notes (User+)
+//   • /uptime          — how long JARVIS has been running (User+)
+//   • /disk            — disk usage summary (Admin only)
+//   • /screen_analyze  — capture + AI visual analysis (User+)
+//   • /stop_voice      — flush TTS playback queue (User+)
+//   • /cache_stats     — LLM cache statistics (User+)
 //
 // Security: every command is gated by TelegramAccessManager
 // before reaching this class. Raw OS shell execution is
@@ -58,6 +61,9 @@ private:
     DispatchResult cmdTasks(qint64 chatId, bool english);
     DispatchResult cmdNote(qint64 chatId, const QString& text, bool english);
     DispatchResult cmdNotes(qint64 chatId, bool english);
+    DispatchResult cmdScreenAnalyze(qint64 chatId, bool english);
+    DispatchResult cmdStopVoice(bool english);
+    DispatchResult cmdCacheStats(bool english);
 
     J2JTelegramGateway*    m_gateway   = nullptr;
     TelegramAccessManager* m_accessMgr = nullptr;

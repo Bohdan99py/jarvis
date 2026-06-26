@@ -229,6 +229,15 @@ add_library(JarvisCore STATIC
         core/media_routing_manager.h
         core/media_routing_manager.cpp
 
+        # Dual-Response Payload + TTS Queue Engine
+        core/jarvis_response.h
+        core/voice_synthesis_manager.h
+        core/voice_synthesis_manager.cpp
+
+        # Smart Clipboard Watcher — auto-detect C++/UE errors & driving test context
+        core/clipboard_watcher.h
+        core/clipboard_watcher.cpp
+
         # Фоновое обучение — индексация проекта + анализ паттернов чата
         core/background_learner.h
         core/background_learner.cpp

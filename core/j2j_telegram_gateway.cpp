@@ -9,6 +9,8 @@
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
+#include "jarvis_response.h"
+#include "voice_synthesis_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
 #include "jarvis_paths.h"
@@ -135,16 +137,42 @@ QString J2JTelegramGateway::localized(TgStringId id, bool en)
                   : QStringLiteral("📊 *Телеметрия Системы*\n");
 
     case TgStringId::HelpText:
-        return en ? QStringLiteral("❓ *J.A.R.V.I.S. Mobile Help*\n\n"
-                                   "• Tap buttons below to interact\n"
-                                   "• Type `/menu` to show the main menu\n"
-                                   "• Type `/cancel` to abort the current wizard\n"
-                                   "• Bug reports are saved locally and exported as Markdown")
-                  : QStringLiteral("❓ *Помощь J.A.R.V.I.S. Mobile*\n\n"
-                                   "• Нажмите кнопки ниже для взаимодействия\n"
-                                   "• Введите `/menu` для главного меню\n"
-                                   "• Введите `/cancel` для отмены текущего мастера\n"
-                                   "• Баг-репорты сохраняются локально и экспортируются в Markdown");
+        return en ? QStringLiteral(
+            "❓ *J.A.R.V.I.S. v3.5.5 — Mobile Help*\n\n"
+            "=== WHAT'S NEW ===\n"
+            "• LayoutFixer: type commands in any keyboard layout\n"
+            "• Local LLM cache (SQLite v11) — offline fallback\n"
+            "• Media Preview Hub — images & video in overlay\n"
+            "• Smart Clipboard Watcher — auto-debug on Ctrl+C\n"
+            "• Natural TTS via Piper voice synthesis queue\n\n"
+            "=== COMMANDS ===\n"
+            "• `/menu` — main control menu\n"
+            "• `/screen_analyze` — capture screen for AI analysis\n"
+            "• `/stop_voice` — silence voice playback\n"
+            "• `/cache_stats` — show LLM cache statistics\n"
+            "• `/cancel` — abort current wizard\n"
+            "• `/help` — this message")
+        : QStringLiteral(
+            "❓ *J.A.R.V.I.S. v3.5.5 — Справка*\n\n"
+            "=== ЧТО НОВОГО В v3.5.5 ===\n"
+            "• LayoutFixer: команды работают в любой раскладке\n"
+            "• Локальный кэш LLM (SQLite v11) — офлайн-ответы\n"
+            "• Glassmorphic MediaPreview — превью медиа в оверлее\n"
+            "• Clipboard Watcher — авто-отладка при Ctrl+C\n"
+            "• Естественный TTS через Piper и очередь речи\n\n"
+            "=== КРАТКАЯ ИНСТРУКЦИЯ ПОЛЬЗОВАТЕЛЯ ===\n"
+            "• `/menu` (`/ьуну`) — главное меню\n"
+            "• `/screen_analyze` (`/ысккуут_фтфдныу`) — захват экрана + ИИ анализ\n"
+            "• `/stop_voice` (`/ытщз_мщшсу`) — остановить голос\n"
+            "• `/cache_stats` — статистика кэша LLM\n"
+            "• `/cancel` — отмена текущего мастера\n"
+            "• `/help` — эта справка\n\n"
+            "💡 Раскладка автоматически исправляется — можно "
+            "набирать команды хоть на русской клавиатуре.\n"
+            "📋 Скопируй ошибку C++ / UE5 через Ctrl+C — "
+            "JARVIS сам разберёт и ответит.\n"
+            "🔇 Для управления голосом: `/stop_voice` мгновенно "
+            "останавливает все фразы в очереди.");
 
     case TgStringId::UnknownCommand:
         return en ? QStringLiteral("🤔 I didn't understand that. Tap a button or type `/menu`.")
@@ -874,6 +902,10 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                 + QStringLiteral("\n\n💾 *Served from local cache*");
             sendMessage(chatId, tagged);
             emit conversationResponse(chatId, tagged);
+
+            JarvisResponse dual = JarvisResponse::parse(cached);
+            VoiceSynthesisManager::instance().say(dual.speechText);
+
             qDebug() << "[TelegramGW] LLM cache HIT for chat" << chatId;
             return;
         }
@@ -890,8 +922,11 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
 
     if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
         finishLlmRequest(chatId);
-        sendMessage(chatId, syncResponse);
-        emit conversationResponse(chatId, syncResponse);
+
+        JarvisResponse dual = JarvisResponse::parse(syncResponse);
+        sendMessage(chatId, dual.fullText);
+        emit conversationResponse(chatId, dual.fullText);
+        VoiceSynthesisManager::instance().say(dual.speechText);
         return;
     }
 
@@ -938,6 +973,10 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
             const QString tagged = fallback
                 + QStringLiteral("\n\n💾 *Served from local cache*");
             sendMessage(chatId, tagged);
+
+            JarvisResponse dual = JarvisResponse::parse(fallback);
+            VoiceSynthesisManager::instance().say(dual.speechText);
+
             qDebug() << "[TelegramGW] Error fallback: cache HIT for chat" << chatId;
         } else {
             sendMessage(chatId, english
@@ -945,6 +984,11 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                                  "and no local cache available for this query.")
                 : QStringLiteral("📡 *Система офлайн:* Таймаут сети, "
                                  "и для этого запроса нет локального кэша."));
+
+            VoiceSynthesisManager::instance().say(english
+                ? QStringLiteral("I'm offline right now, can't reach the server.")
+                : QStringLiteral("Я сейчас не в сети, не могу подключиться к серверу."));
+
             qDebug() << "[TelegramGW] Error fallback: no cache, static offline msg."
                      << "Error:" << error;
         }
@@ -964,6 +1008,10 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
             const QString tagged = fallback
                 + QStringLiteral("\n\n💾 *Served from local cache (timeout fallback)*");
             sendMessage(chatId, tagged);
+
+            JarvisResponse dual = JarvisResponse::parse(fallback);
+            VoiceSynthesisManager::instance().say(dual.speechText);
+
             qDebug() << "[TelegramGW] Timeout fallback: cache HIT for chat" << chatId;
         } else {
             sendMessage(chatId, english
@@ -971,6 +1019,11 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                                  "and no local cache available for this query.")
                 : QStringLiteral("📡 *Система офлайн:* Запрос превысил время ожидания, "
                                  "и для этого запроса нет локального кэша."));
+
+            VoiceSynthesisManager::instance().say(english
+                ? QStringLiteral("Request timed out. I can't reach the server right now.")
+                : QStringLiteral("Запрос не прошёл, сервер не отвечает. Попробуй позже."));
+
             qDebug() << "[TelegramGW] Timeout fallback: no cache for chat" << chatId;
         }
     });

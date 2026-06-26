@@ -6,6 +6,8 @@
 #include "j2j_telegram_gateway.h"
 #include "telegram_access_manager.h"
 #include "database_manager.h"
+#include "llm_cache_manager.h"
+#include "voice_synthesis_manager.h"
 #include "jarvis_paths.h"
 
 #include <QSysInfo>
@@ -38,7 +40,7 @@ CommandDispatcherTg::CommandDispatcherTg(J2JTelegramGateway* gateway,
     , m_startTime(QDateTime::currentDateTime())
 {
     qDebug() << "[CommandDispatcher] Initialized with"
-             << 7 << "registered commands";
+             << 10 << "registered commands";
 }
 
 // ============================================================
@@ -72,6 +74,15 @@ DispatchResult CommandDispatcherTg::dispatch(qint64 chatId,
 
     if (cmd == QStringLiteral("/notes"))
         return cmdNotes(chatId, english);
+
+    if (cmd == QStringLiteral("/screen_analyze"))
+        return cmdScreenAnalyze(chatId, english);
+
+    if (cmd == QStringLiteral("/stop_voice"))
+        return cmdStopVoice(english);
+
+    if (cmd == QStringLiteral("/cache_stats"))
+        return cmdCacheStats(english);
 
     return {};  // not handled
 }
@@ -350,5 +361,106 @@ DispatchResult CommandDispatcherTg::cmdNotes(qint64 chatId, bool english)
     for (int i = start; i < notes.size(); ++i)
         r.response += QStringLiteral("• %1\n").arg(notes[i]);
 
+    return r;
+}
+
+// ============================================================
+//  /screen_analyze — User+, capture + send for AI analysis
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdScreenAnalyze(qint64 /*chatId*/, bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    QScreen* screen = QApplication::primaryScreen();
+    if (!screen) {
+        r.response = english ? QStringLiteral("⚠ No screen available.")
+                             : QStringLiteral("⚠ Экран недоступен.");
+        return r;
+    }
+
+    QPixmap shot = screen->grabWindow(0);
+    if (shot.isNull()) {
+        r.response = english ? QStringLiteral("⚠ Screen capture failed.")
+                             : QStringLiteral("⚠ Не удалось захватить экран.");
+        return r;
+    }
+
+    const QString dir = J2JTelegramGateway::workspaceOutputDir();
+    const QString ts  = QDateTime::currentDateTime()
+        .toString(QStringLiteral("yyyyMMdd_HHmmss"));
+    const QString path = dir + QStringLiteral("/screen_analyze_%1.png").arg(ts);
+
+    if (!shot.save(path, "PNG")) {
+        r.response = english ? QStringLiteral("⚠ Failed to save capture.")
+                             : QStringLiteral("⚠ Не удалось сохранить снимок.");
+        return r;
+    }
+
+    r.response = english
+        ? QStringLiteral("🔍 Screen captured for analysis. "
+                         "AI will process the image and respond shortly.")
+        : QStringLiteral("🔍 Экран захвачен для анализа. "
+                         "ИИ обработает изображение и ответит в ближайшее время.");
+    r.imagePath = path;
+
+    qDebug() << "[CommandDispatcher] /screen_analyze saved:" << path;
+    return r;
+}
+
+// ============================================================
+//  /stop_voice — User+, flush TTS queue
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdStopVoice(bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    VoiceSynthesisManager::instance().stopSpeaking();
+
+    r.response = english
+        ? QStringLiteral("🔇 Voice playback stopped.")
+        : QStringLiteral("🔇 Голосовое воспроизведение остановлено.");
+
+    qDebug() << "[CommandDispatcher] /stop_voice — TTS queue flushed";
+    return r;
+}
+
+// ============================================================
+//  /cache_stats — User+, LLM cache statistics
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdCacheStats(bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    const int cacheCount  = LlmCacheManager::instance().cacheEntryCount();
+    const int offlineCount = DatabaseManager::instance().responseCacheCount();
+
+    if (english) {
+        r.response = QStringLiteral(
+            "💾 *LLM Cache Statistics*\n"
+            "```\n"
+            "LLM response cache:    %1 entries\n"
+            "Offline response pool: %2 entries\n"
+            "Schema version:        11\n"
+            "```"
+        ).arg(cacheCount).arg(offlineCount);
+    } else {
+        r.response = QStringLiteral(
+            "💾 *Статистика кэша LLM*\n"
+            "```\n"
+            "Кэш ответов LLM:         %1 записей\n"
+            "Пул офлайн-ответов:       %2 записей\n"
+            "Версия схемы БД:          11\n"
+            "```"
+        ).arg(cacheCount).arg(offlineCount);
+    }
+
+    qDebug() << "[CommandDispatcher] /cache_stats — LLM:" << cacheCount
+             << "offline:" << offlineCount;
     return r;
 }

@@ -26,6 +26,8 @@
 #include "j2j_mesh_connector.h"
 #include "translation_engine.h"
 #include "jarvis_paths.h"
+#include "jarvis_response.h"
+#include "voice_synthesis_manager.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -1787,10 +1789,14 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         fullResponse += QStringLiteral("\n\n") + fileReport;
     }
 
+    // Parse dual-response: extract [SPEECH:] tag for TTS
+    JarvisResponse dual = JarvisResponse::parse(fullResponse);
+    fullResponse = dual.fullText;
+
     // Smart response: add a human-like summary for long/complex responses
-    if (displayResponse.length() > 500 && !displayResponse.contains(QStringLiteral("[FILE:"))) {
+    if (fullResponse.length() > 500 && !fullResponse.contains(QStringLiteral("[FILE:"))) {
         QString summary;
-        if (displayResponse.contains(QStringLiteral("```"))) {
+        if (fullResponse.contains(QStringLiteral("```"))) {
             summary = m_uiEnglish ? QStringLiteral("Here's what I found — code example included below.")
                                   : QStringLiteral("Вот что нашёл — пример кода ниже.");
         } else if (fileReport.contains(QStringLiteral("✅"))) {
@@ -1803,6 +1809,9 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         }
         fullResponse = QStringLiteral("💡 ") + summary + QStringLiteral("\n\n") + fullResponse;
     }
+
+    // Route speech to TTS queue
+    VoiceSynthesisManager::instance().say(dual.speechText);
 
     emit asyncResponseReady(fullResponse);
 

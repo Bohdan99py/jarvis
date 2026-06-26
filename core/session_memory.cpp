@@ -672,6 +672,26 @@ QString SessionMemory::buildSystemPrompt() const
         "Be concise and direct. No emojis, no filler.\n\n"
     );
 
+    // --- Dual-response TTS instruction ---
+    prompt += QStringLiteral(
+        "=== VOICE OUTPUT FORMAT ===\n"
+        "Your response will be BOTH displayed as text AND spoken aloud via TTS. "
+        "To support this, prepend a single line at the very top of your response:\n"
+        "  [SPEECH: <1-2 sentence natural spoken summary>]\n"
+        "Rules for the SPEECH line:\n"
+        "- Must be in the SAME language as the rest of the response.\n"
+        "- Must sound completely natural when spoken aloud — conversational, human-like.\n"
+        "- NO markdown, NO code, NO symbols, NO emojis, NO file paths.\n"
+        "- Use natural bridges: 'Вот что я нашёл...', 'Слушай, тут такая штука...', "
+        "'Я проверил, всё готово.', 'Here is what I found...', 'Done, all set.'\n"
+        "- For code responses: summarize what the code does, don't read the code.\n"
+        "- For errors: explain the issue in plain words.\n"
+        "- Keep it under 30 words — this is for the ear, not the eye.\n"
+        "The rest of your response after this line is the full technical output as usual.\n"
+        "If the response is already short and conversational (under 100 chars, no code), "
+        "you may omit the [SPEECH:] line — the full text will be spoken as-is.\n\n"
+    );
+
     prompt += QStringLiteral(
         "=== MODE: DIALOG + CODING ===\n"
         "You can both chat and write code. For regular questions — answer with text. "

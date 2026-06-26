@@ -24,9 +24,12 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/cancel"),     TelegramRole::User },
 
         // User-level extras
-        { QStringLiteral("/uptime"),     TelegramRole::User },
-        { QStringLiteral("/note"),       TelegramRole::User },
-        { QStringLiteral("/notes"),      TelegramRole::User },
+        { QStringLiteral("/uptime"),         TelegramRole::User },
+        { QStringLiteral("/note"),           TelegramRole::User },
+        { QStringLiteral("/notes"),          TelegramRole::User },
+        { QStringLiteral("/screen_analyze"), TelegramRole::User },
+        { QStringLiteral("/stop_voice"),     TelegramRole::User },
+        { QStringLiteral("/cache_stats"),    TelegramRole::User },
 
         // Tester-level
         { QStringLiteral("/bug"),        TelegramRole::Tester },

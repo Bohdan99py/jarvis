@@ -35,6 +35,8 @@
 #include "mobile_pairing_manager.h"
 #include "j2j_mesh_connector.h"
 #include "j2j_telegram_gateway.h"
+#include "jarvis_response.h"
+#include "voice_synthesis_manager.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -3936,8 +3938,13 @@ void MainWindow::onAsyncResponse(const QString& response)
 {
     m_audioManager->playSuccess();
     appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
-    if (response.length() <= 200) {
-        if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
+
+    // Dual-response TTS: VoiceSynthesisManager handles the speech channel
+    // from handleClaudeCodeResponse. For non-Claude paths (Gemini/Ollama)
+    // that emit asyncResponseReady directly, parse and speak here as fallback.
+    if (m_audioManager->speechAllowed()) {
+        JarvisResponse dual = JarvisResponse::parse(response);
+        VoiceSynthesisManager::instance().say(dual.speechText);
     }
 
     // Сохраняем для возможного лайка
