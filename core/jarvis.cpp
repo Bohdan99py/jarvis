@@ -843,6 +843,34 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             DatabaseManager::instance().responseCacheCount(),
             m_memory->pastSessionSummaries().size()
         );
+
+        // Core Memory Stream: retrieve TOP-5 events ranked by time-decay score
+        {
+            auto& db = DatabaseManager::instance();
+            auto topEvents = db.getTopMemoryEvents(m_currentUserId, 5);
+            if (!topEvents.isEmpty()) {
+                QString msCtx;
+                for (const DbMemoryEvent& ev : topEvents) {
+                    msCtx += QStringLiteral("- [%1] %2 (importance: %3)\n")
+                                 .arg(ev.eventType,
+                                      ev.content,
+                                      QString::number(ev.importance, 'f', 2));
+                }
+                m_memory->setMemoryStreamContext(msCtx);
+            } else {
+                m_memory->setMemoryStreamContext(QString());
+            }
+        }
+
+        // Log current user query into memory_stream
+        {
+            DbMemoryEvent ev;
+            ev.userId    = m_currentUserId;
+            ev.eventType = QStringLiteral("user_query");
+            ev.content   = s.left(500);
+            ev.importance = isCodingIntent(s) ? 0.7 : 0.4;
+            DatabaseManager::instance().addMemoryEvent(ev);
+        }
     }
 
     // 1. Системные команды из реестра (только явные prefix-команды:

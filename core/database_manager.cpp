@@ -251,6 +251,20 @@ bool DatabaseManager::createTables()
     ))")) return false;
     execQuery("CREATE INDEX IF NOT EXISTS idx_journal_user ON voice_journal(user_id, processed, created_at)");
 
+    // memory_stream — Core Memory с time-decay scoring
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS memory_stream (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 1
+                    REFERENCES users(id) ON DELETE CASCADE,
+        event_type  TEXT    NOT NULL DEFAULT 'user_query',
+        content     TEXT    NOT NULL,
+        importance  REAL    NOT NULL DEFAULT 0.5
+                    CHECK(importance >= 0.0 AND importance <= 1.0),
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_memory_user ON memory_stream(user_id, created_at DESC)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_stream(user_id, event_type)");
+
     // response_cache — кэш AI-ответов для offline (анекдоты, советы, факты)
     if (!execQuery(R"(CREATE TABLE IF NOT EXISTS response_cache (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -352,6 +366,20 @@ bool DatabaseManager::runMigrations()
         execQuery("CREATE INDEX IF NOT EXISTS idx_kb_conf ON knowledge_base(user_id, confidence DESC)");
         execQuery("UPDATE schema_version SET version=6");
         ver = 6;
+    }
+    if (ver < 7) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS memory_stream (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL DEFAULT 1,
+            event_type  TEXT    NOT NULL DEFAULT 'user_query',
+            content     TEXT    NOT NULL,
+            importance  REAL    NOT NULL DEFAULT 0.5,
+            created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_memory_user ON memory_stream(user_id, created_at DESC)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_stream(user_id, event_type)");
+        execQuery("UPDATE schema_version SET version=7");
+        ver = 7;
     }
     return true;
 }
@@ -1241,6 +1269,58 @@ bool DatabaseManager::updateTrainingLogRating(const QString& userMsg,
     q.bindValue(":aresp", aiResp.simplified());
     if (!q.exec()) { logError("updateTrainingLogRating", q.lastError()); return false; }
     return q.numRowsAffected() > 0;
+}
+
+// ============================================================
+//  memory_stream — Core Memory с time-decay
+// ============================================================
+
+qint64 DatabaseManager::addMemoryEvent(const DbMemoryEvent& ev)
+{
+    if (ev.content.trimmed().isEmpty()) return -1;
+
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare(R"(INSERT INTO memory_stream (user_id, event_type, content, importance)
+                 VALUES (:uid, :et, :content, :imp))");
+    q.bindValue(":uid",     ev.userId);
+    q.bindValue(":et",      ev.eventType.isEmpty() ? QStringLiteral("user_query") : ev.eventType);
+    q.bindValue(":content", ev.content.simplified());
+    q.bindValue(":imp",     qBound(0.0, ev.importance, 1.0));
+    if (!q.exec()) { logError("addMemoryEvent", q.lastError()); return -1; }
+    return q.lastInsertId().toLongLong();
+}
+
+QList<DbMemoryEvent> DatabaseManager::getTopMemoryEvents(qint64 userId, int limit)
+{
+    QList<DbMemoryEvent> res;
+    auto db = connection();
+    QSqlQuery q(db);
+    // Score = importance / (1.0 + delta_hours)
+    // delta_hours = (unixepoch('now') - unixepoch(created_at)) / 3600.0
+    // SQLite strftime('%s', ...) returns Unix epoch as TEXT; CAST to REAL.
+    q.prepare(R"(SELECT id, user_id, event_type, content, importance, created_at,
+                        importance / (1.0 + (CAST(strftime('%s','now') AS REAL)
+                                           - CAST(strftime('%s', created_at) AS REAL)) / 3600.0) AS score
+                 FROM memory_stream
+                 WHERE user_id = :uid
+                 ORDER BY score DESC
+                 LIMIT :lim)");
+    q.bindValue(":uid", userId);
+    q.bindValue(":lim", limit);
+    if (q.exec()) {
+        while (q.next()) {
+            DbMemoryEvent ev;
+            ev.id         = q.value("id").toLongLong();
+            ev.userId     = q.value("user_id").toLongLong();
+            ev.eventType  = q.value("event_type").toString();
+            ev.content    = q.value("content").toString();
+            ev.importance = q.value("importance").toDouble();
+            ev.createdAt  = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+            res.append(ev);
+        }
+    }
+    return res;
 }
 
 // ============================================================

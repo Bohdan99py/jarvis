@@ -779,6 +779,16 @@ QString SessionMemory::buildSystemPrompt() const
             "apply the knowledge to give better, more personalized answers.\n\n");
     }
 
+    // --- Core Memory Stream: time-decay weighted recent events ---
+    if (!m_memoryStreamContext.isEmpty()) {
+        prompt += QStringLiteral("=== MEMORY STREAM (time-decay ranked) ===\n")
+                + m_memoryStreamContext + QStringLiteral(
+            "These are the most relevant recent events scored by "
+            "importance / (1 + hours_elapsed). Use them to maintain continuity "
+            "across sessions — reference prior context naturally without saying "
+            "'according to my memory stream'.\n\n");
+    }
+
     bool hasTaskBlock = false;
     QString taskBlock;
     if (!m_taskContext.currentTask.isEmpty()) {

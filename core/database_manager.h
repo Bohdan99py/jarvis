@@ -81,6 +81,16 @@ struct DbBehaviorPattern {
     QDateTime lastSeen;
 };
 
+// Core Memory Stream — значимые события с приоритетом для RAG/time-decay
+struct DbMemoryEvent {
+    qint64    id         = 0;
+    qint64    userId     = 1;
+    QString   eventType;               // "user_query" | "insight" | "decision" | "milestone" | ...
+    QString   content;                 // краткое описание события
+    double    importance = 0.5;        // 0.0 .. 1.0
+    QDateTime createdAt;
+};
+
 // Запись для fine-tuning датасета (лайкнутые диалоги)
 struct DbTrainingLog {
     qint64    id           = 0;
@@ -182,6 +192,11 @@ public:
     bool                     updateTrainingLogRating(const QString& userMsg,
                                                      const QString& aiResp, int rating);
 
+    // ── memory_stream (Core Memory с time-decay) ───────────
+    qint64               addMemoryEvent(const DbMemoryEvent& ev);
+    // TOP-N событий, ранжированных по Score = importance / (1 + Δhours)
+    QList<DbMemoryEvent> getTopMemoryEvents(qint64 userId, int limit = 5);
+
     // ── voice_journal (пассивная запись голоса) ────────────
     qint64 addVoiceJournalEntry(const QString& transcript, const QString& language,
                                 float confidence, const QDateTime& capturedAt);
@@ -224,5 +239,5 @@ private:
     QString        m_lastError;
     mutable QMutex m_mutex;
 
-    static constexpr int k_schemaVersion = 6;
+    static constexpr int k_schemaVersion = 7;
 };

@@ -107,6 +107,9 @@ public:
     // Active user name (for multi-user prompts)
     void setActiveUserName(const QString& name) { m_activeUserName = name; }
 
+    // Core Memory Stream: top-N time-decay scored events (RAG context)
+    void setMemoryStreamContext(const QString& ctx) { m_memoryStreamContext = ctx; }
+
     // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
     void setLearningStats(int totalInteractions, int likedResponses,
                           int cachedResponses, int sessionsRecorded);
@@ -143,6 +146,7 @@ private:
     QString m_detectedRole;
     QString m_knowledgeSummary;
     QString m_activeUserName;
+    QString m_memoryStreamContext;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;
