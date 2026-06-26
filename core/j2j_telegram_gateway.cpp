@@ -847,58 +847,72 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     session.awaitingLlm = true;
     startTypingIndicator(chatId);
 
-    // Build a language instruction so the LLM responds in the correct language
     QString langInstruction = english
         ? QStringLiteral("Respond in English. The user is a QA Tester.")
         : QStringLiteral("Отвечай на русском языке.");
 
-    // processCommand is synchronous for local/cached responses but triggers
-    // async callbacks for Claude/Gemini. We connect to asyncResponseReady
-    // for the async path, and also check the sync return value.
     QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
 
-    // If processCommand returned a non-empty immediate response, send it
     if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
-        stopTypingIndicator(chatId);
-        session.awaitingLlm = false;
+        finishLlmRequest(chatId);
         sendMessage(chatId, syncResponse);
         emit conversationResponse(chatId, syncResponse);
         return;
     }
 
-    // For async LLM responses, connect a one-shot handler
-    auto conn = std::make_shared<QMetaObject::Connection>();
-    *conn = connect(m_jarvis, &Jarvis::asyncResponseReady, this,
-                    [this, chatId, conn](const QString& response) {
+    // Shared guard: both callbacks and the timeout use this to ensure
+    // exactly one of them fires. Once set to true, the others no-op.
+    auto resolved = std::make_shared<bool>(false);
+
+    auto conn    = std::make_shared<QMetaObject::Connection>();
+    auto errConn = std::make_shared<QMetaObject::Connection>();
+
+    // Cleanup lambda — disconnects both signals, releases the lock
+    auto cleanup = [this, chatId, conn, errConn, resolved]() {
+        if (*resolved) return;
+        *resolved = true;
         disconnect(*conn);
-        stopTypingIndicator(chatId);
+        disconnect(*errConn);
+        finishLlmRequest(chatId);
+    };
 
-        if (m_sessions.contains(chatId))
-            m_sessions[chatId].awaitingLlm = false;
-
+    *conn = connect(m_jarvis, &Jarvis::asyncResponseReady, this,
+                    [this, chatId, cleanup](const QString& response) {
+        cleanup();
         sendMessage(chatId, response);
         emit conversationResponse(chatId, response);
-
         qDebug() << "[TelegramGW] LLM response delivered to chat" << chatId
                  << "(" << response.length() << "chars)";
     });
 
-    // Also handle errors
-    auto errConn = std::make_shared<QMetaObject::Connection>();
     *errConn = connect(m_jarvis, &Jarvis::asyncResponseError, this,
-                       [this, chatId, errConn, conn](const QString& error) {
-        disconnect(*errConn);
-        disconnect(*conn);
-        stopTypingIndicator(chatId);
-
-        if (m_sessions.contains(chatId))
-            m_sessions[chatId].awaitingLlm = false;
-
+                       [this, chatId, cleanup](const QString& error) {
+        cleanup();
         bool en = m_sessions.contains(chatId) && m_sessions[chatId].isEnglish;
         sendMessage(chatId, en
             ? QStringLiteral("⚠ Error: %1").arg(error)
             : QStringLiteral("⚠ Ошибка: %1").arg(error));
     });
+
+    // Safety timeout: if neither signal fires within 90 seconds,
+    // force-release the lock so the chat isn't stuck forever.
+    QTimer::singleShot(90000, this, [this, chatId, cleanup]() {
+        cleanup();
+        if (m_sessions.contains(chatId) && !m_sessions[chatId].awaitingLlm)
+            return;  // already cleaned up by a signal
+        bool en = m_sessions.contains(chatId) && m_sessions[chatId].isEnglish;
+        sendMessage(chatId, en
+            ? QStringLiteral("⏱ Request timed out. Please try again.")
+            : QStringLiteral("⏱ Запрос превысил время ожидания. Попробуйте снова."));
+        qDebug() << "[TelegramGW] LLM timeout for chat" << chatId;
+    });
+}
+
+void J2JTelegramGateway::finishLlmRequest(qint64 chatId)
+{
+    stopTypingIndicator(chatId);
+    if (m_sessions.contains(chatId))
+        m_sessions[chatId].awaitingLlm = false;
 }
 
 // ============================================================
@@ -1056,13 +1070,22 @@ void J2JTelegramGateway::downloadTelegramFile(const QString& fileId,
                 QString targetLang = isEnglish ? QStringLiteral("en") : QStringLiteral("ru");
 
                 // Connect transcription result → LLM → reply
+                auto vResolved = std::make_shared<bool>(false);
                 auto transConn = std::make_shared<QMetaObject::Connection>();
-                *transConn = connect(m_translator, &TranslationEngine::audioTranscribed, this,
-                    [this, chatId, isEnglish, tempPath, transConn](const QString& transcript, const QString& lang) {
-                    disconnect(*transConn);
+                auto vErrConn  = std::make_shared<QMetaObject::Connection>();
 
-                    // Clean up temp file
+                auto voiceCleanup = [vResolved, transConn, vErrConn, tempPath]() {
+                    if (*vResolved) return false;
+                    *vResolved = true;
+                    disconnect(*transConn);
+                    disconnect(*vErrConn);
                     QFile::remove(tempPath);
+                    return true;
+                };
+
+                *transConn = connect(m_translator, &TranslationEngine::audioTranscribed, this,
+                    [this, chatId, isEnglish, voiceCleanup](const QString& transcript, const QString& lang) {
+                    if (!voiceCleanup()) return;
 
                     if (transcript.trimmed().isEmpty()) {
                         stopTypingIndicator(chatId);
@@ -1074,21 +1097,17 @@ void J2JTelegramGateway::downloadTelegramFile(const QString& fileId,
 
                     emit voiceProcessed(chatId, transcript);
 
-                    // Show transcript to user
                     sendMessage(chatId, (isEnglish
                         ? QStringLiteral("🎙 *Transcript* (%1):\n_%2_")
                         : QStringLiteral("🎙 *Транскрипт* (%1):\n_%2_"))
                         .arg(lang.toUpper(), transcript.left(500)));
 
-                    // Route the transcript text through the LLM
                     routeToLlm(chatId, transcript, isEnglish);
                 });
 
-                auto errConn = std::make_shared<QMetaObject::Connection>();
-                *errConn = connect(m_translator, &TranslationEngine::audioProcessingError, this,
-                    [this, chatId, isEnglish, tempPath, errConn](const QString& error) {
-                    disconnect(*errConn);
-                    QFile::remove(tempPath);
+                *vErrConn = connect(m_translator, &TranslationEngine::audioProcessingError, this,
+                    [this, chatId, isEnglish, voiceCleanup](const QString& error) {
+                    if (!voiceCleanup()) return;
                     stopTypingIndicator(chatId);
                     sendMessage(chatId, (isEnglish
                         ? QStringLiteral("⚠ Voice processing error: %1")

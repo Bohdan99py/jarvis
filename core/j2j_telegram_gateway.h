@@ -163,6 +163,7 @@ private:
 
     // Free-dialogue LLM routing
     void routeToLlm(qint64 chatId, const QString& text, bool english);
+    void finishLlmRequest(qint64 chatId);
     void sendChatAction(qint64 chatId, const QString& action);
     void startTypingIndicator(qint64 chatId);
     void stopTypingIndicator(qint64 chatId);
