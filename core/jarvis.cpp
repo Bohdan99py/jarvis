@@ -20,6 +20,7 @@
 #include "user_profile_manager.h"
 #include "training_processing_worker.h"
 #include "system_manifest.h"
+#include "task_manager_dialog.h"
 #include "jarvis_paths.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
@@ -903,6 +904,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         // Adaptive Focus: auto-detect from recent memory stream
         m_memory->setAdaptiveFocusContext(
             UserProfileManager::buildFocusContext(m_currentUserId));
+
+        // Task board context: active tasks + deadlines for LLM awareness
+        m_memory->setTaskContext(
+            TaskNotifications::buildTaskContext(m_currentUserId));
     }
 
     // 1. Системные команды из реестра (только явные prefix-команды:
@@ -2397,4 +2402,34 @@ QString Jarvis::cmdCombo(const QString& input)
         std::initializer_list<WORD>(keys.data(), keys.data() + keys.size())
     );
     return QStringLiteral("Executing combo: ") + comboStr;
+}
+
+// ============================================================
+// Task Manager slots
+// ============================================================
+
+qint64 Jarvis::addTask(const QString& title, const QString& category,
+                        const QString& priority, const QDateTime& deadline)
+{
+    DbTask t;
+    t.userId   = m_currentUserId;
+    t.title    = title;
+    t.category = category;
+    t.status   = QStringLiteral("Todo");
+    t.priority = priority;
+    t.deadline = deadline;
+    return DatabaseManager::instance().addTask(t);
+}
+
+bool Jarvis::updateTaskStatus(qint64 taskId, const QString& newStatus)
+{
+    auto task = DatabaseManager::instance().getTask(taskId);
+    if (!task) return false;
+    task->status = newStatus;
+    return DatabaseManager::instance().updateTask(*task);
+}
+
+QString Jarvis::getOverdueTasksSummary() const
+{
+    return TaskNotifications::checkDeadlines(m_currentUserId, m_uiEnglish);
 }

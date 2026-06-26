@@ -116,6 +116,9 @@ public:
     // System capabilities manifest (active modules)
     void setCapabilitiesContext(const QString& ctx) { m_capabilitiesContext = ctx; }
 
+    // Task board context (deadlines, active tasks)
+    void setTaskContext(const QString& ctx) { m_taskBoardContext = ctx; }
+
     // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
     void setLearningStats(int totalInteractions, int likedResponses,
                           int cachedResponses, int sessionsRecorded);
@@ -155,6 +158,7 @@ private:
     QString m_memoryStreamContext;
     QString m_adaptiveFocusContext;
     QString m_capabilitiesContext;
+    QString m_taskBoardContext;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;

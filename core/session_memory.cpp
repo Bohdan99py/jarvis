@@ -799,6 +799,11 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += m_capabilitiesContext;
     }
 
+    // --- Task board (deadlines, active tasks) ---
+    if (!m_taskBoardContext.isEmpty()) {
+        prompt += m_taskBoardContext;
+    }
+
     bool hasTaskBlock = false;
     QString taskBlock;
     if (!m_taskContext.currentTask.isEmpty()) {

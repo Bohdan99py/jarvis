@@ -91,6 +91,19 @@ struct DbMemoryEvent {
     QDateTime createdAt;
 };
 
+// Task Manager — Kanban tasks with deadlines
+struct DbTask {
+    qint64    id         = 0;
+    qint64    userId     = 1;
+    QString   title;
+    QString   category;              // "UE5" | "KiCad" | "Blender" | "General"
+    QString   status;                // "Todo" | "InProgress" | "Done"
+    QString   priority;              // "Low" | "Medium" | "High"
+    QDateTime deadline;              // nullable
+    QDateTime updatedAt;
+    QDateTime createdAt;
+};
+
 // Запись для fine-tuning датасета (лайкнутые диалоги)
 struct DbTrainingLog {
     qint64    id           = 0;
@@ -205,6 +218,14 @@ public:
     int    voiceJournalCount(qint64 userId, bool processedOnly = false);
     int    cleanupOldJournalEntries(qint64 userId, int olderThanDays = 7);
 
+    // ── tasks (Kanban task manager) ──────────────────────────
+    qint64           addTask(const DbTask& t);
+    bool             updateTask(const DbTask& t);
+    bool             deleteTask(qint64 id);
+    QList<DbTask>    getTasks(qint64 userId, const QString& status = QString());
+    std::optional<DbTask> getTask(qint64 id);
+    QList<DbTask>    getOverdueTasks(qint64 userId, int withinHours = 24);
+
     // ── response_cache (кэш AI-ответов для offline) ────────
     // JARVIS один раз спрашивает Claude → кэширует → дальше offline.
     // Накапливается библиотека анекдотов, советов, фактов без доп. затрат.
@@ -239,5 +260,5 @@ private:
     QString        m_lastError;
     mutable QMutex m_mutex;
 
-    static constexpr int k_schemaVersion = 7;
+    static constexpr int k_schemaVersion = 8;
 };

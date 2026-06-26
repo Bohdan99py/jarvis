@@ -99,6 +99,14 @@ public:
     // Синхронизировать данные индексатора с SessionMemory (system prompt)
     void syncProjectInfoToMemory();
 
+    // Task Manager — exposed for voice/text commands
+    qint64 addTask(const QString& title,
+                   const QString& category = QStringLiteral("General"),
+                   const QString& priority = QStringLiteral("Medium"),
+                   const QDateTime& deadline = QDateTime());
+    bool   updateTaskStatus(qint64 taskId, const QString& newStatus);
+    QString getOverdueTasksSummary() const;
+
     // === IDE-агент (вайбкодинг) ===
     // Определяет, похож ли ввод на кодинг-запрос/запрос новой фичи.
     // Используется и для RAG-режима в buildProjectContext, и для

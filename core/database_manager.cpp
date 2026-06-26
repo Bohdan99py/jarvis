@@ -279,6 +279,24 @@ bool DatabaseManager::createTables()
     execQuery("CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_trigger  ON response_cache(trigger, language)");
     execQuery("CREATE INDEX       IF NOT EXISTS idx_cache_category ON response_cache(category, language)");
 
+    // tasks — Kanban task manager with deadlines
+    if (!execQuery(R"(CREATE TABLE IF NOT EXISTS tasks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 1
+                    REFERENCES users(id) ON DELETE CASCADE,
+        title       TEXT    NOT NULL,
+        category    TEXT    NOT NULL DEFAULT 'General',
+        status      TEXT    NOT NULL DEFAULT 'Todo'
+                    CHECK(status IN ('Todo','InProgress','Done')),
+        priority    TEXT    NOT NULL DEFAULT 'Medium'
+                    CHECK(priority IN ('Low','Medium','High')),
+        deadline    TEXT,
+        updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    ))")) return false;
+    execQuery("CREATE INDEX IF NOT EXISTS idx_task_user   ON tasks(user_id, status)");
+    execQuery("CREATE INDEX IF NOT EXISTS idx_task_dead   ON tasks(user_id, deadline)");
+
     return true;
 }
 
@@ -380,6 +398,23 @@ bool DatabaseManager::runMigrations()
         execQuery("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_stream(user_id, event_type)");
         execQuery("UPDATE schema_version SET version=7");
         ver = 7;
+    }
+    if (ver < 8) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS tasks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL DEFAULT 1,
+            title       TEXT    NOT NULL,
+            category    TEXT    NOT NULL DEFAULT 'General',
+            status      TEXT    NOT NULL DEFAULT 'Todo',
+            priority    TEXT    NOT NULL DEFAULT 'Medium',
+            deadline    TEXT,
+            updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+            created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_task_user ON tasks(user_id, status)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_task_dead ON tasks(user_id, deadline)");
+        execQuery("UPDATE schema_version SET version=8");
+        ver = 8;
     }
     return true;
 }
@@ -1402,4 +1437,117 @@ int DatabaseManager::responseCacheCount()
     QSqlQuery q(db);
     q.exec("SELECT COUNT(*) FROM response_cache");
     return q.next() ? q.value(0).toInt() : 0;
+}
+
+// ============================================================
+//  tasks — Kanban task manager
+// ============================================================
+
+qint64 DatabaseManager::addTask(const DbTask& t)
+{
+    QMutexLocker lock(&m_mutex);
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("INSERT INTO tasks (user_id,title,category,status,priority,deadline,updated_at)"
+              " VALUES(:uid,:title,:cat,:st,:pri,:dl,datetime('now'))");
+    q.bindValue(":uid",   t.userId);
+    q.bindValue(":title", t.title);
+    q.bindValue(":cat",   t.category);
+    q.bindValue(":st",    t.status);
+    q.bindValue(":pri",   t.priority);
+    q.bindValue(":dl",    t.deadline.isValid() ? t.deadline.toString(Qt::ISODate) : QVariant());
+    if (!q.exec()) { logError("addTask", q.lastError()); return -1; }
+    return q.lastInsertId().toLongLong();
+}
+
+bool DatabaseManager::updateTask(const DbTask& t)
+{
+    QMutexLocker lock(&m_mutex);
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("UPDATE tasks SET title=:title,category=:cat,status=:st,"
+              "priority=:pri,deadline=:dl,updated_at=datetime('now') WHERE id=:id");
+    q.bindValue(":title", t.title);
+    q.bindValue(":cat",   t.category);
+    q.bindValue(":st",    t.status);
+    q.bindValue(":pri",   t.priority);
+    q.bindValue(":dl",    t.deadline.isValid() ? t.deadline.toString(Qt::ISODate) : QVariant());
+    q.bindValue(":id",    t.id);
+    if (!q.exec()) { logError("updateTask", q.lastError()); return false; }
+    return true;
+}
+
+bool DatabaseManager::deleteTask(qint64 id)
+{
+    QMutexLocker lock(&m_mutex);
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("DELETE FROM tasks WHERE id=:id");
+    q.bindValue(":id", id);
+    if (!q.exec()) { logError("deleteTask", q.lastError()); return false; }
+    return true;
+}
+
+static DbTask taskFromQuery(QSqlQuery& q)
+{
+    DbTask t;
+    t.id        = q.value("id").toLongLong();
+    t.userId    = q.value("user_id").toLongLong();
+    t.title     = q.value("title").toString();
+    t.category  = q.value("category").toString();
+    t.status    = q.value("status").toString();
+    t.priority  = q.value("priority").toString();
+    t.deadline  = q.value("deadline").isNull()
+                      ? QDateTime()
+                      : QDateTime::fromString(q.value("deadline").toString(), Qt::ISODate);
+    t.updatedAt = QDateTime::fromString(q.value("updated_at").toString(), Qt::ISODate);
+    t.createdAt = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
+    return t;
+}
+
+QList<DbTask> DatabaseManager::getTasks(qint64 userId, const QString& status)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    if (status.isEmpty()) {
+        q.prepare("SELECT * FROM tasks WHERE user_id=:uid ORDER BY"
+                  " CASE priority WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END,"
+                  " created_at DESC");
+    } else {
+        q.prepare("SELECT * FROM tasks WHERE user_id=:uid AND status=:st ORDER BY"
+                  " CASE priority WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END,"
+                  " created_at DESC");
+        q.bindValue(":st", status);
+    }
+    q.bindValue(":uid", userId);
+    QList<DbTask> result;
+    if (q.exec()) { while (q.next()) result.append(taskFromQuery(q)); }
+    else logError("getTasks", q.lastError());
+    return result;
+}
+
+std::optional<DbTask> DatabaseManager::getTask(qint64 id)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM tasks WHERE id=:id");
+    q.bindValue(":id", id);
+    if (q.exec() && q.next()) return taskFromQuery(q);
+    return std::nullopt;
+}
+
+QList<DbTask> DatabaseManager::getOverdueTasks(qint64 userId, int withinHours)
+{
+    auto db = connection();
+    QSqlQuery q(db);
+    q.prepare("SELECT * FROM tasks WHERE user_id=:uid AND status!='Done'"
+              " AND deadline IS NOT NULL"
+              " AND deadline <= datetime('now', '+' || :hrs || ' hours')"
+              " ORDER BY deadline ASC");
+    q.bindValue(":uid", userId);
+    q.bindValue(":hrs", withinHours);
+    QList<DbTask> result;
+    if (q.exec()) { while (q.next()) result.append(taskFromQuery(q)); }
+    else logError("getOverdueTasks", q.lastError());
+    return result;
 }

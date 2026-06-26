@@ -60,6 +60,11 @@ inline QVector<Capability> activeCapabilities()
           QStringLiteral("PC Voice Control"),
           QStringLiteral("Mouse/keyboard emulation, app launching, window management, "
                          "system commands, macro recording — all by voice") },
+        { QStringLiteral("task_manager"),
+          QStringLiteral("Task Manager"),
+          QStringLiteral("Cyberpunk Kanban board with categories (UE5, KiCad, Blender, General), "
+                         "priority levels, deadlines, and automatic overdue notifications. "
+                         "Tasks manageable via voice/text commands") },
     };
 }
 

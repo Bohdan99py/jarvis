@@ -26,6 +26,7 @@
 #include "database_manager.h"
 #include <QSqlQuery>
 #include "local_trainer.h"
+#include "task_manager_dialog.h"
 #include "VoskSetupDialog.h"
 #include "activity_tracker.h"
 #include "user_profile.h"
@@ -378,6 +379,15 @@ MainWindow::MainWindow(QWidget* parent)
     m_pulseTimer->start(400);
 
     m_jarvis->autoUpdater()->checkForUpdates(true);
+
+    // Startup deadline check — notify about overdue/approaching tasks
+    QTimer::singleShot(3000, this, [this]() {
+        QString warnings = m_jarvis->getOverdueTasksSummary();
+        if (!warnings.isEmpty()) {
+            appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
+                warnings, Theme::LogColors::error);
+        }
+    });
 }
 
 // ============================================================
@@ -1846,6 +1856,62 @@ void MainWindow::buildMenuBar()
             }
         }
     });
+
+    // --- Task Manager ---
+    {
+        auto* taskMenu = menuBar->addMenu(
+            IS_EN ? QStringLiteral("📋 Tasks") : QStringLiteral("📋 Задачи"));
+
+        auto* actOpenBoard = taskMenu->addAction(
+            IS_EN ? QStringLiteral("Open Task Board...")
+                  : QStringLiteral("Открыть доску задач..."));
+        connect(actOpenBoard, &QAction::triggered, this, [this]() {
+            TaskManagerDialog dlg(m_jarvis->currentUserId(), this);
+            connect(&dlg, &TaskManagerDialog::taskChanged, this, [this]() {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("Task board updated.")
+                          : QStringLiteral("Доска задач обновлена."),
+                    Theme::LogColors::system);
+            });
+            dlg.exec();
+        });
+
+        auto* actQuickAdd = taskMenu->addAction(
+            IS_EN ? QStringLiteral("Quick Add Task...")
+                  : QStringLiteral("Быстро добавить задачу..."));
+        connect(actQuickAdd, &QAction::triggered, this, [this]() {
+            bool ok;
+            QString title = QInputDialog::getText(this,
+                IS_EN ? QStringLiteral("New Task") : QStringLiteral("Новая задача"),
+                IS_EN ? QStringLiteral("Task title:") : QStringLiteral("Название задачи:"),
+                QLineEdit::Normal, QString(), &ok);
+            if (!ok || title.trimmed().isEmpty()) return;
+            qint64 id = m_jarvis->addTask(title.trimmed());
+            if (id > 0) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    (IS_EN ? QStringLiteral("Task created: ") : QStringLiteral("Задача создана: ")) + title.trimmed(),
+                    Theme::LogColors::system);
+            }
+        });
+
+        taskMenu->addSeparator();
+
+        auto* actDeadlines = taskMenu->addAction(
+            IS_EN ? QStringLiteral("Check Deadlines")
+                  : QStringLiteral("Проверить дедлайны"));
+        connect(actDeadlines, &QAction::triggered, this, [this]() {
+            QString warnings = m_jarvis->getOverdueTasksSummary();
+            if (warnings.isEmpty()) {
+                appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
+                    IS_EN ? QStringLiteral("All clear, sir. No approaching deadlines.")
+                          : QStringLiteral("Всё чисто, сэр. Дедлайнов в ближайшее время нет."),
+                    Theme::LogColors::jarvis);
+            } else {
+                appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
+                    warnings, Theme::LogColors::error);
+            }
+        });
+    }
 
     // --- Обновление ---
     auto* updateMenu = menuBar->addMenu(Str::menuUpdate());
