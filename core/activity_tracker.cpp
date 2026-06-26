@@ -485,51 +485,122 @@ void ActivityTracker::extractKnowledge(qint64 userId, const QString& userInput,
                                        const QString& aiResponse)
 {
     const QString input = userInput.trimmed().toLower();
-    if (input.length() < 10) return;
 
-    // Detect "I use X", "I work with X", "my project uses X"
-    static const QRegularExpression reUse(
-        QStringLiteral("(?:i use|i work with|i prefer|my (?:project|team|company) uses?)\\s+(.{3,40})"),
-        QRegularExpression::CaseInsensitiveOption);
-    auto m = reUse.match(input);
-    if (m.hasMatch()) {
-        learnFact(userId, QStringLiteral("tool"), m.captured(1).trimmed(), m.captured(1).trimmed(), 0.7f);
+    // --- Extract from user input ---
+    if (input.length() >= 10) {
+        static const QRegularExpression reUse(
+            QStringLiteral("(?:i use|i work with|i prefer|my (?:project|team|company) uses?)\\s+(.{3,40})"),
+            QRegularExpression::CaseInsensitiveOption);
+        auto m = reUse.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("tool"), m.captured(1).trimmed(), m.captured(1).trimmed(), 0.7f);
+
+        static const QRegularExpression reRole(
+            QStringLiteral("(?:i am a|i'm a|я работаю|я по профессии|моя специальность)\\s+(.{3,40})"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reRole.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("role"), QStringLiteral("profession"), m.captured(1).trimmed(), 0.9f);
+
+        static const QRegularExpression reProject(
+            QStringLiteral("(?:my project|мой проект|working on|работаю над)\\s+(.{3,60})"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reProject.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("project"), QStringLiteral("current_project"), m.captured(1).trimmed(), 0.7f);
+
+        static const QRegularExpression reLang(
+            QStringLiteral("(?:write|writing|code|coding|program|develop)(?:ing)?\\s+(?:in\\s+)?(c\\+\\+|python|rust|go|java|javascript|typescript|c#|kotlin|swift)"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reLang.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("skill"), QStringLiteral("language_") + m.captured(1).toLower(), m.captured(1), 0.7f);
+
+        static const QRegularExpression reRemember(
+            QStringLiteral("(?:remember that|keep in mind|note that|запомни что|учти что|имей в виду)\\s+(.{5,200})"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reRemember.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("preference"), m.captured(1).left(50), m.captured(1).trimmed(), 0.8f);
+
+        // Hardware/EDA mentions
+        static const QRegularExpression reHw(
+            QStringLiteral("(?:my board|my pcb|using|with)\\s+(kicad|altium|eagle|stm32|esp32|arduino|raspberry|atmega|nrf52|fpga)"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reHw.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("tool"), QStringLiteral("hw_") + m.captured(1).toLower(), m.captured(1), 0.7f);
+
+        // 3D/game engine mentions
+        static const QRegularExpression re3d(
+            QStringLiteral("(?:using|in|with|my)\\s+(unreal engine|ue5|ue4|unity|godot|blender|freecad|substance|maya|houdini)"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = re3d.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("tool"), QStringLiteral("engine_") + m.captured(1).toLower().replace(' ', '_'), m.captured(1), 0.7f);
+
+        // Version mentions: "UE 5.4", "Python 3.12", "Qt 6.7"
+        static const QRegularExpression reVer(
+            QStringLiteral("(unreal|ue|python|qt|blender|kicad|cmake|clion|rider|node|npm|gcc|clang|msvc|cuda|opengl|vulkan|directx)\\s*(\\d+\\.\\d+(?:\\.\\d+)?)"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reVer.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("environment"), m.captured(1).toLower() + QStringLiteral("_version"), m.captured(1) + QStringLiteral(" ") + m.captured(2), 0.8f);
+
+        // OS/platform mentions
+        static const QRegularExpression reOS(
+            QStringLiteral("(?:running|on|using)\\s+(windows 1[01]|ubuntu|debian|arch|fedora|macos|linux)"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reOS.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("environment"), QStringLiteral("os"), m.captured(1), 0.8f);
+
+        // Personal info: name, location, timezone
+        static const QRegularExpression reName(
+            QStringLiteral("(?:my name is|i'm called|call me|меня зовут|моё имя)\\s+([A-Za-zА-Яа-яёЁ]{2,20})"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reName.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("personal"), QStringLiteral("name"), m.captured(1).trimmed(), 0.95f);
+
+        static const QRegularExpression reLoc(
+            QStringLiteral("(?:i(?:'m| am) (?:from|in|based in)|я из|живу в)\\s+([A-Za-zА-Яа-яёЁ ]{2,30})"),
+            QRegularExpression::CaseInsensitiveOption);
+        m = reLoc.match(input);
+        if (m.hasMatch())
+            learnFact(userId, QStringLiteral("personal"), QStringLiteral("location"), m.captured(1).trimmed(), 0.8f);
     }
 
-    // Detect "I am a X" / "я X по профессии"
-    static const QRegularExpression reRole(
-        QStringLiteral("(?:i am a|i'm a|я работаю|я по профессии|моя специальность)\\s+(.{3,40})"),
-        QRegularExpression::CaseInsensitiveOption);
-    m = reRole.match(input);
-    if (m.hasMatch()) {
-        learnFact(userId, QStringLiteral("role"), QStringLiteral("profession"), m.captured(1).trimmed(), 0.9f);
-    }
+    // --- Extract from AI response (facts about what was discussed/decided) ---
+    const QString resp = aiResponse.trimmed();
+    if (resp.length() < 20 || resp.length() > 3000) return;
+    if (resp.contains(QStringLiteral("[FILE:")) || resp.contains(QStringLiteral("[DIFF:"))) return;
 
-    // Detect project mentions
-    static const QRegularExpression reProject(
-        QStringLiteral("(?:my project|мой проект|working on|работаю над)\\s+(.{3,60})"),
-        QRegularExpression::CaseInsensitiveOption);
-    m = reProject.match(input);
-    if (m.hasMatch()) {
-        learnFact(userId, QStringLiteral("project"), QStringLiteral("current_project"), m.captured(1).trimmed(), 0.7f);
-    }
+    // Topic extraction: if AI discusses a specific technology in depth, learn it
+    struct TopicPattern {
+        QRegularExpression re;
+        QString category;
+        QString keyPrefix;
+    };
+    static const TopicPattern topicPatterns[] = {
+        { QRegularExpression(QStringLiteral("\\b(cmake|qmake|meson|bazel|ninja|make)\\b"), QRegularExpression::CaseInsensitiveOption),
+          QStringLiteral("workflow"), QStringLiteral("build_system") },
+        { QRegularExpression(QStringLiteral("\\b(docker|kubernetes|k8s|podman)\\b"), QRegularExpression::CaseInsensitiveOption),
+          QStringLiteral("workflow"), QStringLiteral("containers") },
+        { QRegularExpression(QStringLiteral("\\b(github|gitlab|bitbucket|azure devops)\\b"), QRegularExpression::CaseInsensitiveOption),
+          QStringLiteral("workflow"), QStringLiteral("vcs_platform") },
+        { QRegularExpression(QStringLiteral("\\b(postgresql|mysql|sqlite|mongodb|redis)\\b"), QRegularExpression::CaseInsensitiveOption),
+          QStringLiteral("tool"), QStringLiteral("database") },
+    };
 
-    // Detect programming language preferences
-    static const QRegularExpression reLang(
-        QStringLiteral("(?:write|writing|code|coding|program|develop)(?:ing)?\\s+(?:in\\s+)?(c\\+\\+|python|rust|go|java|javascript|typescript|c#|kotlin|swift)"),
-        QRegularExpression::CaseInsensitiveOption);
-    m = reLang.match(input);
-    if (m.hasMatch()) {
-        learnFact(userId, QStringLiteral("skill"), QStringLiteral("language_") + m.captured(1).toLower(), m.captured(1), 0.7f);
-    }
-
-    // Detect explicit "remember" / "запомни" patterns beyond the key=value command
-    static const QRegularExpression reRemember(
-        QStringLiteral("(?:remember that|keep in mind|note that|запомни что|учти что|имей в виду)\\s+(.{5,200})"),
-        QRegularExpression::CaseInsensitiveOption);
-    m = reRemember.match(input);
-    if (m.hasMatch()) {
-        learnFact(userId, QStringLiteral("preference"), m.captured(1).left(50), m.captured(1).trimmed(), 0.8f);
+    const QString combined = (input + QStringLiteral(" ") + resp.left(500)).toLower();
+    for (const auto& tp : topicPatterns) {
+        auto m = tp.re.match(combined);
+        if (m.hasMatch()) {
+            const QString val = m.captured(1);
+            learnFact(userId, tp.category, tp.keyPrefix + QStringLiteral("_") + val.toLower(),
+                      val, 0.55f);
+        }
     }
 }
 

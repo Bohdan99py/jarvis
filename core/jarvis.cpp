@@ -16,6 +16,8 @@
 #include "brain.h"
 #include "pc_command_registry.h"
 #include "database_manager.h"
+#include <QSqlQuery>
+#include <QSqlDatabase>
 #include "activity_tracker.h"
 #include "user_profile_manager.h"
 #include "training_processing_worker.h"
@@ -1466,6 +1468,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                     m_memory->addMessage(QStringLiteral("assistant"), resp2);
                     m_memory->updateContext(s, resp2);
                     m_predictor->recordSequence(s);
+                    m_activity->extractKnowledge(m_currentUserId, s, resp2);
                     // Auto-cache conversational response for offline
                     if (resp2.length() <= 2000 && !resp2.contains(QStringLiteral("```"))) {
                         DbBehaviorPattern cached;
@@ -1525,6 +1528,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
                 m_predictor->recordSequence(s);
+                m_activity->extractKnowledge(m_currentUserId, s, response);
                 // Auto-cache conversational response for offline
                 if (response.length() <= 2000 && !response.contains(QStringLiteral("```"))) {
                     DbBehaviorPattern cached;
@@ -1785,16 +1789,29 @@ QString Jarvis::cmdRememberFact(const QString& input)
 {
     QString arg = extractArg(input, {QStringLiteral("запомни "),
                                       QStringLiteral("remember ")});
+    if (arg.trimmed().length() < 3)
+        return m_uiEnglish ? QStringLiteral("What should I remember?")
+                           : QStringLiteral("Что запомнить?");
+
+    // Legacy key=value still works
     int eqPos = arg.indexOf(QChar('='));
-    if (eqPos <= 0) {
-        return QStringLiteral("Format: remember key=value");
+    if (eqPos > 0) {
+        QString key   = arg.left(eqPos).trimmed();
+        QString value = arg.mid(eqPos + 1).trimmed();
+        m_memory->rememberFact(key, value);
+        m_activity->learnFact(m_currentUserId, QStringLiteral("preference"),
+                              key, value, 0.9f);
+        return (m_uiEnglish ? QStringLiteral("Noted: ") : QStringLiteral("Запомнил: "))
+               + key + QStringLiteral(" = ") + value;
     }
 
-    QString key   = arg.left(eqPos).trimmed();
-    QString value = arg.mid(eqPos + 1).trimmed();
-
-    m_memory->rememberFact(key, value);
-    return QStringLiteral("Noted: ") + key + QStringLiteral(" = ") + value;
+    // Natural language: store as both legacy fact and knowledge_base entry
+    QString key = arg.left(50).simplified();
+    m_memory->rememberFact(key, arg);
+    m_activity->learnFact(m_currentUserId, QStringLiteral("preference"),
+                          key, arg.trimmed(), 0.9f);
+    return (m_uiEnglish ? QStringLiteral("Got it. I'll remember: ")
+                        : QStringLiteral("Понял. Запомнил: ")) + arg.trimmed();
 }
 
 QString Jarvis::cmdRecallFact(const QString& input)
@@ -1814,21 +1831,108 @@ QString Jarvis::cmdRecallFact(const QString& input)
 
 QString Jarvis::cmdShowMemory(const QString&)
 {
-    QJsonObject facts = m_memory->allFacts();
-    if (facts.isEmpty()) {
-        return QStringLiteral("Memory bank is empty. Use: remember key=value");
+    const bool en = m_uiEnglish;
+    auto& db = DatabaseManager::instance();
+    QString text;
+
+    // --- Knowledge Base (autonomously learned) ---
+    QSqlQuery q(QSqlDatabase::database());
+    q.prepare(R"(SELECT category, key, value, confidence, reinforcements,
+                        last_seen
+                 FROM knowledge_base
+                 WHERE user_id = :uid AND confidence >= 0.3
+                 ORDER BY confidence DESC, reinforcements DESC
+                 LIMIT 40)");
+    q.bindValue(":uid", m_currentUserId);
+
+    QMap<QString, QStringList> byCategory;
+    int totalKb = 0;
+    if (q.exec()) {
+        while (q.next()) {
+            const QString cat  = q.value(0).toString();
+            const QString key  = q.value(1).toString();
+            const QString val  = q.value(2).toString();
+            const float  conf  = q.value(3).toFloat();
+            const int   reinf  = q.value(4).toInt();
+
+            QString entry = val;
+            if (key != val && !key.isEmpty() && key.length() < 40)
+                entry = key + QStringLiteral(": ") + val;
+            if (conf >= 0.8f)
+                entry += QStringLiteral("  ★");
+            else if (reinf >= 3)
+                entry += QStringLiteral("  ×") + QString::number(reinf);
+
+            byCategory[cat].append(entry);
+            ++totalKb;
+        }
     }
 
-    QString text = QStringLiteral("Stored facts:\n");
-    for (auto it = facts.begin(); it != facts.end(); ++it) {
-        text += QStringLiteral("• ") + it.key() + QStringLiteral(": ")
-              + it.value().toString() + QStringLiteral("\n");
+    if (totalKb > 0) {
+        text += en ? QStringLiteral("🧠 Learned Knowledge (%1 facts):\n")
+                   : QStringLiteral("🧠 Изученные факты (%1 записей):\n");
+        text = text.arg(totalKb);
+
+        static const QMap<QString, QString> catLabelsEn = {
+            {QStringLiteral("tool"),        QStringLiteral("Tools & Tech")},
+            {QStringLiteral("skill"),       QStringLiteral("Skills")},
+            {QStringLiteral("project"),     QStringLiteral("Projects")},
+            {QStringLiteral("role"),        QStringLiteral("Role")},
+            {QStringLiteral("preference"),  QStringLiteral("Preferences")},
+            {QStringLiteral("environment"), QStringLiteral("Environment")},
+            {QStringLiteral("workflow"),    QStringLiteral("Workflow")},
+            {QStringLiteral("personal"),    QStringLiteral("Personal")},
+            {QStringLiteral("habit"),       QStringLiteral("Habits")},
+        };
+        static const QMap<QString, QString> catLabelsRu = {
+            {QStringLiteral("tool"),        QStringLiteral("Инструменты")},
+            {QStringLiteral("skill"),       QStringLiteral("Навыки")},
+            {QStringLiteral("project"),     QStringLiteral("Проекты")},
+            {QStringLiteral("role"),        QStringLiteral("Роль")},
+            {QStringLiteral("preference"),  QStringLiteral("Предпочтения")},
+            {QStringLiteral("environment"), QStringLiteral("Среда")},
+            {QStringLiteral("workflow"),    QStringLiteral("Рабочий процесс")},
+            {QStringLiteral("personal"),    QStringLiteral("Личное")},
+            {QStringLiteral("habit"),       QStringLiteral("Привычки")},
+        };
+        const auto& labels = en ? catLabelsEn : catLabelsRu;
+
+        for (auto it = byCategory.constBegin(); it != byCategory.constEnd(); ++it) {
+            const QString label = labels.value(it.key(), it.key());
+            text += QStringLiteral("\n  [") + label + QStringLiteral("]\n");
+            for (const auto& fact : it.value())
+                text += QStringLiteral("    • ") + fact + QStringLiteral("\n");
+        }
     }
 
-    text += QStringLiteral("\nSessions in memory: ")
-          + QString::number(m_memory->pastSessionSummaries().size());
-    text += QStringLiteral("\nMessages this session: ")
+    // --- Legacy manual facts (memory_kv) ---
+    QJsonObject manualFacts = m_memory->allFacts();
+    if (!manualFacts.isEmpty()) {
+        text += en ? QStringLiteral("\n📌 Pinned Notes:\n")
+                   : QStringLiteral("\n📌 Закреплённые заметки:\n");
+        for (auto it = manualFacts.begin(); it != manualFacts.end(); ++it)
+            text += QStringLiteral("    • ") + it.key() + QStringLiteral(": ")
+                  + it.value().toString() + QStringLiteral("\n");
+    }
+
+    // --- Stats ---
+    text += QStringLiteral("\n");
+    text += (en ? QStringLiteral("📊 Sessions recorded: ")
+                : QStringLiteral("📊 Сессий в памяти: "))
+          + QString::number(m_memory->pastSessionSummaries().size())
+          + QStringLiteral("\n");
+    text += (en ? QStringLiteral("💬 Messages this session: ")
+                : QStringLiteral("💬 Сообщений за сессию: "))
           + QString::number(m_memory->messageCount());
+
+    if (text.trimmed().isEmpty() || totalKb == 0) {
+        text = en ? QStringLiteral("🧠 Memory is building up. Keep chatting — "
+                                   "I learn your tools, preferences, and projects "
+                                   "from our conversations automatically.")
+                  : QStringLiteral("🧠 Память наполняется. Продолжай общаться — "
+                                   "я запоминаю твои инструменты, предпочтения и проекты "
+                                   "из наших разговоров автоматически.");
+    }
 
     return text.trimmed();
 }
