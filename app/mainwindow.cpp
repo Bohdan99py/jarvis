@@ -2404,6 +2404,10 @@ void MainWindow::buildMenuBar()
             auto* gw = mesh->telegramGateway();
             if (!gw) return;
 
+            // Bind Jarvis core + translation engine for free dialogue and voice
+            gw->setJarvisCore(m_jarvis);
+            gw->setTranslationEngine(m_jarvis->translationEngine());
+
             auto* dlg = new QDialog(this);
             dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
                                       : QStringLiteral("Telegram QA Шлюз"));

@@ -19,6 +19,7 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
+#include <QSet>
 #include <QTimer>
 #include <QMutex>
 #include <QJsonObject>
@@ -27,6 +28,8 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class Jarvis;
+class TranslationEngine;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -82,6 +85,7 @@ struct TgChatSession {
     bool          isEnglish = false; // derived from role
     QaWizardStep  wizardStep = QaWizardStep::Idle;
     QaBugReport   pendingBug;
+    bool          awaitingLlm = false; // true while LLM is generating
 };
 
 // ── Gateway class ────────────────────────────────────────────
@@ -103,23 +107,31 @@ public:
     void setBotToken(const QString& token);
     QString botToken() const { return m_botToken; }
 
+    // Jarvis core binding (for free-dialogue routing)
+    void setJarvisCore(Jarvis* jarvis) { m_jarvis = jarvis; }
+    void setTranslationEngine(TranslationEngine* te) { m_translator = te; }
+
     // Localization dictionary
     static QString localized(TgStringId id, bool english);
 
     // Markdown export
     static QString bugReportToMarkdown(const QaBugReport& bug);
 
-    static constexpr int POLL_INTERVAL_MS = 2000;
+    static constexpr int POLL_INTERVAL_MS    = 2000;
+    static constexpr int TYPING_INTERVAL_MS  = 3000;
 
 signals:
     void messageReceived(qint64 chatId, const QString& text);
     void bugReportFiled(const QaBugReport& report);
+    void conversationResponse(qint64 chatId, const QString& response);
+    void voiceProcessed(qint64 chatId, const QString& transcript);
     void gatewayStarted();
     void gatewayStopped();
     void gatewayError(const QString& message);
 
 private slots:
     void onPollUpdates();
+    void onTypingTimer();
 
 private:
     void processUpdate(const QJsonObject& update);
@@ -127,6 +139,18 @@ private:
                        const QString& firstName);
     void handleCallbackQuery(const QString& callbackId,
                              qint64 chatId, const QString& data);
+    void handleVoiceMessage(qint64 chatId, const QJsonObject& voice,
+                            bool isEnglish);
+
+    // Free-dialogue LLM routing
+    void routeToLlm(qint64 chatId, const QString& text, bool english);
+    void sendChatAction(qint64 chatId, const QString& action);
+    void startTypingIndicator(qint64 chatId);
+    void stopTypingIndicator(qint64 chatId);
+
+    // Voice file download + transcription pipeline
+    void downloadTelegramFile(const QString& fileId, qint64 chatId,
+                              bool isEnglish);
 
     // Chat session management
     TgChatSession& getOrCreateSession(qint64 chatId);
@@ -153,11 +177,16 @@ private:
 
     QNetworkAccessManager* m_network    = nullptr;
     QTimer*                m_pollTimer  = nullptr;
+    QTimer*                m_typingTimer = nullptr;
     QString                m_botToken;
     qint64                 m_lastUpdateId = 0;
     bool                   m_running    = false;
 
+    Jarvis*                m_jarvis     = nullptr;
+    TranslationEngine*     m_translator = nullptr;
+
     QMap<qint64, TgChatSession> m_sessions;
+    QSet<qint64>                m_typingChats;  // chats with active typing indicator
 
     mutable QMutex m_mutex;
 };

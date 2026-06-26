@@ -4,6 +4,9 @@
 
 #include "j2j_telegram_gateway.h"
 #include "database_manager.h"
+#include "jarvis.h"
+#include "translation_engine.h"
+#include "jarvis_paths.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -15,6 +18,8 @@
 #include <QSqlQuery>
 #include <QSqlDatabase>
 #include <QSqlError>
+#include <QDir>
+#include <QFile>
 #include <QDebug>
 
 static const QString kTgApiBase = QStringLiteral("https://api.telegram.org/bot");
@@ -160,6 +165,11 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
     m_pollTimer->setInterval(POLL_INTERVAL_MS);
     connect(m_pollTimer, &QTimer::timeout,
             this, &J2JTelegramGateway::onPollUpdates);
+
+    m_typingTimer = new QTimer(this);
+    m_typingTimer->setInterval(TYPING_INTERVAL_MS);
+    connect(m_typingTimer, &QTimer::timeout,
+            this, &J2JTelegramGateway::onTypingTimer);
 
     // Ensure the qa_artifacts table exists
     {
@@ -313,14 +323,26 @@ void J2JTelegramGateway::onPollUpdates()
 
 void J2JTelegramGateway::processUpdate(const QJsonObject& update)
 {
-    // Handle text messages
+    // Handle messages (text, voice, audio)
     if (update.contains(QStringLiteral("message"))) {
         QJsonObject msg = update[QStringLiteral("message")].toObject();
         qint64 chatId = static_cast<qint64>(
             msg[QStringLiteral("chat")].toObject()[QStringLiteral("id")].toDouble());
-        QString text = msg[QStringLiteral("text")].toString().trimmed();
         QString firstName = msg[QStringLiteral("from")].toObject()
                                 [QStringLiteral("first_name")].toString();
+
+        // Voice note or audio file
+        if (msg.contains(QStringLiteral("voice")) || msg.contains(QStringLiteral("audio"))) {
+            QJsonObject voiceObj = msg.contains(QStringLiteral("voice"))
+                ? msg[QStringLiteral("voice")].toObject()
+                : msg[QStringLiteral("audio")].toObject();
+            TgChatSession& session = getOrCreateSession(chatId);
+            handleVoiceMessage(chatId, voiceObj, session.isEnglish);
+            return;
+        }
+
+        // Text message
+        QString text = msg[QStringLiteral("text")].toString().trimmed();
         if (!text.isEmpty())
             handleMessage(chatId, text, firstName);
     }
@@ -380,8 +402,8 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
         return;
     }
 
-    // Unknown text
-    sendMessage(chatId, localized(TgStringId::UnknownCommand, en));
+    // Free-dialogue: route non-command text to the LLM
+    routeToLlm(chatId, text, en);
 }
 
 void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
@@ -654,6 +676,293 @@ QString J2JTelegramGateway::bugReportToMarkdown(const QaBugReport& bug)
           bug.stepsToReproduce,
           bug.expectedResult,
           bug.actualResult);
+}
+
+// ============================================================
+//  Free-Dialogue LLM Routing
+// ============================================================
+
+void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
+                                      bool english)
+{
+    if (!m_jarvis) {
+        sendMessage(chatId, english
+            ? QStringLiteral("⚠ AI core not connected. Use buttons or `/menu`.")
+            : QStringLiteral("⚠ AI-ядро не подключено. Используйте кнопки или `/menu`."));
+        return;
+    }
+
+    TgChatSession& session = getOrCreateSession(chatId);
+    if (session.awaitingLlm) {
+        sendMessage(chatId, english
+            ? QStringLiteral("⏳ Still processing your previous message...")
+            : QStringLiteral("⏳ Ещё обрабатываю предыдущее сообщение..."));
+        return;
+    }
+
+    session.awaitingLlm = true;
+    startTypingIndicator(chatId);
+
+    // Build a language instruction so the LLM responds in the correct language
+    QString langInstruction = english
+        ? QStringLiteral("Respond in English. The user is a QA Tester.")
+        : QStringLiteral("Отвечай на русском языке.");
+
+    // processCommand is synchronous for local/cached responses but triggers
+    // async callbacks for Claude/Gemini. We connect to asyncResponseReady
+    // for the async path, and also check the sync return value.
+    QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
+
+    // If processCommand returned a non-empty immediate response, send it
+    if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
+        stopTypingIndicator(chatId);
+        session.awaitingLlm = false;
+        sendMessage(chatId, syncResponse);
+        emit conversationResponse(chatId, syncResponse);
+        return;
+    }
+
+    // For async LLM responses, connect a one-shot handler
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(m_jarvis, &Jarvis::asyncResponseReady, this,
+                    [this, chatId, conn](const QString& response) {
+        disconnect(*conn);
+        stopTypingIndicator(chatId);
+
+        if (m_sessions.contains(chatId))
+            m_sessions[chatId].awaitingLlm = false;
+
+        sendMessage(chatId, response);
+        emit conversationResponse(chatId, response);
+
+        qDebug() << "[TelegramGW] LLM response delivered to chat" << chatId
+                 << "(" << response.length() << "chars)";
+    });
+
+    // Also handle errors
+    auto errConn = std::make_shared<QMetaObject::Connection>();
+    *errConn = connect(m_jarvis, &Jarvis::asyncResponseError, this,
+                       [this, chatId, errConn, conn](const QString& error) {
+        disconnect(*errConn);
+        disconnect(*conn);
+        stopTypingIndicator(chatId);
+
+        if (m_sessions.contains(chatId))
+            m_sessions[chatId].awaitingLlm = false;
+
+        bool en = m_sessions.contains(chatId) && m_sessions[chatId].isEnglish;
+        sendMessage(chatId, en
+            ? QStringLiteral("⚠ Error: %1").arg(error)
+            : QStringLiteral("⚠ Ошибка: %1").arg(error));
+    });
+}
+
+// ============================================================
+//  Typing Indicator
+// ============================================================
+
+void J2JTelegramGateway::sendChatAction(qint64 chatId, const QString& action)
+{
+    if (m_botToken.isEmpty()) return;
+
+    QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendChatAction"));
+    QJsonObject body;
+    body[QStringLiteral("chat_id")] = chatId;
+    body[QStringLiteral("action")]  = action;
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader,
+                  QStringLiteral("application/json"));
+    req.setTransferTimeout(3000);
+
+    QNetworkReply* reply = m_network->post(
+        req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void J2JTelegramGateway::startTypingIndicator(qint64 chatId)
+{
+    m_typingChats.insert(chatId);
+    sendChatAction(chatId, QStringLiteral("typing"));
+    if (!m_typingTimer->isActive())
+        m_typingTimer->start();
+}
+
+void J2JTelegramGateway::stopTypingIndicator(qint64 chatId)
+{
+    m_typingChats.remove(chatId);
+    if (m_typingChats.isEmpty())
+        m_typingTimer->stop();
+}
+
+void J2JTelegramGateway::onTypingTimer()
+{
+    for (qint64 chatId : m_typingChats)
+        sendChatAction(chatId, QStringLiteral("typing"));
+}
+
+// ============================================================
+//  Voice Message Processing
+// ============================================================
+
+void J2JTelegramGateway::handleVoiceMessage(qint64 chatId,
+                                              const QJsonObject& voice,
+                                              bool isEnglish)
+{
+    const QString fileId = voice[QStringLiteral("file_id")].toString();
+    if (fileId.isEmpty()) return;
+
+    sendMessage(chatId, isEnglish
+        ? QStringLiteral("🎙 Voice message received — transcribing...")
+        : QStringLiteral("🎙 Голосовое сообщение получено — транскрибирую..."));
+
+    startTypingIndicator(chatId);
+    downloadTelegramFile(fileId, chatId, isEnglish);
+}
+
+void J2JTelegramGateway::downloadTelegramFile(const QString& fileId,
+                                                qint64 chatId,
+                                                bool isEnglish)
+{
+    // Step 1: call getFile to get file_path
+    QUrl url(kTgApiBase + m_botToken + QStringLiteral("/getFile"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("file_id"), fileId);
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setTransferTimeout(10000);
+    QNetworkReply* reply = m_network->get(req);
+
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, chatId, isEnglish]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            stopTypingIndicator(chatId);
+            sendMessage(chatId, isEnglish
+                ? QStringLiteral("⚠ Failed to retrieve voice file.")
+                : QStringLiteral("⚠ Не удалось получить голосовой файл."));
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject root = doc.object();
+        if (!root[QStringLiteral("ok")].toBool()) {
+            stopTypingIndicator(chatId);
+            return;
+        }
+
+        QString filePath = root[QStringLiteral("result")].toObject()
+                               [QStringLiteral("file_path")].toString();
+        if (filePath.isEmpty()) {
+            stopTypingIndicator(chatId);
+            return;
+        }
+
+        // Step 2: download the actual file
+        QUrl dlUrl(QStringLiteral("https://api.telegram.org/file/bot")
+                   + m_botToken + QStringLiteral("/") + filePath);
+        QNetworkRequest dlReq(dlUrl);
+        dlReq.setTransferTimeout(30000);
+        QNetworkReply* dlReply = m_network->get(dlReq);
+
+        connect(dlReply, &QNetworkReply::finished, this,
+                [this, dlReply, chatId, isEnglish, filePath]() {
+            dlReply->deleteLater();
+            if (dlReply->error() != QNetworkReply::NoError) {
+                stopTypingIndicator(chatId);
+                sendMessage(chatId, isEnglish
+                    ? QStringLiteral("⚠ Voice file download failed.")
+                    : QStringLiteral("⚠ Скачивание голосового файла не удалось."));
+                return;
+            }
+
+            QByteArray audioData = dlReply->readAll();
+            if (audioData.isEmpty()) {
+                stopTypingIndicator(chatId);
+                return;
+            }
+
+            // Save to temp file
+            QString ext = QStringLiteral(".ogg");
+            if (filePath.endsWith(QStringLiteral(".wav"))) ext = QStringLiteral(".wav");
+            else if (filePath.endsWith(QStringLiteral(".m4a"))) ext = QStringLiteral(".m4a");
+            else if (filePath.endsWith(QStringLiteral(".mp3"))) ext = QStringLiteral(".mp3");
+
+            QString tempDir = JarvisPaths::dataRoot() + QStringLiteral("/voice_telegram");
+            QDir().mkpath(tempDir);
+            QString tempPath = tempDir + QStringLiteral("/tg_voice_%1_%2%3")
+                .arg(chatId)
+                .arg(QDateTime::currentMSecsSinceEpoch())
+                .arg(ext);
+
+            QFile file(tempPath);
+            if (!file.open(QIODevice::WriteOnly)) {
+                stopTypingIndicator(chatId);
+                return;
+            }
+            file.write(audioData);
+            file.close();
+
+            qDebug() << "[TelegramGW] Voice file saved:" << tempPath
+                     << "(" << audioData.size() << "bytes)";
+
+            // Route to translation engine for transcription
+            if (m_translator) {
+                QString targetLang = isEnglish ? QStringLiteral("en") : QStringLiteral("ru");
+
+                // Connect transcription result → LLM → reply
+                auto transConn = std::make_shared<QMetaObject::Connection>();
+                *transConn = connect(m_translator, &TranslationEngine::audioTranscribed, this,
+                    [this, chatId, isEnglish, tempPath, transConn](const QString& transcript, const QString& lang) {
+                    disconnect(*transConn);
+
+                    // Clean up temp file
+                    QFile::remove(tempPath);
+
+                    if (transcript.trimmed().isEmpty()) {
+                        stopTypingIndicator(chatId);
+                        sendMessage(chatId, isEnglish
+                            ? QStringLiteral("🎙 Could not transcribe the voice message.")
+                            : QStringLiteral("🎙 Не удалось распознать голосовое сообщение."));
+                        return;
+                    }
+
+                    emit voiceProcessed(chatId, transcript);
+
+                    // Show transcript to user
+                    sendMessage(chatId, (isEnglish
+                        ? QStringLiteral("🎙 *Transcript* (%1):\n_%2_")
+                        : QStringLiteral("🎙 *Транскрипт* (%1):\n_%2_"))
+                        .arg(lang.toUpper(), transcript.left(500)));
+
+                    // Route the transcript text through the LLM
+                    routeToLlm(chatId, transcript, isEnglish);
+                });
+
+                auto errConn = std::make_shared<QMetaObject::Connection>();
+                *errConn = connect(m_translator, &TranslationEngine::audioProcessingError, this,
+                    [this, chatId, isEnglish, tempPath, errConn](const QString& error) {
+                    disconnect(*errConn);
+                    QFile::remove(tempPath);
+                    stopTypingIndicator(chatId);
+                    sendMessage(chatId, (isEnglish
+                        ? QStringLiteral("⚠ Voice processing error: %1")
+                        : QStringLiteral("⚠ Ошибка обработки голоса: %1")).arg(error));
+                });
+
+                m_translator->processAudioFile(tempPath, targetLang,
+                    QStringLiteral("TelegramVoice"));
+            } else {
+                // No translation engine — try to route raw text
+                stopTypingIndicator(chatId);
+                QFile::remove(tempPath);
+                sendMessage(chatId, isEnglish
+                    ? QStringLiteral("⚠ Voice transcription engine not available.")
+                    : QStringLiteral("⚠ Движок транскрипции недоступен."));
+            }
+        });
+    });
 }
 
 // ============================================================
