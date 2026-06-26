@@ -4,6 +4,7 @@
 
 #include "j2j_telegram_gateway.h"
 #include "mobile_pairing_manager.h"
+#include "telegram_access_manager.h"
 #include "database_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
@@ -176,6 +177,8 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
     m_typingTimer->setInterval(TYPING_INTERVAL_MS);
     connect(m_typingTimer, &QTimer::timeout,
             this, &J2JTelegramGateway::onTypingTimer);
+
+    m_accessMgr = new TelegramAccessManager(this);
 
     // Ensure the qa_artifacts table exists
     {
@@ -378,7 +381,7 @@ void J2JTelegramGateway::processUpdate(const QJsonObject& update)
 // ============================================================
 //  Message Handling — strict priority hierarchy:
 //    1. Pairing PIN  (highest — must not be swallowed by LLM)
-//    2. Slash commands (/start, /menu, /cancel, /help)
+//    2. RBAC-gated slash commands
 //    3. Bug wizard (if a wizard session is active)
 //    4. Free-dialogue LLM routing (lowest)
 // ============================================================
@@ -388,13 +391,34 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
 {
     emit messageReceived(chatId, text);
 
+    // Register user in RBAC system (first user → Admin)
+    m_accessMgr->ensureRegistered(chatId, firstName);
+
     // ── 1. TOP PRIORITY: Pairing PIN ────────────────────────
     if (handlePairing(chatId, text, firstName))
         return;
 
-    // ── 2. Slash commands ───────────────────────────────────
+    // ── 2. Slash commands (RBAC-gated) ──────────────────────
     if (text.startsWith(QLatin1Char('/'))) {
         const QString cmd = text.section(QLatin1Char(' '), 0, 0).toLower();
+
+        // RBAC check — deny before any processing
+        if (!m_accessMgr->hasAccess(chatId, cmd)) {
+            TgChatSession& session = getOrCreateSession(chatId);
+            sendMessage(chatId, session.isEnglish
+                ? QStringLiteral("🔒 Access denied. Your role: *%1*. "
+                                 "Required: *%2*.")
+                    .arg(telegramRoleToString(m_accessMgr->getRole(chatId)),
+                         telegramRoleToString(TelegramAccessManager::minimumRoleFor(cmd)))
+                : QStringLiteral("🔒 Доступ запрещён. Ваша роль: *%1*. "
+                                 "Требуется: *%2*.")
+                    .arg(telegramRoleToString(m_accessMgr->getRole(chatId)),
+                         telegramRoleToString(TelegramAccessManager::minimumRoleFor(cmd))));
+            m_accessMgr->logActivity(chatId, QStringLiteral("denied"), cmd);
+            return;
+        }
+
+        m_accessMgr->logActivity(chatId, QStringLiteral("command"), cmd);
 
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
             TgChatSession& session = getOrCreateSession(chatId);
@@ -417,17 +441,55 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             sendMessage(chatId, localized(TgStringId::HelpText, session.isEnglish));
             return;
         }
+
+        // ── Admin commands ──────────────────────────────────
+        if (cmd == QStringLiteral("/admin_stats")) {
+            sendMessage(chatId, m_accessMgr->buildStatsReport());
+            return;
+        }
+        if (cmd == QStringLiteral("/admin_grant")) {
+            // /admin_grant <chat_id> <Role>
+            const QString args = text.section(QLatin1Char(' '), 1).trimmed();
+            const QString targetIdStr = args.section(QLatin1Char(' '), 0, 0);
+            const QString roleName = args.section(QLatin1Char(' '), 1, 1);
+            bool ok = false;
+            qint64 targetId = targetIdStr.toLongLong(&ok);
+            if (!ok || roleName.isEmpty()) {
+                sendMessage(chatId, QStringLiteral("Usage: `/admin_grant <chat_id> <Admin|Tester|User>`"));
+                return;
+            }
+            TelegramRole newRole = telegramRoleFromString(roleName);
+            m_accessMgr->setRole(targetId, newRole);
+            sendMessage(chatId, QStringLiteral("✅ Chat %1 → role *%2*")
+                .arg(targetId).arg(telegramRoleToString(newRole)));
+            return;
+        }
+        if (cmd == QStringLiteral("/admin_revoke")) {
+            const QString targetIdStr = text.section(QLatin1Char(' '), 1, 1).trimmed();
+            bool ok = false;
+            qint64 targetId = targetIdStr.toLongLong(&ok);
+            if (!ok) {
+                sendMessage(chatId, QStringLiteral("Usage: `/admin_revoke <chat_id>`"));
+                return;
+            }
+            m_accessMgr->setRole(targetId, TelegramRole::User);
+            sendMessage(chatId, QStringLiteral("✅ Chat %1 → role *User*").arg(targetId));
+            return;
+        }
+
         // Unknown slash command — fall through to LLM
     }
 
     // ── 3. Bug wizard (active session) ──────────────────────
     TgChatSession& session = getOrCreateSession(chatId);
     if (session.wizardStep != QaWizardStep::Idle) {
+        m_accessMgr->logActivity(chatId, QStringLiteral("wizard"), text.left(50));
         advanceBugWizard(session, text);
         return;
     }
 
     // ── 4. Free-dialogue LLM routing (lowest priority) ──────
+    m_accessMgr->logActivity(chatId, QStringLiteral("message"), text.left(50));
     routeToLlm(chatId, text, session.isEnglish);
 }
 

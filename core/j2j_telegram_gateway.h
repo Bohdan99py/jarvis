@@ -31,6 +31,7 @@ class QNetworkReply;
 class Jarvis;
 class TranslationEngine;
 class MobilePairingManager;
+class TelegramAccessManager;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -112,6 +113,7 @@ public:
     void setJarvisCore(Jarvis* jarvis) { m_jarvis = jarvis; }
     void setTranslationEngine(TranslationEngine* te) { m_translator = te; }
     void setPairingManager(MobilePairingManager* pm) { m_pairing = pm; }
+    TelegramAccessManager* accessManager() const { return m_accessMgr; }
 
     // Localization dictionary
     static QString localized(TgStringId id, bool english);
@@ -209,6 +211,7 @@ private:
     Jarvis*                m_jarvis     = nullptr;
     TranslationEngine*     m_translator = nullptr;
     MobilePairingManager*  m_pairing    = nullptr;
+    TelegramAccessManager* m_accessMgr  = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator
