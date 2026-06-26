@@ -2262,18 +2262,28 @@ R"w(<b>🎙️ Пассивная запись голоса</b><br>
         dlg->setMinimumSize(900, 620);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setStyleSheet(QStringLiteral(
-            "QDialog { background: #080e14; color: #c8e0f0; }"
-            "QListWidget { background: #0a1018; color: #96c8e6; border: 1px solid #1a3050; "
-            "  border-radius: 4px; font-size: 12px; outline: none; }"
-            "QListWidget::item { padding: 10px 14px; border-bottom: 1px solid #0d1a28; }"
-            "QListWidget::item:selected { background: #0f2438; color: #00d4ff; "
-            "  border-left: 3px solid #00d4ff; }"
-            "QListWidget::item:hover { background: #0d1a28; }"
-            "QTextBrowser { background: #0a1018; color: #c8e0f0; border: 1px solid #1a3050; "
-            "  border-radius: 4px; font-size: 12px; }"
-            "QPushButton { background: #0f2438; color: #00d4ff; border: 1px solid #1a5070; "
-            "  padding: 6px 24px; border-radius: 4px; }"
-            "QPushButton:hover { background: #1a3a5c; }"));
+            "QDialog { background: #0B0C10; color: #C5C6C7; }"
+            "QLabel { background: transparent; }"
+            "QListWidget { background: rgba(11,12,16,240); color: #C5C6C7; "
+            "  border: 1px solid rgba(102,252,241,0.12); border-radius: 8px; "
+            "  font-family: 'Segoe UI', sans-serif; font-size: 13px; outline: none; }"
+            "QListWidget::item { padding: 11px 16px; border-bottom: 1px solid rgba(102,252,241,0.06); }"
+            "QListWidget::item:selected { background: rgba(102,252,241,0.10); color: #66FCF1; "
+            "  border-left: 3px solid #66FCF1; }"
+            "QListWidget::item:hover { background: rgba(102,252,241,0.05); }"
+            "QTextBrowser { background: rgba(11,12,16,220); color: #C5C6C7; "
+            "  border: 1px solid rgba(102,252,241,0.10); border-radius: 8px; "
+            "  font-family: 'Segoe UI', sans-serif; font-size: 13px; padding: 8px; }"
+            "QScrollBar:vertical { background: transparent; width: 5px; }"
+            "QScrollBar::handle:vertical { background: rgba(102,252,241,0.20); border-radius: 2px; min-height: 30px; }"
+            "QScrollBar::handle:vertical:hover { background: rgba(102,252,241,0.45); }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
+            "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
+            "  border: 1px solid rgba(102,252,241,0.18); padding: 7px 28px; border-radius: 6px; "
+            "  font-family: 'Segoe UI Semibold', sans-serif; }"
+            "QPushButton:hover { background: rgba(102,252,241,0.15); "
+            "  border-color: rgba(102,252,241,0.30); }"));
 
         auto* mainLayout = new QVBoxLayout(dlg);
         mainLayout->setContentsMargins(16, 14, 16, 14);
@@ -2281,7 +2291,8 @@ R"w(<b>🎙️ Пассивная запись голоса</b><br>
 
         // Заголовок
         auto* title = new QLabel(
-            QStringLiteral("<b style='font-size:14px;color:#00d4ff;'>📖 J.A.R.V.I.S. User Guide</b>"),
+            QStringLiteral("<b style='font-size:15px; color:#66FCF1; letter-spacing:2px;'>"
+                           "⬡ J.A.R.V.I.S. User Guide</b>"),
             dlg);
         title->setTextFormat(Qt::RichText);
         mainLayout->addWidget(title);
@@ -2314,337 +2325,300 @@ R"w(<b>🎙️ Пассивная запись голоса</b><br>
         // ── Разделы ─────────────────────────────────────────────
         struct Section { QString icon; QString titleRu; QString titleEn; QString htmlRu; QString htmlEn; };
 
+        // Color constants for HTML (Cyberpunk palette)
+        const char* H = "#66FCF1"; // headings
+        const char* S2 = "#45A29E"; // subheadings
+        const char* W = "#C5C6C7"; // body text
+        const char* A = "#ffaa44"; // warnings
+        const char* G = "#44ff44"; // success/tips
+        Q_UNUSED(W)
+
         QVector<Section> sections = {
+        // ══════════════════════════════════════════════════════════
+        //  QUICK START
+        // ══════════════════════════════════════════════════════════
         {
             "🚀", "Быстрый старт", "Quick Start",
-            R"w(<h3 style='color:#00d4ff;'>🚀 Быстрый старт</h3>
-<p>Никакой настройки для базовых команд — просто запусти и пиши.</p>
-<h4 style='color:#44aaff;'>Первые шаги:</h4>
-<ol>
-<li>Запусти JARVIS из меню Пуск или рабочего стола</li>
-<li>Напиши <b>"привет"</b> или любую команду</li>
-<li>Для AI-ответов: <b>Настройки → Ключ Claude API...</b></li>
-</ol>
-<h4 style='color:#44aaff;'>Бесплатные AI-сервисы:</h4>
-<ul>
-<li><b>Gemini</b> — бесплатно, встроен (aistudio.google.com)</li>
-<li><b>Ollama</b> — полностью офлайн (ollama.com)</li>
-<li><b>Claude</b> — лучшее качество (~$1-3/мес)</li>
-</ul>
-<p style='color:#44ff44;'>✅ Приложение работает без интернета для локальных команд!</p>)w",
-            R"w(<h3 style='color:#00d4ff;'>🚀 Quick Start</h3>
+            QString(), // RU filled below
+            QStringLiteral(R"w(<h3 style='color:%1;'>🚀 Quick Start</h3>
 <p>No setup needed for basic commands — just launch and type.</p>
-<h4 style='color:#44aaff;'>First steps:</h4>
+<h4 style='color:%2;'>First steps</h4>
 <ol>
-<li>Launch JARVIS from Start Menu or Desktop</li>
-<li>Type <b>"hello"</b> or any command</li>
-<li>For AI answers: <b>Settings → Claude API key...</b></li>
+<li>Launch JARVIS from the Start Menu or Desktop shortcut</li>
+<li>Type <b>"hello"</b> or any command in the input field</li>
+<li>For AI-powered answers: <b>Settings → Claude API key...</b></li>
 </ol>
-<h4 style='color:#44aaff;'>Free AI services:</h4>
-<ul>
-<li><b>Gemini</b> — free, built-in (aistudio.google.com)</li>
-<li><b>Ollama</b> — fully offline (ollama.com)</li>
-<li><b>Claude</b> — best quality (~$1-3/mo)</li>
-</ul>
-<p style='color:#44ff44;'>✅ Works without internet for local commands!</p>)w"
-        },
-        {
-            "💬", "Команды", "Commands",
-            R"w(<h3 style='color:#00d4ff;'>💬 Команды без интернета</h3>
+<h4 style='color:%2;'>AI Backends (pick any or all)</h4>
 <table border='0' cellpadding='4'>
-<tr><td style='color:#44aaff;'><b>Команда</b></td><td style='color:#44aaff;'><b>Что делает</b></td></tr>
-<tr><td>открой Chrome / Steam</td><td>Запускает приложение</td></tr>
-<tr><td>закрой Steam</td><td>Завершает процесс</td></tr>
-<tr><td>заблокируй</td><td>Блокировка экрана</td></tr>
-<tr><td>выключи / перезагрузи</td><td>Выключение ПК</td></tr>
-<tr><td>который час / какая дата</td><td>Время и дата</td></tr>
-<tr><td>2+2 / 10*5</td><td>Математика мгновенно</td></tr>
-<tr><td>громкость 70 / тише</td><td>Управление звуком</td></tr>
-<tr><td>яркость выше</td><td>Яркость экрана</td></tr>
-<tr><td>открой ютуб</td><td>Открывает YouTube в браузере</td></tr>
-<tr><td>хочу послушать музыку</td><td>Предлагает Spotify/YouTube Music</td></tr>
-<tr><td>что ты умеешь</td><td>Полный список команд</td></tr>
+<tr><td style='color:%3;'><b>Claude</b></td><td>Best quality for code & reasoning (~$1-3/mo) — console.anthropic.com</td></tr>
+<tr><td style='color:%3;'><b>Gemini</b></td><td>Free tier, built-in key — aistudio.google.com</td></tr>
+<tr><td style='color:%3;'><b>Ollama</b></td><td>100% offline local LLM — ollama.com → <code>ollama pull qwen2.5:3b</code></td></tr>
 </table>
-<p style='color:#aaa;font-size:11px;'>Работает на русском и английском без переключения.</p>)w",
-            R"w(<h3 style='color:#00d4ff;'>💬 Offline Commands</h3>
+<p>Enable <b>Agent Mode</b> (Settings menu) to auto-route: casual → Ollama (free), code → Claude.</p>
+<h4 style='color:%2;'>Adaptive Focus System</h4>
+<p>JARVIS automatically detects your workflow from the <b>Core Memory Stream</b> — the last 10 interactions
+scored by <code style='color:%3;'>importance / (1 + hours_elapsed)</code>. Based on keyword patterns it
+shifts its persona between <b>Developer</b> (terse, technical), <b>Creative</b> (brainstorming),
+<b>Admin</b> (step-by-step), or <b>Casual</b> (witty) — no configuration needed.</p>
+<h4 style='color:%2;'>What works offline vs. online</h4>
 <table border='0' cellpadding='4'>
-<tr><td style='color:#44aaff;'><b>Command</b></td><td style='color:#44aaff;'><b>Action</b></td></tr>
-<tr><td>open Chrome / Steam</td><td>Launches the app</td></tr>
-<tr><td>close Steam</td><td>Kills the process</td></tr>
-<tr><td>lock screen</td><td>Locks Windows</td></tr>
-<tr><td>shutdown / restart</td><td>Powers off PC</td></tr>
-<tr><td>what time / what date</td><td>Time and date</td></tr>
-<tr><td>2+2 / 10*5</td><td>Instant math</td></tr>
-<tr><td>volume 70 / louder</td><td>Volume control</td></tr>
-<tr><td>brightness up</td><td>Screen brightness</td></tr>
-<tr><td>open youtube</td><td>Opens YouTube in browser</td></tr>
-<tr><td>play some music</td><td>Suggests Spotify/YouTube Music</td></tr>
-<tr><td>what can you do</td><td>Full command list</td></tr>
+<tr><td style='color:%3;'><b>Always offline</b></td><td>Voice input (Vosk), system commands, response cache, behavior patterns, activity tracking, virtual keyboard, PC control</td></tr>
+<tr><td style='color:%3;'><b>Needs internet</b></td><td>Claude API, Gemini API, auto-updater, Screenshot Vision</td></tr>
+<tr><td style='color:%3;'><b>Optional local</b></td><td>Ollama (runs on your GPU/CPU, no internet)</td></tr>
 </table>
-<p style='color:#aaa;font-size:11px;'>Works in Russian and English without switching.</p>)w"
+<p style='color:%4;background:rgba(68,255,68,0.06);padding:8px;border-radius:6px;'>
+✅ JARVIS works without internet for all local commands, cached responses, and learned behavior patterns.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2), QLatin1String(S2), QLatin1String(G))
         },
+        // ══════════════════════════════════════════════════════════
+        //  COMMANDS
+        // ══════════════════════════════════════════════════════════
         {
-            "🎤", "Голосовой ввод", "Voice Input",
-            R"w(<h3 style='color:#00d4ff;'>🎤 Голосовой ввод (Vosk)</h3>
-<p>Работает полностью офлайн — никакого облака и API ключей.</p>
-<h4 style='color:#44aaff;'>Доступные языки:</h4>
-<table border='0' cellpadding='3'>
-<tr><td style='color:#44ff44;'><b>EN Fast</b></td><td>~40 MB · Команды, wake word ✅ рекомендуется</td></tr>
-<tr><td><b>EN Full</b></td><td>~1.8 GB · Диктовка высокого качества</td></tr>
-<tr><td><b>RU</b></td><td>~1.8 GB · Русский язык</td></tr>
-<tr><td><b>DE / FR</b></td><td>~1.0 GB · Немецкий / Французский</td></tr>
-<tr><td><b>ZH</b></td><td>~500 MB · Китайский</td></tr>
+            "⌨", "Команды", "Commands",
+            QString(),
+            QStringLiteral(R"w(<h3 style='color:%1;'>⌨ Complete Command Reference</h3>
+<h4 style='color:%2;'>System Automation</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>open &lt;app&gt;</b></td><td>Launch any installed application (Chrome, Steam, Notepad, etc.)</td></tr>
+<tr><td style='color:%1;'><b>close &lt;app&gt;</b></td><td>Terminate a running process</td></tr>
+<tr><td style='color:%1;'><b>lock screen</b></td><td>Lock the Windows session</td></tr>
+<tr><td style='color:%1;'><b>shutdown / restart</b></td><td>Power off or reboot the PC</td></tr>
+<tr><td style='color:%1;'><b>volume &lt;0-100&gt; / louder / quieter</b></td><td>System volume control</td></tr>
+<tr><td style='color:%1;'><b>brightness up / down</b></td><td>Screen brightness adjustment</td></tr>
+<tr><td style='color:%1;'><b>what time / what date</b></td><td>Current time and date</td></tr>
+<tr><td style='color:%1;'><b>2+2 / 10*5 / sqrt(144)</b></td><td>Instant math evaluation</td></tr>
 </table>
-<h4 style='color:#44aaff;'>Первый запуск:</h4>
+<h4 style='color:%2;'>Memory & Knowledge</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>remember</b> key=value</td><td>Permanently store a fact in the knowledge base</td></tr>
+<tr><td style='color:%1;'><b>recall</b> key</td><td>Retrieve a stored fact</td></tr>
+<tr><td style='color:%1;'><b>memory</b></td><td>List all stored facts</td></tr>
+<tr><td style='color:%1;'><b>profile</b></td><td>Show learned work patterns, scenarios, and time-of-day preferences</td></tr>
+<tr><td style='color:%1;'><b>stats</b></td><td>Display command usage frequency across sessions</td></tr>
+</table>
+<h4 style='color:%2;'>Project & Code Intelligence</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>index</b> &lt;path&gt;</td><td>Index a project folder — enables RAG code context in AI queries</td></tr>
+<tr><td style='color:%1;'><b>symbol</b> &lt;name&gt;</td><td>Search for classes, functions, structs, or variables in the index</td></tr>
+<tr><td style='color:%1;'><b>grep</b> &lt;text&gt;</td><td>Full-text search across all indexed project files</td></tr>
+</table>
+<h4 style='color:%2;'>Input & Keyboard Emulation</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>type</b> &lt;text&gt;</td><td>Type text into the currently active window</td></tr>
+<tr><td style='color:%1;'><b>press</b> &lt;key&gt;</td><td>Press a single key (Enter, F5, Escape, etc.)</td></tr>
+<tr><td style='color:%1;'><b>combo</b> &lt;keys&gt;</td><td>Press a key combination (Ctrl+S, Alt+Tab, Ctrl+Shift+P)</td></tr>
+</table>
+<h4 style='color:%2;'>Screen Vision & AI</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>"what do you see"</b></td><td>Capture screen and analyze via Claude Vision</td></tr>
+<tr><td style='color:%1;'><b>"describe screen"</b></td><td>Full visual description of screen content</td></tr>
+<tr><td style='color:%1;'><b>"click on X"</b></td><td>OCR locates the element, then clicks it</td></tr>
+</table>
+<h4 style='color:%2;'>Conversation & History</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>Any question</b></td><td>Routes to Claude (code/complex) or Ollama/Gemini (casual chat)</td></tr>
+<tr><td style='color:%1;'><b>"recall what happened..."</b></td><td>Search session journal by date or topic keyword</td></tr>
+<tr><td style='color:%1;'><b>apikey</b> &lt;key&gt;</td><td>Set or update your Claude API key</td></tr>
+<tr><td style='color:%1;'><b>help</b></td><td>Show the quick reference guide in chat</td></tr>
+</table>
+<p style='font-size:11px;color:rgba(197,198,199,0.5);'>All commands work in both English and Russian without switching.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2))
+        },
+        // ══════════════════════════════════════════════════════════
+        //  VOICE INPUT
+        // ══════════════════════════════════════════════════════════
+        {
+            "🎙", "Голосовой ввод", "Voice Input",
+            QString(),
+            QStringLiteral(R"w(<h3 style='color:%1;'>🎙 Voice Input System</h3>
+<p>Powered by <b>Vosk</b> — fully offline speech recognition. No cloud, no API keys, no internet required.</p>
+<h4 style='color:%2;'>How it works</h4>
 <ol>
-<li>При старте откроется диалог <b>«Настройка голосового ввода»</b></li>
-<li>Выбери нужные языки и нажми «Установить»</li>
-<li>После загрузки скажи <b>«Джарвис»</b> — wake word активирует</li>
-<li>Или нажми кнопку <b>🎤</b> в строке ввода</li>
+<li><b>VoiceRecorder</b> captures raw microphone audio with real-time Voice Activity Detection (VAD) at -45 dB threshold</li>
+<li>Audio is downsampled to 16 kHz mono and streamed to the <b>VoskWorker</b> in a separate thread</li>
+<li>If multiple language models are loaded, both run in parallel and the highest-confidence result wins</li>
+<li>Silence detection (800ms timeout) auto-stops recording; max 10 seconds per utterance</li>
 </ol>
-<h4 style='color:#44aaff;'>Добавить язык позже:</h4>
-<p><b>Настройки → 🎤 Голосовые модели...</b> — скачать или удалить любую модель</p>
-<h4 style='color:#44aaff;'>Особенности:</h4>
-<ul>
-<li>🤫 Распознаёт шёпот (порог -45 dB)</li>
-<li>🌍 Автоопределение языка (если загружено несколько)</li>
-<li>💻 Работает на CPU без GPU</li>
-<li>🔒 Аудио не покидает компьютер, тишина не записывается</li>
-</ul>
-<h4 style='color:#44aaff;'>Если голос не работает:</h4>
-<ul>
-<li>Убедись что микрофон разрешён в <b>Windows → Настройки → Конфиденциальность</b></li>
-<li>Переоткрой диалог моделей: <b>Настройки → Голосовые модели</b></li>
-</ul>)w",
-            R"w(<h3 style='color:#00d4ff;'>🎤 Voice Input (Vosk)</h3>
-<p>Fully offline — no cloud, no API keys needed.</p>
-<h4 style='color:#44aaff;'>Available languages:</h4>
-<table border='0' cellpadding='3'>
-<tr><td style='color:#44ff44;'><b>EN Fast</b></td><td>~40 MB · Commands &amp; wake word ✅ recommended</td></tr>
-<tr><td><b>EN Full</b></td><td>~1.8 GB · High-quality dictation</td></tr>
-<tr><td><b>RU</b></td><td>~1.8 GB · Russian language</td></tr>
-<tr><td><b>DE / FR</b></td><td>~1.0 GB · German / French</td></tr>
-<tr><td><b>ZH</b></td><td>~500 MB · Chinese (small model)</td></tr>
-</table>
-<h4 style='color:#44aaff;'>First launch:</h4>
-<ol>
-<li>A <b>"Voice Setup"</b> dialog opens on first run</li>
-<li>Select your languages and click "Install"</li>
-<li>After download, say <b>"Jarvis"</b> — wake word activates</li>
-<li>Or click the <b>🎤</b> button in the input bar</li>
-</ol>
-<h4 style='color:#44aaff;'>Add more languages later:</h4>
-<p><b>Settings → 🎤 Voice Models...</b> — download or remove any model</p>
-<h4 style='color:#44aaff;'>Features:</h4>
-<ul>
-<li>🤫 Detects whisper level speech (-45 dB)</li>
-<li>🌍 Auto-detects language (if multiple loaded)</li>
-<li>💻 Runs on CPU, no GPU needed</li>
-<li>🔒 Audio never leaves the PC, silence is not recorded</li>
-</ul>
-<h4 style='color:#44aaff;'>If voice doesn't work:</h4>
-<ul>
-<li>Check microphone permission: <b>Windows Settings → Privacy → Microphone</b></li>
-<li>Reopen model manager: <b>Settings → Voice Models</b></li>
-</ul>)w"
-        },
-        {
-            "🧠", "Обучение ИИ", "AI Training",
-            R"w(<h3 style='color:#00d4ff;'>🧠 Как JARVIS обучается на тебе</h3>
-<p>JARVIS накапливает твои диалоги и учится отвечать в твоём стиле.</p>
-
-<h4 style='color:#44aaff;'>📊 Шаг 1 — Сбор данных (автоматически)</h4>
-<p>Каждый ответ AI автоматически сохраняется в базу данных.<br>
-Нажми <b>👍</b> под ответом чтобы отметить его как "отличный".</p>
-
-<h4 style='color:#44aaff;'>📤 Шаг 2 — Экспорт датасета</h4>
-<p>Меню <b>🧠 Обучение → Экспорт .jsonl...</b><br>
-Файл весит несколько МБ и содержит пары вопрос/ответ.<br>
-Рекомендуем экспортировать при <b>500+ записях</b>.</p>
-
-<h4 style='color:#44aaff;'>🎙️ Шаг 3 — Пассивная запись (опционально)</h4>
-<p>Меню <b>🧠 Обучение → Пассивная запись: ВЫКЛ</b><br>
-JARVIS слушает микрофон в фоне и записывает твою речь.<br>
-Brain автоматически создаёт пары диалогов.<br>
-Данные удаляются через 7 дней.</p>
-
-<h4 style='color:#44aaff;'>📁 Шаг 4 — Папка датасета</h4>
-<p>Меню <b>🧠 Обучение → Папка для датасета...</b><br>
-Укажи папку на большом диске (например 4TB).<br>
-Там будут храниться .jsonl файлы для обучения.</p>
-
-<h4 style='color:#44aaff;'>🧹 Автоочистка</h4>
-<p>BackgroundLearner автоматически удаляет мусор:<br>
-короткие ответы, дубли, ошибки распознавания голоса.</p>
-
-<p style='color:#44ff44;background:#0d2a0d;padding:8px;border-radius:4px;'>
-💡 Чем больше лайков — тем качественнее будущая модель.<br>
-Цель: собрать 500-1000 👍 ответов, потом дообучить через Unsloth/LLaMA-Factory.</p>)w",
-            R"w(<h3 style='color:#00d4ff;'>🧠 How JARVIS Learns From You</h3>
-<p>JARVIS accumulates your dialogs and learns to respond in your style.</p>
-
-<h4 style='color:#44aaff;'>📊 Step 1 — Data Collection (automatic)</h4>
-<p>Every AI response is auto-saved to the database.<br>
-Press <b>👍</b> below a response to mark it as "great".</p>
-
-<h4 style='color:#44aaff;'>📤 Step 2 — Export Dataset</h4>
-<p>Menu <b>🧠 Training → Export .jsonl...</b><br>
-File is a few MB and contains question/answer pairs.<br>
-Recommended: export when you have <b>500+ entries</b>.</p>
-
-<h4 style='color:#44aaff;'>🎙️ Step 3 — Passive Recording (optional)</h4>
-<p>Menu <b>🧠 Training → Passive Recording: OFF</b><br>
-JARVIS listens in background and records your speech.<br>
-Brain automatically creates dialog pairs.<br>
-Data is deleted after 7 days.</p>
-
-<h4 style='color:#44aaff;'>📁 Step 4 — Dataset Folder</h4>
-<p>Menu <b>🧠 Training → Set dataset folder...</b><br>
-Point to a large drive (e.g. 4TB external).<br>
-.jsonl files will be stored there for training.</p>
-
-<h4 style='color:#44aaff;'>🧹 Auto-cleanup</h4>
-<p>BackgroundLearner automatically removes noise:<br>
-short replies, duplicates, voice recognition errors.</p>
-
-<p style='color:#44ff44;background:#0d2a0d;padding:8px;border-radius:4px;'>
-💡 More likes = better future model.<br>
-Goal: collect 500-1000 👍 responses, then fine-tune via Unsloth/LLaMA-Factory.</p>)w"
-        },
-        {
-            "👁", "Зрение и экран", "Screen Vision",
-            R"w(<h3 style='color:#00d4ff;'>👁 Зрение и управление экраном</h3>
-<p>JARVIS видит твой экран и может кликать по элементам.</p>
-<h4 style='color:#44aaff;'>Команды зрения:</h4>
+<h4 style='color:%2;'>Wake word activation</h4>
+<p>Say <b>"Jarvis"</b> or <b>"Джарвис"</b> — the wake word triggers hands-free listening mode.
+No button press needed. JARVIS processes your next sentence and returns to idle.</p>
+<h4 style='color:%2;'>Whisper mode</h4>
+<p>When ambient noise is high and you speak softly, JARVIS auto-adjusts its recognition thresholds.
+The VAD adapts dynamically — you don't need to configure anything.</p>
+<h4 style='color:%2;'>Language auto-detection</h4>
+<p>If English and Russian models are both loaded, JARVIS runs recognition on both and picks
+the result with higher confidence. The detected language is shown in the chat log as
+<code>[🎤 EN]</code> or <code>[🎤 RU]</code>.</p>
+<h4 style='color:%2;'>Available models</h4>
 <table border='0' cellpadding='4'>
-<tr><td><b>что видишь</b></td><td>Скриншот → Claude анализирует</td></tr>
-<tr><td><b>опиши экран</b></td><td>Полное описание содержимого</td></tr>
-<tr><td><b>кликни на "OK"</b></td><td>OCR находит текст → клик</td></tr>
-<tr><td><b>нажми кнопку X</b></td><td>Поиск по тексту + клик мышью</td></tr>
+<tr><td style='color:%3;'><b>EN Small</b></td><td>~40 MB — fast, good for commands & wake word ✅</td></tr>
+<tr><td style='color:%2;'><b>EN Full</b></td><td>~1.8 GB — high-quality dictation</td></tr>
+<tr><td style='color:%2;'><b>RU</b></td><td>~1.8 GB — Russian language support</td></tr>
+<tr><td style='color:%2;'><b>DE / FR / ZH</b></td><td>~0.5-1.0 GB — German, French, Chinese</td></tr>
 </table>
-<p style='color:#ffaa44;'>⚠️ Требует ключ Claude API (используется Vision модель)</p>
-<h4 style='color:#44aaff;'>Как прикрепить файл:</h4>
-<ul>
-<li>Кнопка <b>📎</b> — выбрать файл</li>
-<li>Перетащить файл в окно</li>
-<li>Поддерживаются: .txt .cpp .h .py .pdf .docx изображения</li>
-</ul>)w",
-            R"w(<h3 style='color:#00d4ff;'>👁 Screen Vision & Control</h3>
-<p>JARVIS sees your screen and can click elements.</p>
-<h4 style='color:#44aaff;'>Vision commands:</h4>
-<table border='0' cellpadding='4'>
-<tr><td><b>what do you see</b></td><td>Screenshot → Claude analyzes</td></tr>
-<tr><td><b>describe screen</b></td><td>Full content description</td></tr>
-<tr><td><b>click on "OK"</b></td><td>OCR finds text → clicks</td></tr>
-<tr><td><b>press button X</b></td><td>Text search + mouse click</td></tr>
-</table>
-<p style='color:#ffaa44;'>⚠️ Requires Claude API key (Vision model used)</p>
-<h4 style='color:#44aaff;'>How to attach a file:</h4>
-<ul>
-<li>Click <b>📎</b> button — choose file</li>
-<li>Drag & drop file into window</li>
-<li>Supported: .txt .cpp .h .py .pdf .docx images</li>
-</ul>)w"
+<p>Manage models via <b>Settings → 🎤 Voice Models...</b></p>
+<h4 style='color:%2;'>Passive recording (dataset mode)</h4>
+<p>Enable via Settings menu. JARVIS continuously transcribes background speech into the
+<b>voice_journal</b> database table with language and confidence scores. Entries marked
+<i>"Pending processing"</i> haven't been analyzed yet — BackgroundLearner processes them
+into training pairs. Raw entries are auto-deleted after 7 days.</p>
+<p style='font-size:11px;color:rgba(197,198,199,0.5);'>Audio never leaves your computer. Silence is not recorded. Runs on CPU — no GPU needed.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2), QLatin1String(G))
         },
+        // ══════════════════════════════════════════════════════════
+        //  AI TRAINING
+        // ══════════════════════════════════════════════════════════
         {
-            "⚙️", "Настройки", "Settings",
-            R"w(<h3 style='color:#00d4ff;'>⚙️ Настройки</h3>
-<h4 style='color:#44aaff;'>API ключи:</h4>
-<ul>
-<li><b>Claude</b> — console.anthropic.com → API Keys → Create Key</li>
-<li><b>Gemini</b> — aistudio.google.com → Get API key (бесплатно)</li>
-<li><b>Ollama</b> — ollama.com → скачать → <code>ollama pull qwen2.5:3b</code></li>
-</ul>
-<h4 style='color:#44aaff;'>Модели Ollama (по скорости):</h4>
-<table border='0' cellpadding='3'>
-<tr><td style='color:#44ff44;'><b>qwen2.5:3b</b></td><td>Быстро, хорошее качество ✅</td></tr>
-<tr><td><b>phi3:mini</b></td><td>Быстро, Microsoft</td></tr>
-<tr><td><b>llama3.2:3b</b></td><td>Хороший баланс</td></tr>
-<tr><td><b>mistral:7b</b></td><td>Хорошо для кода</td></tr>
+            "◈", "Обучение ИИ", "AI Training",
+            QString(),
+            QStringLiteral(R"w(<h3 style='color:%1;'>◈ AI Training & Data Pipeline</h3>
+<p>JARVIS accumulates your interactions and learns to respond in your style over time.</p>
+<h4 style='color:%2;'>Automatic data collection</h4>
+<p>Every user-AI exchange is saved to the <b>training_logs</b> database table with <code>rating=0</code>.
+When you click the <b>👍</b> button below a response, the rating updates to <code>1</code>, marking
+it as a high-quality training pair. These liked pairs are prioritized during export.</p>
+<h4 style='color:%2;'>Behavior pattern learning</h4>
+<p>The <b>BackgroundLearner</b> continuously analyzes chat history and builds <b>behavior_patterns</b> —
+normalized trigger→response pairs with frequency and confidence scores. When JARVIS sees a question
+that matches an existing pattern with frequency ≥ 3 and confidence ≥ 0.5, it can respond
+<i>instantly without any API call</i> (offline brain). This means common questions get faster over time.</p>
+<h4 style='color:%2;'>Response cache (offline library)</h4>
+<p>Jokes, advice, facts, motivational quotes, and poems generated by Claude are cached in the
+<b>response_cache</b> table. Next time you ask for a joke, JARVIS serves it from cache —
+zero latency, zero cost. The cache grows automatically with every unique request.</p>
+<h4 style='color:%2;'>Voice journal (passive dataset)</h4>
+<p>When passive recording is enabled, ambient speech is transcribed into <b>voice_journal</b>
+with language tags and confidence scores. BackgroundLearner processes these entries into
+training pairs. Unprocessed entries show as <i>"Pending processing"</i> in the stats dialog.</p>
+<h4 style='color:%2;'>Export for fine-tuning</h4>
+<p>Menu <b>🧠 Training → Export .jsonl...</b> creates an Alpaca/Unsloth-format dataset:</p>
+<pre style='background:rgba(102,252,241,0.04);padding:8px;border-radius:6px;font-size:11px;color:%2;'>
+{"instruction": "user question", "input": "", "output": "AI response", "model": "claude"}
+</pre>
+<p>Recommended: export when you reach <b>500+ liked entries</b>. Use with Unsloth, LLaMA-Factory,
+or any Alpaca-compatible trainer to fine-tune a local model on your personal style.</p>
+<h4 style='color:%2;'>Auto-cleanup</h4>
+<p>BackgroundLearner automatically removes noise: messages under 5 chars, AI responses under 20 chars,
+speech recognition artifacts ("hmm", "uh", "aga"), and near-duplicate pairs.</p>
+<p style='color:%3;background:rgba(68,255,68,0.06);padding:8px;border-radius:6px;'>
+💡 More 👍 likes = better future model. The training pipeline is fully automatic — just use JARVIS
+naturally and like the responses you want it to learn from.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2), QLatin1String(G))
+        },
+        // ══════════════════════════════════════════════════════════
+        //  SCREEN VISION
+        // ══════════════════════════════════════════════════════════
+        {
+            "⊡", "Зрение и экран", "Screen Vision",
+            QString(),
+            QStringLiteral(R"w(<h3 style='color:%1;'>⊡ Screen Vision & Control</h3>
+<p>JARVIS can see your screen and interact with UI elements using Claude Vision + OCR.</p>
+<h4 style='color:%2;'>Vision commands</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>"what do you see"</b></td><td>Takes a screenshot and sends it to Claude Vision for analysis</td></tr>
+<tr><td style='color:%1;'><b>"describe screen"</b></td><td>Full visual description of everything on screen</td></tr>
+<tr><td style='color:%1;'><b>"click on OK"</b></td><td>OCR scans for the text "OK", locates it, and performs a mouse click</td></tr>
+<tr><td style='color:%1;'><b>"press button X"</b></td><td>Searches for UI element by text and clicks it</td></tr>
 </table>
-<h4 style='color:#44aaff;'>Режим Агента:</h4>
-<p>Настройки → Режим Агента — включает роутинг:<br>
-простые вопросы → Ollama (офлайн/бесплатно)<br>
-код и анализ → Claude API</p>
-<h4 style='color:#44aaff;'>Горячие клавиши:</h4>
-<ul>
-<li><b>Enter</b> — отправить сообщение</li>
-<li><b>Ctrl+O</b> — прикрепить файл</li>
-<li><b>Esc</b> — закрыть панель уточнения</li>
-</ul>)w",
-            R"w(<h3 style='color:#00d4ff;'>⚙️ Settings</h3>
-<h4 style='color:#44aaff;'>API Keys:</h4>
-<ul>
-<li><b>Claude</b> — console.anthropic.com → API Keys → Create Key</li>
-<li><b>Gemini</b> — aistudio.google.com → Get API key (free)</li>
-<li><b>Ollama</b> — ollama.com → install → <code>ollama pull qwen2.5:3b</code></li>
-</ul>
-<h4 style='color:#44aaff;'>Ollama models (by speed):</h4>
-<table border='0' cellpadding='3'>
-<tr><td style='color:#44ff44;'><b>qwen2.5:3b</b></td><td>Fast, good quality ✅</td></tr>
+<p style='color:%3;'>⚠️ Requires a Claude API key (Vision model is used for screen analysis).</p>
+<h4 style='color:%2;'>File attachments</h4>
+<p>Attach files for AI analysis — JARVIS extracts content and includes it in the prompt context.</p>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;'><b>📎 button</b></td><td>Open file picker dialog (also Ctrl+O)</td></tr>
+<tr><td style='color:%1;'><b>Drag &amp; Drop</b></td><td>Drop files directly into the JARVIS window</td></tr>
+</table>
+<p><b>Supported formats:</b> .txt .cpp .h .py .js .ts .pdf .docx and image files (PNG, JPG, BMP).</p>
+<h4 style='color:%2;'>Screenshot learning</h4>
+<p>The ScreenshotLearner module can periodically capture your screen to learn app usage patterns.
+This data stays local and helps JARVIS understand which tools you use at different times of day.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2), QLatin1String(A))
+        },
+        // ══════════════════════════════════════════════════════════
+        //  SETTINGS
+        // ══════════════════════════════════════════════════════════
+        {
+            "⚙", "Настройки", "Settings",
+            QString(),
+            QStringLiteral(R"w(<h3 style='color:%1;'>⚙ Settings & Configuration</h3>
+<h4 style='color:%2;'>API keys</h4>
+<table border='0' cellpadding='4' style='width:100%%;'>
+<tr><td style='color:%1;white-space:nowrap;'><b>Claude</b></td><td>console.anthropic.com → API Keys → Create Key</td></tr>
+<tr><td style='color:%1;'><b>Gemini</b></td><td>aistudio.google.com → Get API key (free tier)</td></tr>
+<tr><td style='color:%1;'><b>Ollama</b></td><td>ollama.com → install → <code>ollama pull qwen2.5:3b</code></td></tr>
+</table>
+<h4 style='color:%2;'>Recommended Ollama models</h4>
+<table border='0' cellpadding='4'>
+<tr><td style='color:%3;'><b>qwen2.5:3b</b></td><td>Fast, good quality ✅ recommended</td></tr>
 <tr><td><b>phi3:mini</b></td><td>Fast, Microsoft model</td></tr>
-<tr><td><b>llama3.2:3b</b></td><td>Good balance</td></tr>
-<tr><td><b>mistral:7b</b></td><td>Good for code</td></tr>
+<tr><td><b>llama3.2:3b</b></td><td>Good balance of speed and quality</td></tr>
+<tr><td><b>mistral:7b</b></td><td>Strong for code generation</td></tr>
 </table>
-<h4 style='color:#44aaff;'>Agent Mode:</h4>
-<p>Settings → Agent Mode — enables routing:<br>
-simple questions → Ollama (offline/free)<br>
-code & analysis → Claude API</p>
-<h4 style='color:#44aaff;'>Keyboard shortcuts:</h4>
-<ul>
-<li><b>Enter</b> — send message</li>
-<li><b>Ctrl+O</b> — attach file</li>
-<li><b>Esc</b> — close clarification panel</li>
-</ul>)w"
+<h4 style='color:%2;'>Agent Mode routing</h4>
+<p><b>Settings → Agent Mode</b> enables intelligent routing:<br>
+Simple questions / chitchat → <b>Ollama</b> (offline, free, instant)<br>
+Code analysis / complex reasoning → <b>Claude API</b> (best quality)<br>
+If Ollama is unavailable → <b>Gemini</b> (free fallback) → Claude (last resort)</p>
+<h4 style='color:%2;'>Audio modes</h4>
+<p>Click the speaker icon in the bottom bar to cycle:</p>
+<table border='0' cellpadding='4'>
+<tr><td style='color:%1;'><b>🔊 Full</b></td><td>TTS speech + UI sound effects</td></tr>
+<tr><td style='color:%1;'><b>🔕 Mute Speech</b></td><td>UI sounds only — JARVIS stays silent</td></tr>
+<tr><td style='color:%1;'><b>🔇 Mute All</b></td><td>Complete silence</td></tr>
+</table>
+<h4 style='color:%2;'>Keyboard shortcuts</h4>
+<table border='0' cellpadding='4'>
+<tr><td style='color:%1;'><b>Enter</b></td><td>Send message</td></tr>
+<tr><td style='color:%1;'><b>Ctrl+O</b></td><td>Attach files</td></tr>
+<tr><td style='color:%1;'><b>Escape</b></td><td>Close clarification panel / focus input</td></tr>
+<tr><td style='color:%1;'><b>Drag &amp; Drop</b></td><td>Attach files by dropping into window</td></tr>
+</table>
+<h4 style='color:%2;'>Data storage</h4>
+<p>All data is stored locally in <b>Documents/JARVIS/jarvis.db</b> (SQLite).
+Easy to backup, easy to delete to start fresh. Session memory is in
+<b>Documents/JARVIS/jarvis_memory.json</b>.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2), QLatin1String(G))
         },
+        // ══════════════════════════════════════════════════════════
+        //  TROUBLESHOOTING
+        // ══════════════════════════════════════════════════════════
         {
             "🔧", "Устранение проблем", "Troubleshooting",
-            R"w(<h3 style='color:#00d4ff;'>🔧 Устранение проблем</h3>
-<h4 style='color:#ffaa44;'>Нет ответа от AI:</h4>
-<ul>
-<li>Проверь ключ API: <b>Настройки → Ключ Claude API...</b></li>
-<li>Попробуй переключить бэкенд в <b>Настройки → Режим Агента</b></li>
-<li>Gemini работает бесплатно как запасной вариант</li>
-</ul>
-<h4 style='color:#ffaa44;'>Приложение не найдено:</h4>
-<ul>
-<li>Используй полное имя: "открой Google Chrome" вместо "открой гугл"</li>
-<li>Английские и русские алиасы работают оба</li>
-</ul>
-<h4 style='color:#ffaa44;'>Голосовой ввод не работает:</h4>
-<ul>
-<li>Проверь разрешение микрофона в Windows (Настройки → Конфиденциальность)</li>
-<li>Открой <b>Настройки → Голосовые модели</b> и скачай модель</li>
-<li>Кнопка 🎤 становится активной только после загрузки модели</li>
-</ul>
-<h4 style='color:#ffaa44;'>Антивирус блокирует:</h4>
-<p>Добавь папку JARVIS в исключения антивируса.<br>
-JARVIS использует SendInput и ShellExecuteW — это нормально.</p>
-<h4 style='color:#ffaa44;'>Нашёл баг:</h4>
-<p>Меню <b>Помощь → 🐛 Сообщить о баге...</b> — описание уйдёт разработчику.</p>)w",
-            R"w(<h3 style='color:#00d4ff;'>🔧 Troubleshooting</h3>
-<h4 style='color:#ffaa44;'>No AI response:</h4>
+            QString(),
+            QStringLiteral(R"w(<h3 style='color:%1;'>🔧 Troubleshooting</h3>
+<h4 style='color:%2;'>No AI response</h4>
 <ul>
 <li>Check API key: <b>Settings → Claude API key...</b></li>
-<li>Try switching backend in <b>Settings → Agent Mode</b></li>
-<li>Gemini works free as fallback</li>
+<li>Try <b>Settings → Agent Mode</b> to enable Ollama or Gemini fallback</li>
+<li>Gemini works with a free API key as a backup</li>
+<li>Check your internet connection for cloud-based models</li>
 </ul>
-<h4 style='color:#ffaa44;'>App not found:</h4>
+<h4 style='color:%2;'>Application not found</h4>
 <ul>
-<li>Use full name: "open Google Chrome" not "open google"</li>
-<li>Both English and Russian aliases work</li>
+<li>Use the full name: <b>"open Google Chrome"</b> not <b>"open google"</b></li>
+<li>Both English and Russian application names work</li>
+<li>JARVIS searches system PATH + common install directories</li>
 </ul>
-<h4 style='color:#ffaa44;'>Voice input not working:</h4>
+<h4 style='color:%2;'>Voice input not working</h4>
 <ul>
-<li>Check microphone permission in Windows Settings → Privacy</li>
-<li>Open <b>Settings → Voice Models</b> and download a model</li>
-<li>The 🎤 button only becomes active after a model is loaded</li>
+<li>Check microphone permission: <b>Windows Settings → Privacy → Microphone</b></li>
+<li>Open <b>Settings → 🎤 Voice Models...</b> and download at least one model</li>
+<li>The 🎤 button in the input bar only activates after a model finishes loading</li>
+<li>If models are loaded but recognition fails, try the EN Small model (~40 MB) first</li>
 </ul>
-<h4 style='color:#ffaa44;'>Antivirus blocking:</h4>
-<p>Add JARVIS folder to antivirus exclusions.<br>
-JARVIS uses SendInput and ShellExecuteW — this is normal.</p>
-<h4 style='color:#ffaa44;'>Found a bug:</h4>
-<p>Menu <b>Help → 🐛 Report a Bug...</b> — description goes to developer.</p>)w"
+<h4 style='color:%2;'>Adaptive Focus stuck in wrong mode</h4>
+<p>The focus system reads the last 10 memory events. If it's stuck in "Developer" mode when you
+want casual chat, just have a few casual conversations — the time-decay formula will naturally
+shift the focus as newer events outweigh older ones.</p>
+<h4 style='color:%2;'>Antivirus / SmartScreen warnings</h4>
+<p>JARVIS uses <b>SendInput</b> (virtual keyboard), <b>ShellExecuteW</b> (app launcher), and writes
+to <b>Documents/JARVIS/</b>. These are legitimate operations but may trigger security software.
+Add the JARVIS folder to your antivirus exclusions.</p>
+<h4 style='color:%2;'>Database issues</h4>
+<p>If the database becomes corrupted, delete <b>Documents/JARVIS/jarvis.db</b> — JARVIS will
+recreate it on next launch. Session memory (<b>jarvis_memory.json</b>) is separate and won't be affected.</p>
+<h4 style='color:%2;'>Report a bug</h4>
+<p>Menu <b>Help → 🐛 Report a Bug...</b> — creates a GitHub issue with system info.</p>)w")
+                .arg(QLatin1String(H), QLatin1String(S2))
         },
         };
 
@@ -2659,7 +2633,9 @@ JARVIS uses SendInput and ShellExecuteW — this is normal.</p>
         QObject::connect(sectionList, &QListWidget::currentRowChanged, dlg,
             [&sections, content_browser, isEnglish](int row) {
             if (row < 0 || row >= sections.size()) return;
-            content_browser->setHtml(isEnglish ? sections[row].htmlEn : sections[row].htmlRu);
+            const auto& sec = sections[row];
+            QString html = (!isEnglish && !sec.htmlRu.isEmpty()) ? sec.htmlRu : sec.htmlEn;
+            content_browser->setHtml(html);
         });
 
         // Открываем первый раздел
