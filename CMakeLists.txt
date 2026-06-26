@@ -63,7 +63,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH OR CMAKE_PREFIX_PATH STREQUAL "")
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent Multimedia MultimediaWidgets)
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
 # ============================================================
@@ -223,6 +223,12 @@ add_library(JarvisCore STATIC
         core/llm_cache_manager.h
         core/llm_cache_manager.cpp
 
+        # Media Preview & Routing — dual-route local preview + Telegram delivery
+        core/media_preview_widget.h
+        core/media_preview_widget.cpp
+        core/media_routing_manager.h
+        core/media_routing_manager.cpp
+
         # Фоновое обучение — индексация проекта + анализ паттернов чата
         core/background_learner.h
         core/background_learner.cpp
@@ -272,6 +278,7 @@ target_link_libraries(JarvisCore PUBLIC
         Qt6::Sql
         Qt6::Concurrent
         Qt6::Multimedia
+        Qt6::MultimediaWidgets
 )
 
 target_link_libraries(JarvisCore PRIVATE

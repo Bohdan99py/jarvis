@@ -125,8 +125,10 @@ public:
     // Desktop workspace for media assets
     static QString workspaceOutputDir();
 
-    // Outbound image delivery to mobile
+    // Outbound media delivery to mobile
     void sendImageToMobile(qint64 chatId, const QString& filePath,
+                           const QString& caption = QString());
+    void sendVideoToMobile(qint64 chatId, const QString& filePath,
                            const QString& caption = QString());
 
     static constexpr int POLL_INTERVAL_MS    = 2000;
@@ -139,6 +141,7 @@ signals:
     void voiceProcessed(qint64 chatId, const QString& transcript);
     void imageReceived(qint64 chatId, const QString& savedPath);
     void imageSent(qint64 chatId, const QString& filePath);
+    void videoSent(qint64 chatId, const QString& filePath);
     void pairingCompleted(qint64 chatId, const QString& role);
     void gatewayStarted();
     void gatewayStopped();

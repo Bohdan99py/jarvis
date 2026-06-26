@@ -1463,6 +1463,90 @@ void J2JTelegramGateway::sendImageToMobile(qint64 chatId,
     });
 }
 
+// ── Video delivery via Telegram Bot API /sendVideo ─────────
+
+void J2JTelegramGateway::sendVideoToMobile(qint64 chatId,
+                                            const QString& filePath,
+                                            const QString& caption)
+{
+    if (m_botToken.isEmpty()) return;
+
+    QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) {
+        qWarning() << "[TelegramGW] sendVideoToMobile: file not found:" << filePath;
+        return;
+    }
+
+    (void)QtConcurrent::run([this, chatId, filePath, caption, fi]() {
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            qWarning() << "[TelegramGW] Cannot open video for sending:" << filePath;
+            return;
+        }
+        QByteArray fileData = file.readAll();
+        file.close();
+
+        QString mimeType = QStringLiteral("video/mp4");
+        const QString suffix = fi.suffix().toLower();
+        if (suffix == QStringLiteral("mkv"))       mimeType = QStringLiteral("video/x-matroska");
+        else if (suffix == QStringLiteral("avi"))  mimeType = QStringLiteral("video/x-msvideo");
+        else if (suffix == QStringLiteral("mov"))  mimeType = QStringLiteral("video/quicktime");
+        else if (suffix == QStringLiteral("webm")) mimeType = QStringLiteral("video/webm");
+        else if (suffix == QStringLiteral("wmv"))  mimeType = QStringLiteral("video/x-ms-wmv");
+
+        QMetaObject::invokeMethod(this, [this, chatId, filePath, caption,
+                                          fileData, mimeType, fi]() {
+            QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendVideo"));
+
+            auto* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+            QHttpPart chatIdPart;
+            chatIdPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                 QStringLiteral("form-data; name=\"chat_id\""));
+            chatIdPart.setBody(QByteArray::number(chatId));
+            multiPart->append(chatIdPart);
+
+            if (!caption.isEmpty()) {
+                QHttpPart captionPart;
+                captionPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                      QStringLiteral("form-data; name=\"caption\""));
+                captionPart.setBody(caption.toUtf8());
+                multiPart->append(captionPart);
+
+                QHttpPart parseModePart;
+                parseModePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                        QStringLiteral("form-data; name=\"parse_mode\""));
+                parseModePart.setBody(QByteArrayLiteral("Markdown"));
+                multiPart->append(parseModePart);
+            }
+
+            QHttpPart videoPart;
+            videoPart.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
+            videoPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                QStringLiteral("form-data; name=\"video\"; filename=\"%1\"")
+                    .arg(fi.fileName()));
+            videoPart.setBody(fileData);
+            multiPart->append(videoPart);
+
+            QNetworkRequest req(url);
+            req.setTransferTimeout(60000);
+
+            QNetworkReply* reply = m_network->post(req, multiPart);
+            multiPart->setParent(reply);
+
+            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath]() {
+                reply->deleteLater();
+                if (reply->error() != QNetworkReply::NoError) {
+                    qWarning() << "[TelegramGW] Failed to send video:" << reply->errorString();
+                    return;
+                }
+                emit videoSent(chatId, filePath);
+                qDebug() << "[TelegramGW] Video sent to chat" << chatId << ":" << filePath;
+            });
+        }, Qt::QueuedConnection);
+    });
+}
+
 // ============================================================
 //  Telegram Bot API: Senders
 // ============================================================
