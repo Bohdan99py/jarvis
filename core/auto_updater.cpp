@@ -19,8 +19,6 @@
 #include <QFile>
 #include <QDir>
 #include <QStandardPaths>
-#include <QCoreApplication>
-#include <QTimer>
 
 AutoUpdater::AutoUpdater(const QString& currentVersion,
                          const QString& githubUser,
@@ -181,34 +179,28 @@ void AutoUpdater::onDownloadFinished(QNetworkReply* reply)
 
     const std::wstring wPath = QDir::toNativeSeparators(installerPath).toStdWString();
 
-    // Сначала пробуем "runas" — запрос повышения прав (UAC).
-    // Большинство NSIS/Inno Setup инсталляторов требуют Admin.
-    HINSTANCE result = ShellExecuteW(
-        nullptr,
-        L"runas",
-        wPath.c_str(),
-        nullptr,
-        nullptr,
-        SW_SHOWNORMAL
-    );
+    SHELLEXECUTEINFOW sei = {};
+    sei.cbSize       = sizeof(sei);
+    sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
+    sei.hwnd         = nullptr;
+    sei.lpVerb       = L"runas";
+    sei.lpFile       = wPath.c_str();
+    sei.lpParameters = nullptr;
+    sei.lpDirectory  = nullptr;
+    sei.nShow        = SW_SHOWNORMAL;
 
-    // Если пользователь отклонил UAC или runas недоступен — пробуем "open"
-    if (reinterpret_cast<intptr_t>(result) <= 32) {
-        result = ShellExecuteW(
-            nullptr,
-            L"open",
-            wPath.c_str(),
-            nullptr,
-            nullptr,
-            SW_SHOWNORMAL
-        );
+    BOOL launched = ShellExecuteExW(&sei);
+
+    if (!launched && GetLastError() == ERROR_CANCELLED) {
+        sei.lpVerb = L"open";
+        launched = ShellExecuteExW(&sei);
     }
 
-    if (reinterpret_cast<intptr_t>(result) > 32) {
+    if (launched) {
+        if (sei.hProcess)
+            CloseHandle(sei.hProcess);
         emit installerLaunched();
-        QTimer::singleShot(2000, this, []() {
-            QCoreApplication::quit();
-        });
+        ExitProcess(0);
     } else {
         emit updateError(QStringLiteral("Failed to launch installer.\n"
                                         "Open manually: ") + installerPath);
