@@ -794,11 +794,6 @@ void MainWindow::dropEvent(QDropEvent* e)
 void MainWindow::buildMenuBar()
 {
     auto* menuBar = this->menuBar();
-    menuBar->setStyleSheet(
-        QStringLiteral("QMenuBar { background: #0a1018; color: #96c8e6; font-size: 12px; }"
-                       "QMenuBar::item:selected { background: #1a3050; }"
-                       "QMenu { background: #0c1828; color: #96c8e6; border: 1px solid #1a3050; }"
-                       "QMenu::item:selected { background: #00243d; color: #00d4ff; }"));
 
     // --- Файл ---
     auto* fileMenu = menuBar->addMenu(Str::menuFile());

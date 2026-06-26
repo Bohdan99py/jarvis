@@ -2133,65 +2133,179 @@ QString Jarvis::cmdSetGeminiKey(const QString& input)
 
 QString Jarvis::cmdHelp(const QString&)
 {
-    auto section = [](const QString& icon, const QString& title, const QString& body) {
+    auto S = [](const QString& icon, const QString& title, const QString& body) {
         return QStringLiteral(
-            "<div style='margin:6px 0; padding:10px 14px; "
-            "background:rgba(0,212,255,0.04); border:1px solid rgba(0,212,255,0.12); "
+            "<div style='margin:6px 0; padding:12px 16px; "
+            "background:rgba(102,252,241,0.03); border:1px solid rgba(102,252,241,0.10); "
             "border-radius:10px;'>"
-            "<b style='font-size:14px;'>%1 %2</b><br>"
-            "<span style='font-size:12px; line-height:1.6;'>%3</span>"
+            "<b style='font-size:14px; color:#66FCF1;'>%1 %2</b><br>"
+            "<span style='font-size:12px; line-height:1.7; color:#C5C6C7;'>%3</span>"
             "</div>"
         ).arg(icon, title, body);
     };
 
-    QString html;
-    html += QStringLiteral("<b style='font-size:16px;'>J.A.R.V.I.S. — User Guide</b><br>");
+    auto row = [](const QString& cmd, const QString& desc) {
+        return QStringLiteral(
+            "<tr><td style='padding:2px 12px 2px 0; color:#66FCF1; font-family:Consolas,monospace; "
+            "white-space:nowrap;'>%1</td>"
+            "<td style='padding:2px 0; color:#C5C6C7;'>%2</td></tr>"
+        ).arg(cmd, desc);
+    };
 
-    html += section(QStringLiteral("🎤"), QStringLiteral("Voice & Hotkeys"),
-        QStringLiteral("Click the <b>mic button</b> or say <b>\"Jarvis\"</b> to activate voice input. "
-                       "Supports English and Russian offline (Vosk). "
-                       "Press <b>Enter</b> to send, <b>Ctrl+O</b> to attach files."));
+    QString h;
+    h += QStringLiteral("<div style='padding:4px 0;'>"
+         "<b style='font-size:18px; color:#66FCF1; letter-spacing:2px;'>"
+         "J.A.R.V.I.S. — Complete User Guide</b></div>");
 
-    html += section(QStringLiteral("🔊"), QStringLiteral("Audio Mixer"),
-        QStringLiteral("<b>Full Sound</b> — speech + UI effects enabled.<br>"
-                       "<b>Mute Speech</b> — UI sounds only, JARVIS stays silent.<br>"
-                       "<b>Mute All</b> — complete silence. Click the audio icon in the bottom bar to cycle."));
+    // ── 1. Voice ──
+    h += S(QStringLiteral("🎙"), QStringLiteral("Voice Input & Wake Word"),
+        QStringLiteral(
+        "JARVIS uses <b>Vosk</b> for fully offline speech recognition (no internet needed).<br><br>"
+        "<b>Activation:</b> Click the mic button in the input bar, or simply say "
+        "<b>\"Jarvis\"</b> (or \"Джарвис\") — the wake word triggers hands-free listening.<br><br>"
+        "<b>Supported languages:</b> English and Russian with automatic detection. "
+        "The recognizer picks the highest-confidence result across loaded models.<br><br>"
+        "<b>Whisper mode:</b> When ambient noise is detected and you speak softly, "
+        "JARVIS enters whisper mode — recognition thresholds adapt automatically.<br><br>"
+        "<b>Passive recording:</b> Enable via Settings menu to continuously transcribe "
+        "background speech into the voice journal database for later analysis. "
+        "Entries are stored locally and can be exported for AI training."));
 
-    html += section(QStringLiteral("🧠"), QStringLiteral("Dynamic Profiling"),
-        QStringLiteral("JARVIS analyzes your recent interactions to detect your current focus "
-                       "(Developer, Creative, Admin, or Casual) and adapts its system instructions "
-                       "accordingly. No manual configuration needed — it shifts automatically as your "
-                       "workflow changes."));
+    // ── 2. Audio ──
+    h += S(QStringLiteral("🔊"), QStringLiteral("Audio Mixer & Sound Effects"),
+        QStringLiteral(
+        "Three audio modes, cycled by clicking the speaker icon in the bottom bar:<br><br>"
+        "<table style='margin:4px 0;'>"
+        "<tr><td style='padding:2px 10px 2px 0;'><b>🔊 Full Sound</b></td>"
+        "<td>TTS speech + all UI sound effects (success chime, warning buzz, listening ping).</td></tr>"
+        "<tr><td style='padding:2px 10px 2px 0;'><b>🔕 Mute Speech</b></td>"
+        "<td>JARVIS does not speak aloud, but notification/error sounds remain active.</td></tr>"
+        "<tr><td style='padding:2px 10px 2px 0;'><b>🔇 Mute All</b></td>"
+        "<td>Complete silence — both TTS and UI effects globally suppressed.</td></tr>"
+        "</table><br>"
+        "Sound effects are procedurally generated at startup (no external audio files). "
+        "TTS uses the Windows SAPI engine with the system default voice."));
 
-    html += section(QStringLiteral("💬"), QStringLiteral("Productivity Commands"),
-        QStringLiteral("<b>remember</b> key=value — store a fact<br>"
-                       "<b>recall</b> key — recall a stored fact<br>"
-                       "<b>memory</b> — show all stored facts<br>"
-                       "<b>profile</b> — show learned work patterns<br>"
-                       "<b>stats</b> — command usage statistics<br>"
-                       "<b>index</b> path — index a project for code context<br>"
-                       "<b>symbol</b> name — search indexed symbols<br>"
-                       "<b>grep</b> text — search text across project"));
+    // ── 3. Adaptive Focus ──
+    h += S(QStringLiteral("🧠"), QStringLiteral("Adaptive Persona / Focus Subsystem"),
+        QStringLiteral(
+        "JARVIS continuously reads the <b>top 10 time-decay-scored events</b> from the "
+        "Core Memory Stream and classifies your current workflow into one of four focus states:<br><br>"
+        "<table style='margin:4px 0;'>"
+        "<tr><td style='padding:2px 10px 2px 0; color:#66FCF1;'><b>Developer</b></td>"
+        "<td>Detected when recent queries mention code, functions, bugs, files, or build systems. "
+        "JARVIS becomes terse and technical — prioritizes code snippets and debugging strategies.</td></tr>"
+        "<tr><td style='padding:2px 10px 2px 0; color:#66FCF1;'><b>Creative</b></td>"
+        "<td>Activated by art, design, texture, or rendering keywords. "
+        "Shifts to collaborative brainstorming and visual thinking.</td></tr>"
+        "<tr><td style='padding:2px 10px 2px 0; color:#66FCF1;'><b>Admin</b></td>"
+        "<td>Triggered by file management, settings, installation, or backup queries. "
+        "Provides concise step-by-step instructions.</td></tr>"
+        "<tr><td style='padding:2px 10px 2px 0; color:#66FCF1;'><b>Casual</b></td>"
+        "<td>Default when no strong keyword pattern is detected. "
+        "Relaxed, witty JARVIS personality — short answers unless depth is requested.</td></tr>"
+        "</table><br>"
+        "<b>How it works:</b> Each user message is logged to the <b>memory_stream</b> table with an "
+        "importance score (0.7 for coding intents, 0.4 for casual). The time-decay formula "
+        "<code style='color:#45A29E;'>Score = importance / (1 + hours_elapsed)</code> ranks recent "
+        "high-importance events above stale ones. The top 10 are keyword-scanned to select the focus, "
+        "which injects an adaptive instruction block into the system prompt before every LLM call.<br><br>"
+        "This happens silently — no user action is needed. The focus shifts as your workflow changes."));
 
-    html += section(QStringLiteral("📂"), QStringLiteral("Project & Code"),
-        QStringLiteral("Index a project folder and JARVIS auto-attaches relevant code "
-                       "fragments when you ask coding questions. Supports C++, Python, JS/TS, "
-                       "and more. Drag files into the window to attach them."));
+    // ── 4. AI Training ──
+    h += S(QStringLiteral("⚡"), QStringLiteral("AI Training & Dataset Mechanics"),
+        QStringLiteral(
+        "<b>Automatic collection:</b> Every user-AI exchange is saved to <b>training_logs</b> "
+        "with <code>rating=0</code>. When you click the <b>👍</b> Like button, the rating updates "
+        "to <code>1</code>, marking it as a high-quality pair for fine-tuning.<br><br>"
+        "<b>Behavior patterns:</b> The <b>BackgroundLearner</b> analyzes chat history to build "
+        "<b>behavior_patterns</b> — if JARVIS sees a similar question 3+ times with consistent "
+        "answers, it can respond locally without an API call (offline brain).<br><br>"
+        "<b>Voice journal:</b> Passive listening captures ambient speech transcriptions into "
+        "<b>voice_journal</b> with language and confidence scores. Entries marked "
+        "'Pending processing' haven't been analyzed yet. Processed entries feed into "
+        "the knowledge base.<br><br>"
+        "<b>Export:</b> Use Settings → Training → Export .jsonl to create an Alpaca/Unsloth-format "
+        "dataset from your liked responses for local model fine-tuning.<br><br>"
+        "<b>Response cache:</b> Jokes, advice, facts, and other cached responses are stored in "
+        "<b>response_cache</b> — once Claude generates one, JARVIS serves it offline next time."));
 
-    html += section(QStringLiteral("🎨"), QStringLiteral("Themes"),
-        QStringLiteral("Click the theme button in the toolbar to cycle between "
-                       "<b>Cyberpunk</b> (dark neon), <b>Soft Light</b> (gentle porcelain), "
-                       "and <b>Glass</b> (frosted translucent)."));
+    // ── 5. Commands ──
+    h += S(QStringLiteral("⌨"), QStringLiteral("Complete Command Reference"),
+        QStringLiteral(
+        "<table style='border-collapse:collapse; width:100%;'>"
+        "<tr><td colspan='2' style='padding:4px 0; color:#45A29E; font-weight:bold;'>"
+        "Memory & Knowledge</td></tr>")
+        + row(QStringLiteral("remember key=value"), QStringLiteral("Permanently store a fact"))
+        + row(QStringLiteral("recall key"), QStringLiteral("Retrieve a stored fact"))
+        + row(QStringLiteral("memory"), QStringLiteral("List all stored facts"))
+        + row(QStringLiteral("profile"), QStringLiteral("Show learned work patterns and scenarios"))
+        + row(QStringLiteral("stats"), QStringLiteral("Display command usage frequency"))
+        + QStringLiteral(
+        "<tr><td colspan='2' style='padding:6px 0 4px; color:#45A29E; font-weight:bold;'>"
+        "Project & Code Intelligence</td></tr>")
+        + row(QStringLiteral("index &lt;path&gt;"), QStringLiteral("Index a project folder for RAG code context"))
+        + row(QStringLiteral("symbol &lt;name&gt;"), QStringLiteral("Search for classes, functions, or variables"))
+        + row(QStringLiteral("grep &lt;text&gt;"), QStringLiteral("Full-text search across all project files"))
+        + QStringLiteral(
+        "<tr><td colspan='2' style='padding:6px 0 4px; color:#45A29E; font-weight:bold;'>"
+        "System & Input Control</td></tr>")
+        + row(QStringLiteral("type &lt;text&gt;"), QStringLiteral("Type text into the active window via virtual keyboard"))
+        + row(QStringLiteral("press &lt;key&gt;"), QStringLiteral("Press a single key (Enter, F5, Escape, etc.)"))
+        + row(QStringLiteral("combo &lt;keys&gt;"), QStringLiteral("Press a key combination (Ctrl+S, Alt+Tab, etc.)"))
+        + row(QStringLiteral("apikey &lt;key&gt;"), QStringLiteral("Set your Claude API key"))
+        + row(QStringLiteral("help"), QStringLiteral("Show this guide"))
+        + QStringLiteral(
+        "<tr><td colspan='2' style='padding:6px 0 4px; color:#45A29E; font-weight:bold;'>"
+        "Screen & Vision</td></tr>")
+        + row(QStringLiteral("\"what do you see\""),
+              QStringLiteral("Capture screen and describe it via Claude Vision"))
+        + row(QStringLiteral("\"click on X\""),
+              QStringLiteral("Locate element on screen and click it"))
+        + QStringLiteral(
+        "<tr><td colspan='2' style='padding:6px 0 4px; color:#45A29E; font-weight:bold;'>"
+        "Conversation</td></tr>")
+        + row(QStringLiteral("Any question"),
+              QStringLiteral("Routes to Claude (code/complex) or Ollama/Gemini (casual)"))
+        + row(QStringLiteral("\"recall what happened...\""),
+              QStringLiteral("Search session journal by date or topic"))
+        + QStringLiteral("</table>"));
+
+    // ── 6. Offline/Online ──
+    h += S(QStringLiteral("🌐"), QStringLiteral("Offline & Online Integration"),
+        QStringLiteral(
+        "<b>Always offline (no internet):</b><br>"
+        "• Voice recognition (Vosk) • Behavior pattern matching • Response cache • "
+        "Virtual keyboard • PC control commands • Activity tracking<br><br>"
+        "<b>Requires internet:</b><br>"
+        "• Claude API (code analysis, complex reasoning) • Gemini API (conversational fallback) • "
+        "Auto-updater (GitHub Releases) • Screenshot Vision analysis<br><br>"
+        "<b>Optional local LLM (Ollama):</b><br>"
+        "Enable Agent Mode in Settings to route casual conversation through a local model "
+        "(Llama 3, Mistral, etc.) — completely free and private. Claude remains the fallback "
+        "for complex tasks. Set your model with <code style='color:#45A29E;'>ollamamodel &lt;name&gt;</code>."));
+
+    // ── 7. Keyboard shortcuts ──
+    h += S(QStringLiteral("⌘"), QStringLiteral("Keyboard Shortcuts"),
+        QStringLiteral(
+        "<table style='margin:4px 0;'>")
+        + row(QStringLiteral("Enter"), QStringLiteral("Send message"))
+        + row(QStringLiteral("Ctrl+O"), QStringLiteral("Attach files"))
+        + row(QStringLiteral("Drag & Drop"), QStringLiteral("Drop files into the window to attach"))
+        + row(QStringLiteral("Ctrl+C"), QStringLiteral("Copy selected text from chat log"))
+        + QStringLiteral("</table>"));
 
     if (m_indexer->fileCount() > 0) {
-        html += section(QStringLiteral("📁"), QStringLiteral("Active Project"),
-            QStringLiteral("<b>%1</b> — %2 files, %3 symbols indexed")
+        h += S(QStringLiteral("📁"), QStringLiteral("Active Project"),
+            QStringLiteral("<b>%1</b> — %2 files, %3 symbols indexed<br>"
+                           "Code fragments auto-attach to coding queries. "
+                           "Ask JARVIS to explain, refactor, or extend any part of the project.")
                 .arg(QFileInfo(m_indexer->projectRoot()).fileName())
                 .arg(m_indexer->fileCount())
                 .arg(m_indexer->symbolCount()));
     }
 
-    return html;
+    return h;
 }
 
 // ============================================================

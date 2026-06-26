@@ -134,11 +134,18 @@ inline const QString& cyberpunkStyleSheet()
           border-bottom: 1px solid rgba(102,252,241,18); }
         QMenuBar::item { background: transparent; padding: 5px 12px; border-radius: 4px; }
         QMenuBar::item:selected { background-color: rgba(102,252,241,18); color: #66FCF1; }
-        QMenu { background-color: rgba(11,12,16,245); color: #C5C6C7;
-          border: 1px solid rgba(102,252,241,25); border-radius: 8px; padding: 4px; }
-        QMenu::item { padding: 6px 24px 6px 12px; border-radius: 4px; }
-        QMenu::item:selected { background-color: rgba(102,252,241,22); color: #66FCF1; }
-        QMenu::separator { height: 1px; background: rgba(102,252,241,15); margin: 4px 8px; }
+        QMenu, QMenu QMenu {
+          background-color: rgba(11,12,16,248); color: #C5C6C7;
+          border: 1px solid rgba(102,252,241,20); border-radius: 8px; padding: 6px 4px;
+          font-family: 'Segoe UI', sans-serif; font-size: 13px; }
+        QMenu::item { padding: 7px 28px 7px 14px; border-radius: 5px; margin: 1px 4px; }
+        QMenu::item:selected { background-color: rgba(102,252,241,0.12); color: #66FCF1; }
+        QMenu::item:disabled { color: rgba(197,198,199,0.30); }
+        QMenu::separator { height: 1px; background: rgba(102,252,241,0.10); margin: 4px 10px; }
+        QMenu::indicator { width: 14px; height: 14px; margin-left: 6px; }
+        QMenu::indicator:checked { background: #66FCF1; border-radius: 3px; }
+        QMenu::indicator:unchecked { background: rgba(102,252,241,0.10); border-radius: 3px; }
+        QMenu::right-arrow { width: 8px; height: 8px; }
 
         #keyboardPanel { background-color: rgba(11,12,16,230); border-top: 1px solid rgba(102,252,241,18); }
         #keyboardPanel QPushButton { background-color: rgba(15,16,22,180); color: #C5C6C7;
