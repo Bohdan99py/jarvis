@@ -18,6 +18,8 @@
 #include "database_manager.h"
 #include "activity_tracker.h"
 #include "user_profile_manager.h"
+#include "training_processing_worker.h"
+#include "jarvis_paths.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -65,6 +67,12 @@ Jarvis::Jarvis(QObject* parent)
     m_profile      = new UserProfile(this);
     m_activity     = new ActivityTracker(this);
     m_activity->start(15); // capture every 15 seconds
+
+    // Background training data pipeline: voice_journal → training pairs → .jsonl
+    m_trainingPipeline = new TrainingPipelineController(this);
+    m_trainingPipeline->setUserId(m_currentUserId);
+    m_trainingPipeline->setDatasetPath(JarvisPaths::subPath(QStringLiteral("training_export")));
+    m_trainingPipeline->start(10);
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -114,6 +122,7 @@ Jarvis::Jarvis(QObject* parent)
 
 Jarvis::~Jarvis()
 {
+    m_trainingPipeline->stop();
     m_predictor->savePatterns();
     m_memory->savePersistent();
     m_indexer->saveIndex();

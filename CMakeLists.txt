@@ -206,6 +206,10 @@ add_library(JarvisCore STATIC
         core/background_learner.h
         core/background_learner.cpp
 
+        # Background training data pipeline — voice journal → training pairs → .jsonl
+        core/training_processing_worker.h
+        core/training_processing_worker.cpp
+
         # Голосовой ввод — Whisper.cpp, VAD, шёпот, wake word
         core/voice_input.h
         core/voice_input.cpp

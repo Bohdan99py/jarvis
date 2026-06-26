@@ -32,6 +32,7 @@ class ProjectIndexer;
 class CodeActions;
 class AttachmentsManager;
 class PcCommandRegistry;
+class TrainingPipelineController;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -193,6 +194,7 @@ private:
     UserProfile*        m_profile      = nullptr;  // обучение паттернов/сценариев
     PcCommandRegistry*  m_pcCommands   = nullptr;  // голосовое управление ПК (мышь/окна/система/макросы)
     ActivityTracker*    m_activity     = nullptr;  // deep context awareness + knowledge base
+    TrainingPipelineController* m_trainingPipeline = nullptr; // background voice→training data
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 
