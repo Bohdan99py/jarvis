@@ -135,7 +135,7 @@ void ProactiveReminderManager::fireReminder(int index)
     const QString msg = QStringLiteral("⏰ *Напоминание:*\n%1").arg(r.text);
 
     if (m_gateway && r.chatId != 0)
-        m_gateway->sendMessage(r.chatId, msg);
+        m_gateway->sendOutboundMessage(r.chatId, msg);
 
     VoiceSynthesisManager::instance().say(r.spokenText);
 

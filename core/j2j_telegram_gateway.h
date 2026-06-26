@@ -125,6 +125,9 @@ public:
     // Desktop workspace for media assets
     static QString workspaceOutputDir();
 
+    // Outbound message delivery (proactive pings, reminders, curiosity prompts)
+    void sendOutboundMessage(qint64 chatId, const QString& text);
+
     // Outbound media delivery to mobile
     void sendImageToMobile(qint64 chatId, const QString& filePath,
                            const QString& caption = QString());

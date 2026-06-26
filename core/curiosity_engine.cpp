@@ -101,7 +101,7 @@ void CuriosityEngine::postRandomQuestion()
     const QString question = pickQuestion();
     const QString msg = QStringLiteral("💭 ") + question;
 
-    m_gateway->sendMessage(m_targetChatId, msg);
+    m_gateway->sendOutboundMessage(m_targetChatId, msg);
 
     emit questionPosted(question);
     qDebug() << "[CuriosityEngine] Posted question to chat" << m_targetChatId

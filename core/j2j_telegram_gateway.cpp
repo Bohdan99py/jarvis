@@ -1426,6 +1426,15 @@ void J2JTelegramGateway::downloadAndSaveImage(const QString& fileId,
 }
 
 // ============================================================
+//  Outbound Text Delivery (proactive pings, reminders, etc.)
+// ============================================================
+
+void J2JTelegramGateway::sendOutboundMessage(qint64 chatId, const QString& text)
+{
+    sendMessage(chatId, text);
+}
+
+// ============================================================
 //  Outbound Image Delivery (Desktop → Telegram)
 // ============================================================
 
