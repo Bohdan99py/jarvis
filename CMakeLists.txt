@@ -129,6 +129,8 @@ add_library(JarvisCore STATIC
         core/session_memory.h
         core/session_memory.cpp
         core/theme.h
+        core/theme_manager.h
+        core/audio_manager.h
         core/virtual_keyboard.h
         core/virtual_keyboard.cpp
 

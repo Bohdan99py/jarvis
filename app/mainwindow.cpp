@@ -98,6 +98,8 @@ MainWindow::MainWindow(QWidget* parent)
     m_jarvis = new Jarvis(this);
     m_jarvis->setUiLanguage(english);
 
+    m_audioManager = new AudioManager(this);
+
     // Restore last active user
     {
         qint64 lastUserId = cfg.value(QStringLiteral("user/currentId"), 1).toLongLong();
@@ -190,7 +192,11 @@ MainWindow::MainWindow(QWidget* parent)
     buildUI();
     buildMenuBar();
     menuBar()->setVisible(false);
-    qApp->setStyleSheet(Theme::globalStyleSheet());
+
+    m_themeIndex = cfg.value(QStringLiteral("ui/theme"), 0).toInt();
+    if (m_themeIndex < 0 || m_themeIndex >= ThemeManager::ThemeCount)
+        m_themeIndex = 0;
+    applyThemeStyleSheet(m_themeIndex);
 
     // ── Системный трей ────────────────────────────────────
     QIcon trayIcon;
@@ -249,14 +255,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     // What's New — show once per version
     {
-        QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
-        QString lastVer = cfg.value(QStringLiteral("ui/last_seen_version")).toString();
+        QSettings cfg2(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
+        QString lastVer = cfg2.value(QStringLiteral("ui/last_seen_version")).toString();
         QString currentVer = QCoreApplication::applicationVersion();
         if (lastVer != currentVer) {
             appendLog(Str::logJarvis(),
                       Str::whatsNew().arg(currentVer),
                       Theme::LogColors::jarvis);
-            cfg.setValue(QStringLiteral("ui/last_seen_version"), currentVer);
+            cfg2.setValue(QStringLiteral("ui/last_seen_version"), currentVer);
         }
     }
 
@@ -462,8 +468,26 @@ void MainWindow::applyTheme(int index)
 
 void MainWindow::applyThemeStyleSheet(int index)
 {
+    ThemeManager::applyStyleSheet(index);
+
+    const char* themeName = (index == ThemeManager::Cyberpunk) ? "Cyberpunk"
+                          : (index == ThemeManager::SoftLight)  ? "Soft Light"
+                          :                                       "Glass";
+    appendLog(Str::logSystem(),
+        (IS_EN ? QStringLiteral("Theme: ") : QStringLiteral("Тема: "))
+            + QString::fromLatin1(themeName),
+        ThemeManager::colors(index).system);
+
+    if (m_audioModeBtn) m_audioModeBtn->setText(m_audioManager->modeLabel());
+}
+
+// Legacy inline themes kept for reference but no longer called.
+// ThemeManager::applyStyleSheet() now handles all QSS application.
+#if 0 // ── Old inline themes (superseded by theme_manager.h) ──────
+static void applyThemeStyleSheet_legacy(int index)
+{
     switch (index) {
-    case 1: { // Glass — frosted translucent, distinct from dark
+    case 1: {
         QString glass = QStringLiteral(
             "QMainWindow { background-color: rgba(16, 22, 42, 185); }"
             "QWidget { background-color: transparent; color: #d4e6f8; "
@@ -718,17 +742,12 @@ void MainWindow::applyThemeStyleSheet(int index)
         qApp->setStyleSheet(light);
         break;
     }
-    default: // Dark (0) — built-in theme from theme.h
+    default:
         qApp->setStyleSheet(Theme::globalStyleSheet());
         break;
     }
-
-    appendLog(Str::logSystem(),
-        index == 0 ? (IS_EN ? QStringLiteral("Theme: Dark") : QStringLiteral("Тема: Тёмная"))
-        : index == 1 ? (IS_EN ? QStringLiteral("Theme: Glass") : QStringLiteral("Тема: Стекло"))
-        : (IS_EN ? QStringLiteral("Theme: Light") : QStringLiteral("Тема: Светлая")),
-        Theme::LogColors::system);
 }
+#endif // legacy themes
 
 // ============================================================
 // Drag-n-drop
@@ -2702,7 +2721,7 @@ bool MainWindow::trySystemControl(const QString& userText)
     }
     // Успешно выполнено
     appendLog(Str::logJarvis(), result.message, Theme::LogColors::jarvis);
-    m_jarvis->speakAsync(result.message);
+    if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(result.message);
     m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
     m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result.message);
     return true;
@@ -3019,7 +3038,7 @@ void MainWindow::onSend()
         connect(router, &SearchRouter::searchFinished,
                 this, [this, router, text](const QString& result) {
             appendLog(Str::logJarvis(), result, Theme::LogColors::jarvis);
-            if (result.length() <= 300) m_jarvis->speakAsync(result);
+            if (result.length() <= 300) if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(result);
             m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
             m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result);
             setThinkingState(false);
@@ -3037,7 +3056,7 @@ void MainWindow::onSend()
 
         if (!searchResult.isEmpty()) {
             appendLog(Str::logJarvis(), searchResult, Theme::LogColors::jarvis);
-            if (searchResult.length() <= 300) m_jarvis->speakAsync(searchResult);
+            if (searchResult.length() <= 300) if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(searchResult);
             m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
             m_jarvis->memory()->addMessage(QStringLiteral("assistant"), searchResult);
 
@@ -3075,7 +3094,7 @@ void MainWindow::onSend()
 
     if (!response.isEmpty()) {
         appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
-        m_jarvis->speakAsync(response);
+        if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
 
         // ── Сохраняем синхронный ответ в датасет (rating=0) ──
         m_lastAiResponse = response;
@@ -3255,9 +3274,10 @@ void MainWindow::onTypingFinished()
 
 void MainWindow::onAsyncResponse(const QString& response)
 {
+    m_audioManager->playSuccess();
     appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
     if (response.length() <= 200) {
-        m_jarvis->speakAsync(response);
+        if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
     }
 
     // Сохраняем для возможного лайка
@@ -3304,6 +3324,7 @@ void MainWindow::onAsyncResponse(const QString& response)
 
 void MainWindow::onAsyncError(const QString& error)
 {
+    m_audioManager->playWarning();
     appendLog(Str::logError(), error, Theme::LogColors::error);
 }
 
@@ -3746,20 +3767,12 @@ void MainWindow::buildUI()
     });
 
     // === Theme switcher ===
-    m_themeIndex = QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
-                       .value(QStringLiteral("ui/theme"), 0).toInt();
-
     connect(tbTheme, &QPushButton::clicked, this, [this]() {
-        m_themeIndex = (m_themeIndex + 1) % 3;
+        m_themeIndex = (m_themeIndex + 1) % ThemeManager::ThemeCount;
         QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
             .setValue(QStringLiteral("ui/theme"), m_themeIndex);
         applyTheme(m_themeIndex);
     });
-
-    // Apply initial theme after a short delay (after stylesheet is set)
-    if (m_themeIndex != 0) {
-        QTimer::singleShot(100, this, [this]() { applyTheme(m_themeIndex); });
-    }
 
     // === Панель обновления ===
     m_updateBar = new QWidget(this);
@@ -4035,8 +4048,19 @@ void MainWindow::buildUI()
     kbBtn->setFixedWidth(40);
     kbBtn->setToolTip(Str::menuKeyboard());
 
+    m_audioModeBtn = new QPushButton(m_audioManager->modeLabel(), this);
+    m_audioModeBtn->setObjectName(QStringLiteral("audioModeBtn"));
+    m_audioModeBtn->setFixedWidth(44);
+    m_audioModeBtn->setToolTip(m_audioManager->modeTooltip());
+    connect(m_audioModeBtn, &QPushButton::clicked, this, [this]() {
+        m_audioManager->cycleMode();
+        m_audioModeBtn->setText(m_audioManager->modeLabel());
+        m_audioModeBtn->setToolTip(m_audioManager->modeTooltip());
+    });
+
     bottomBar->addWidget(modeLabel);
     bottomBar->addWidget(m_likeBtn);   // 👍 кнопка лайка
+    bottomBar->addWidget(m_audioModeBtn);
     bottomBar->addWidget(bSpacer);
     bottomBar->addWidget(kbBtn);
     vbox->addLayout(bottomBar);
@@ -4289,13 +4313,11 @@ void MainWindow::buildUI()
 
 void MainWindow::appendLog(const QString& who, const QString& text, const QString& color)
 {
-    QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
-    QString html = QStringLiteral(
-        "<span style='color:%1'>[%2]</span> "
-        "<b style='color:%3'>%4:</b> "
-        "<span style='color:%5'>%6</span>"
-    ).arg(Theme::LogColors::timestamp, time, color, who, color,
-          text.toHtmlEscaped().replace(QStringLiteral("\n"), QStringLiteral("<br>")));
+    const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
+    const auto& tc = ThemeManager::colors(m_themeIndex);
+    const QString escaped = text.toHtmlEscaped()
+                                .replace(QStringLiteral("\n"), QStringLiteral("<br>"));
+    const QString html = ThemeManager::buildMessageHtml(tc, time, who, escaped, color);
 
     m_log->append(html);
     m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
@@ -4422,6 +4444,7 @@ void MainWindow::onMicButtonClicked()
 
     if (!m_voiceActive) {
         // Запускаем прослушивание
+        m_audioManager->playListening();
         m_voiceInput->startListening();
         m_voiceActive = true;
         m_micBtn->setText(QStringLiteral("🔴"));

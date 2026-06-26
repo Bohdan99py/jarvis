@@ -39,6 +39,8 @@ class QDropEvent;
 #include "VoskSetupDialog.h"
 #include "screenshot_learner.h"
 #include "activity_tracker.h"
+#include "audio_manager.h"
+#include "theme_manager.h"
 
 class MainWindow : public QMainWindow
 {
@@ -180,6 +182,10 @@ private:
     // Авто-скриншот для датасета
     QTimer*                 m_screenshotTimer  = nullptr;
 
-    // Тема интерфейса: 0=dark, 1=glass, 2=light
+    // Тема интерфейса: 0=Cyberpunk, 1=Soft Light, 2=Glass(legacy)
     int                     m_themeIndex = 0;
+
+    // Audio notification system
+    AudioManager*           m_audioManager  = nullptr;
+    QPushButton*            m_audioModeBtn  = nullptr;
 };
