@@ -367,15 +367,15 @@ MainWindow::MainWindow(QWidget* parent)
         m_pulse = !m_pulse;
         if (m_jarvis->isSpeaking()) {
             m_dot->setStyleSheet(m_pulse
-                ? QStringLiteral("color: #00ff88; font-size: 20px;")
-                : QStringLiteral("color: #005533; font-size: 16px;"));
+                ? QStringLiteral("color: #45A29E; font-size: 20px;")
+                : QStringLiteral("color: rgba(69,162,158,0.35); font-size: 16px;"));
         } else if (!m_input->isEnabled()) {
             m_dot->setStyleSheet(m_pulse
-                ? QStringLiteral("color: #cc88ff; font-size: 20px;")
-                : QStringLiteral("color: #7733cc; font-size: 16px;"));
+                ? QStringLiteral("color: #66FCF1; font-size: 20px;")
+                : QStringLiteral("color: rgba(102,252,241,0.30); font-size: 16px;"));
         }
     });
-    m_pulseTimer->start(350);
+    m_pulseTimer->start(400);
 
     m_jarvis->autoUpdater()->checkForUpdates(true);
 }
@@ -487,17 +487,9 @@ void MainWindow::applyTheme(int index)
 
 void MainWindow::applyThemeStyleSheet(int index)
 {
-    ThemeManager::applyStyleSheet(index);
-
-    const char* themeName = (index == ThemeManager::Cyberpunk) ? "Cyberpunk"
-                          : (index == ThemeManager::SoftLight)  ? "Soft Light"
-                          :                                       "Glass";
-    appendLog(Str::logSystem(),
-        (IS_EN ? QStringLiteral("Theme: ") : QStringLiteral("Тема: "))
-            + QString::fromLatin1(themeName),
-        ThemeManager::colors(index).system);
-
-    if (m_audioModeBtn) m_audioModeBtn->setText(m_audioManager->modeLabel());
+    Q_UNUSED(index)
+    ThemeManager::applyStyleSheet(ThemeManager::Cyberpunk);
+    m_themeIndex = ThemeManager::Cyberpunk;
 }
 
 // Legacy inline themes kept for reference but no longer called.
@@ -3631,8 +3623,12 @@ void MainWindow::buildUI()
                        "QPushButton:hover { background: rgba(0,212,255,0.08); color: #00d4ff; "
                        "border-color: rgba(0,212,255,0.2); }"));
 
-    auto* title = new QLabel(QStringLiteral("⬡  J.A.R.V.I.S."), this);
+    auto* title = new QLabel(
+        QStringLiteral("⬡  J.A.R.V.I.S.  <span style='font-size:11px; color:rgba(102,252,241,100); "
+                       "font-weight:normal; letter-spacing:1px;'>v%1</span>")
+            .arg(QCoreApplication::applicationVersion()), this);
     title->setObjectName(QStringLiteral("titleLabel"));
+    title->setTextFormat(Qt::RichText);
 
     auto* spacer = new QWidget(this);
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -3666,43 +3662,39 @@ void MainWindow::buildUI()
 
     // === Quick-access toolbar ===
     auto* toolbar = new QHBoxLayout();
-    toolbar->setSpacing(4);
-    toolbar->setContentsMargins(0, 2, 0, 2);
+    toolbar->setSpacing(10);
+    toolbar->setContentsMargins(4, 4, 4, 4);
 
     auto makeToolBtn = [this](const QString& icon, const QString& tip) -> QPushButton* {
         auto* btn = new QPushButton(icon, this);
-        btn->setFixedSize(36, 30);
         btn->setToolTip(tip);
         btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet(
-            QStringLiteral("QPushButton { background: transparent; color: #607888; "
-                           "border: 1px solid transparent; border-radius: 6px; font-size: 15px; } "
-                           "QPushButton:hover { background: rgba(0,212,255,0.08); color: #00d4ff; "
-                           "border-color: rgba(0,212,255,0.2); }"));
+        btn->setStyleSheet(QStringLiteral(
+            "QPushButton { background: transparent; color: rgba(102,252,241,0.45); "
+            "  border: none; padding: 4px 8px; font-size: 17px; } "
+            "QPushButton:hover { color: #66FCF1; "
+            "  background: rgba(102,252,241,0.08); border-radius: 8px; }"));
         return btn;
     };
 
-    auto* tbSearch = makeToolBtn(QStringLiteral("🔍"),
-        IS_EN ? QStringLiteral("Search chat history") : QStringLiteral("Поиск по чату"));
-    auto* tbProject = makeToolBtn(QStringLiteral("📂"),
-        IS_EN ? QStringLiteral("Open project") : QStringLiteral("Открыть проект"));
-    auto* tbVoiceModels = makeToolBtn(QStringLiteral("🎤"),
-        IS_EN ? QStringLiteral("Voice models") : QStringLiteral("Модели голоса"));
-    auto* tbTraining = makeToolBtn(QStringLiteral("🧠"),
-        IS_EN ? QStringLiteral("Training stats") : QStringLiteral("Статистика обучения"));
-    auto* tbScreenshot = makeToolBtn(QStringLiteral("📸"),
-        IS_EN ? QStringLiteral("Screenshot + AI") : QStringLiteral("Скриншот + AI"));
-    auto* tbTheme = makeToolBtn(QStringLiteral("🎨"),
-        IS_EN ? QStringLiteral("Switch theme") : QStringLiteral("Сменить тему"));
-    auto* tbClear = makeToolBtn(QStringLiteral("🗑"),
-        IS_EN ? QStringLiteral("Clear chat") : QStringLiteral("Очистить чат"));
+    auto* tbSearch    = makeToolBtn(QStringLiteral("⌕"),
+        IS_EN ? QStringLiteral("Search history")   : QStringLiteral("Поиск по чату"));
+    auto* tbProject   = makeToolBtn(QStringLiteral("⬡"),
+        IS_EN ? QStringLiteral("Index project")    : QStringLiteral("Открыть проект"));
+    auto* tbVoice     = makeToolBtn(QStringLiteral("🎙"),
+        IS_EN ? QStringLiteral("Voice models")     : QStringLiteral("Модели голоса"));
+    auto* tbTrain     = makeToolBtn(QStringLiteral("◈"),
+        IS_EN ? QStringLiteral("Training stats")   : QStringLiteral("Статистика обучения"));
+    auto* tbCapture   = makeToolBtn(QStringLiteral("⊡"),
+        IS_EN ? QStringLiteral("Screenshot + AI")  : QStringLiteral("Скриншот + AI"));
+    auto* tbClear     = makeToolBtn(QStringLiteral("⌫"),
+        IS_EN ? QStringLiteral("Clear chat")       : QStringLiteral("Очистить чат"));
 
     toolbar->addWidget(tbSearch);
     toolbar->addWidget(tbProject);
-    toolbar->addWidget(tbVoiceModels);
-    toolbar->addWidget(tbTraining);
-    toolbar->addWidget(tbScreenshot);
-    toolbar->addWidget(tbTheme);
+    toolbar->addWidget(tbVoice);
+    toolbar->addWidget(tbTrain);
+    toolbar->addWidget(tbCapture);
     toolbar->addStretch();
     toolbar->addWidget(tbClear);
     vbox->addLayout(toolbar);
@@ -3737,7 +3729,7 @@ void MainWindow::buildUI()
     });
     connect(tbClear, &QPushButton::clicked, this, [this]() { m_log->clear(); });
 
-    connect(tbVoiceModels, &QPushButton::clicked, this, [this]() {
+    connect(tbVoice, &QPushButton::clicked, this, [this]() {
         for (auto* action : menuBar()->actions()) {
             auto* menu = action->menu();
             if (!menu) continue;
@@ -3749,7 +3741,7 @@ void MainWindow::buildUI()
             }
         }
     });
-    connect(tbTraining, &QPushButton::clicked, this, [this]() {
+    connect(tbTrain, &QPushButton::clicked, this, [this]() {
         for (auto* action : menuBar()->actions()) {
             auto* menu = action->menu();
             if (!menu) continue;
@@ -3761,7 +3753,7 @@ void MainWindow::buildUI()
             }
         }
     });
-    connect(tbScreenshot, &QPushButton::clicked, this, [this]() {
+    connect(tbCapture, &QPushButton::clicked, this, [this]() {
         for (auto* action : menuBar()->actions()) {
             auto* menu = action->menu();
             if (!menu) continue;
@@ -3783,14 +3775,6 @@ void MainWindow::buildUI()
         }
         popup->exec(hamburgerBtn->mapToGlobal(QPoint(0, hamburgerBtn->height())));
         popup->deleteLater();
-    });
-
-    // === Theme switcher ===
-    connect(tbTheme, &QPushButton::clicked, this, [this]() {
-        m_themeIndex = (m_themeIndex + 1) % ThemeManager::ThemeCount;
-        QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
-            .setValue(QStringLiteral("ui/theme"), m_themeIndex);
-        applyTheme(m_themeIndex);
     });
 
     // === Панель обновления ===
