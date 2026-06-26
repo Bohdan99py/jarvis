@@ -82,6 +82,11 @@ Jarvis::Jarvis(QObject* parent)
 
     // J2J Mesh: peer-to-peer network for multi-instance knowledge sync
     m_mesh = new J2JMeshConnector(this);
+    {
+        auto userOpt = DatabaseManager::instance().getUser(m_currentUserId);
+        if (userOpt && !userOpt->currentRole.isEmpty())
+            m_mesh->setNodeRole(userOpt->currentRole);
+    }
     connect(m_mesh, &J2JMeshConnector::peerAuthorized, this,
             [this](const QString& name, const QString& addr) {
         const QString msg = QStringLiteral("[MESH LINK]: Established secure link with peer '%1' (%2). "

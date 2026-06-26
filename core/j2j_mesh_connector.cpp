@@ -131,6 +131,7 @@ void J2JMeshConnector::sendBeacon()
     beacon[QStringLiteral("name")]     = m_nodeName;
     beacon[QStringLiteral("version")]  = QStringLiteral(JARVIS_VERSION);
     beacon[QStringLiteral("tcpPort")]  = m_tcpPort;
+    beacon[QStringLiteral("role")]     = m_nodeRole;
 
     QByteArray data = QJsonDocument(beacon).toJson(QJsonDocument::Compact);
 
@@ -179,6 +180,7 @@ void J2JMeshConnector::onReadBeacon()
         peer.nodeId   = peerId;
         peer.nodeName = obj[QStringLiteral("name")].toString();
         peer.version  = obj[QStringLiteral("version")].toString();
+        peer.role     = obj[QStringLiteral("role")].toString(QStringLiteral("Developer"));
         peer.address  = sender;
         peer.tcpPort  = static_cast<quint16>(obj[QStringLiteral("tcpPort")].toInt());
         peer.lastSeen = QDateTime::currentDateTime();
@@ -308,50 +310,92 @@ void J2JMeshConnector::handleHandshake(QTcpSocket* socket, const QJsonObject& da
     reply[QStringLiteral("nodeId")]       = m_nodeId;
     reply[QStringLiteral("name")]         = m_nodeName;
     reply[QStringLiteral("version")]      = QStringLiteral(JARVIS_VERSION);
+    reply[QStringLiteral("role")]         = m_nodeRole;
     reply[QStringLiteral("capabilities")] = capsArr;
 
     sendReply(socket, QStringLiteral("Handshake"), reply);
 
-    qDebug() << "[J2J] Handshake completed with" << peerName;
+    qDebug() << "[J2J] Handshake completed with" << peerName << "[" << data[QStringLiteral("role")].toString() << "]";
     emit peerAuthorized(peerName, socket->peerAddress().toString());
 }
 
 void J2JMeshConnector::handleSyncKnowledge(QTcpSocket* socket, const QJsonObject& data)
 {
-    const QString fromNode = data[QStringLiteral("fromNode")].toString();
-    const QJsonArray facts = data[QStringLiteral("facts")].toArray();
+    const QString fromNode  = data[QStringLiteral("fromNode")].toString();
+    const QString fromRole  = data[QStringLiteral("originRole")].toString(QStringLiteral("Developer"));
+    const QJsonArray facts  = data[QStringLiteral("facts")].toArray();
 
-    int imported = 0;
-    auto& db = DatabaseManager::instance();
+    int imported = 0, linked = 0;
 
     for (const auto& f : facts) {
         QJsonObject fact = f.toObject();
-        const QString category = fact[QStringLiteral("category")].toString();
-        const QString key      = fact[QStringLiteral("key")].toString();
-        const QString value    = fact[QStringLiteral("value")].toString();
+        const QString category  = fact[QStringLiteral("category")].toString();
+        const QString key       = fact[QStringLiteral("key")].toString();
+        const QString value     = fact[QStringLiteral("value")].toString();
+        const QString originTag = fact[QStringLiteral("origin")].toString(fromRole);
 
         if (key.isEmpty() || value.isEmpty()) continue;
         if (key.length() > 200 || value.length() > 500) continue;
 
-        // Insert via ActivityTracker's learnFact for dedup
+        const QString fullKey = QStringLiteral("mesh_") + key;
+
+        // Insert with origin profile role and dedup
         QSqlQuery q(QSqlDatabase::database());
-        q.prepare(R"(INSERT INTO knowledge_base (user_id, category, key, value, confidence)
-                     VALUES (1, :cat, :key, :val, 0.5)
+        q.prepare(R"(INSERT INTO knowledge_base
+                     (user_id, category, key, value, confidence, origin_profile_role)
+                     VALUES (1, :cat, :key, :val, 0.5, :origin)
                      ON CONFLICT(user_id, key) DO UPDATE SET
                          confidence = MIN(1.0, confidence + 0.05),
                          reinforcements = reinforcements + 1,
                          last_seen = datetime('now'))");
-        q.bindValue(":cat", category.left(30));
-        q.bindValue(":key", QStringLiteral("mesh_") + key);
-        q.bindValue(":val", value);
+        q.bindValue(":cat",    category.left(30));
+        q.bindValue(":key",    fullKey);
+        q.bindValue(":val",    value);
+        q.bindValue(":origin", originTag);
         if (q.exec()) ++imported;
+
+        // Synaptic cross-linking: QA facts → Developer tasks
+        if ((originTag == QStringLiteral("QA_Tester") || originTag == QStringLiteral("QA_Expertise"))
+            && (category == QStringLiteral("tool") || category == QStringLiteral("workflow")
+                || value.toLower().contains(QStringLiteral("bug"))
+                || value.toLower().contains(QStringLiteral("test"))))
+        {
+            // Search for a matching task in the local Kanban board
+            const QString valLower = value.toLower();
+            auto tasks = DatabaseManager::instance().getTasks(1);
+            for (const auto& task : tasks) {
+                if (task.status == QStringLiteral("Done")) continue;
+                const QString titleLo = task.title.toLower();
+                // Match if the fact references a keyword from the task title
+                bool match = false;
+                const auto words = valLower.split(' ', Qt::SkipEmptyParts);
+                for (const auto& w : words) {
+                    if (w.length() >= 4 && titleLo.contains(w)) { match = true; break; }
+                }
+                if (!match) continue;
+
+                // Establish structural link
+                QSqlQuery linkQ(QSqlDatabase::database());
+                linkQ.prepare(R"(UPDATE knowledge_base SET linked_artifact_id = :tid
+                                 WHERE user_id = 1 AND key = :key AND linked_artifact_id IS NULL)");
+                linkQ.bindValue(":tid", task.id);
+                linkQ.bindValue(":key", fullKey);
+                if (linkQ.exec() && linkQ.numRowsAffected() > 0) {
+                    ++linked;
+                    qDebug() << "[J2J Synapse]" << originTag << "fact linked to task:" << task.title;
+                }
+                break;
+            }
+        }
     }
 
     QJsonObject reply;
     reply[QStringLiteral("imported")] = imported;
+    reply[QStringLiteral("linked")]   = linked;
     sendReply(socket, QStringLiteral("SyncKnowledge"), reply);
 
-    qDebug() << "[J2J] Synced" << imported << "facts from" << fromNode;
+    qDebug() << "[J2J] Synced" << imported << "facts (" << linked << "cross-linked) from"
+             << fromNode << "[" << fromRole << "]";
     if (imported > 0)
         emit knowledgeReceived(fromNode, imported);
 }
@@ -405,16 +449,18 @@ void J2JMeshConnector::broadcastKnowledge(const QJsonArray& facts)
         auto* sock = new QTcpSocket(this);
         const QString token = authToken();
         const QString fromNode = m_nodeName;
+        const QString fromRole = m_nodeRole;
 
         connect(sock, &QTcpSocket::connected, this,
-                [sock, token, fromNode, facts]() {
+                [sock, token, fromNode, fromRole, facts]() {
             QJsonObject packet;
             packet[QStringLiteral("token")] = token;
             packet[QStringLiteral("type")]  = QStringLiteral("SyncKnowledge");
             QJsonObject data;
-            data[QStringLiteral("fromNode")] = fromNode;
-            data[QStringLiteral("facts")]    = facts;
-            packet[QStringLiteral("data")]   = data;
+            data[QStringLiteral("fromNode")]   = fromNode;
+            data[QStringLiteral("originRole")] = fromRole;
+            data[QStringLiteral("facts")]      = facts;
+            packet[QStringLiteral("data")]     = data;
             sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact) + "\n");
             sock->flush();
             QTimer::singleShot(5000, sock, &QTcpSocket::deleteLater);

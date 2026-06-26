@@ -421,6 +421,13 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=9");
         ver = 9;
     }
+    if (ver < 10) {
+        execQuery("ALTER TABLE knowledge_base ADD COLUMN origin_profile_role TEXT NOT NULL DEFAULT 'local'");
+        execQuery("ALTER TABLE knowledge_base ADD COLUMN linked_artifact_id INTEGER DEFAULT NULL");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_kb_origin ON knowledge_base(origin_profile_role)");
+        execQuery("UPDATE schema_version SET version=10");
+        ver = 10;
+    }
     return true;
 }
 

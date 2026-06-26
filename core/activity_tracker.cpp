@@ -407,20 +407,28 @@ void ActivityTracker::learnFact(qint64 userId, const QString& category,
     auto& db = DatabaseManager::instance();
     if (!db.isOpen()) return;
 
+    // Resolve the user's current role for origin tagging
+    QString originRole = QStringLiteral("local");
+    auto userOpt = db.getUser(userId);
+    if (userOpt && !userOpt->currentRole.isEmpty()) {
+        originRole = userOpt->currentRole;
+    }
+
     QSqlQuery q(QSqlDatabase::database());
-    q.prepare(R"(INSERT INTO knowledge_base (user_id, category, key, value, confidence)
-                 VALUES (:uid, :cat, :key, :val, :conf)
+    q.prepare(R"(INSERT INTO knowledge_base (user_id, category, key, value, confidence, origin_profile_role)
+                 VALUES (:uid, :cat, :key, :val, :conf, :origin)
                  ON CONFLICT(user_id, key) DO UPDATE SET
                      value = :val2,
                      confidence = MIN(1.0, confidence + 0.1),
                      reinforcements = reinforcements + 1,
                      last_seen = datetime('now'))");
-    q.bindValue(":uid",  userId);
-    q.bindValue(":cat",  category);
-    q.bindValue(":key",  key);
-    q.bindValue(":val",  value);
-    q.bindValue(":conf", confidence);
-    q.bindValue(":val2", value);
+    q.bindValue(":uid",    userId);
+    q.bindValue(":cat",    category);
+    q.bindValue(":key",    key);
+    q.bindValue(":val",    value);
+    q.bindValue(":conf",   confidence);
+    q.bindValue(":origin", originRole);
+    q.bindValue(":val2",   value);
     q.exec();
 
     emit knowledgeLearned(key, value);

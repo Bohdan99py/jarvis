@@ -21,6 +21,7 @@ struct J2JPeer {
     QString   nodeId;
     QString   nodeName;
     QString   version;
+    QString   role;         // peer's current_role (Developer, QA_Tester, etc.)
     QHostAddress address;
     quint16   tcpPort    = 0;
     QDateTime lastSeen;
@@ -40,6 +41,8 @@ public:
 
     void setNodeName(const QString& name) { m_nodeName = name; }
     QString nodeName() const { return m_nodeName; }
+    void setNodeRole(const QString& role) { m_nodeRole = role; }
+    QString nodeRole() const { return m_nodeRole; }
 
     QList<J2JPeer> activePeers() const;
     int peerCount() const;
@@ -86,6 +89,7 @@ private:
 
     QString  m_nodeId;
     QString  m_nodeName;
+    QString  m_nodeRole = QStringLiteral("Developer");
     quint16  m_tcpPort = 9090;
     quint16  m_udpPort = 9091;
     bool     m_running = false;
