@@ -117,6 +117,13 @@ public:
     // Markdown export
     static QString bugReportToMarkdown(const QaBugReport& bug);
 
+    // Desktop workspace for media assets
+    static QString workspaceOutputDir();
+
+    // Outbound image delivery to mobile
+    void sendImageToMobile(qint64 chatId, const QString& filePath,
+                           const QString& caption = QString());
+
     static constexpr int POLL_INTERVAL_MS    = 2000;
     static constexpr int TYPING_INTERVAL_MS  = 3000;
 
@@ -125,6 +132,8 @@ signals:
     void bugReportFiled(const QaBugReport& report);
     void conversationResponse(qint64 chatId, const QString& response);
     void voiceProcessed(qint64 chatId, const QString& transcript);
+    void imageReceived(qint64 chatId, const QString& savedPath);
+    void imageSent(qint64 chatId, const QString& filePath);
     void gatewayStarted();
     void gatewayStopped();
     void gatewayError(const QString& message);
@@ -151,6 +160,14 @@ private:
     // Voice file download + transcription pipeline
     void downloadTelegramFile(const QString& fileId, qint64 chatId,
                               bool isEnglish);
+
+    // Image handling
+    void handlePhotoMessage(qint64 chatId, const QJsonArray& photos,
+                            const QString& caption, bool isEnglish);
+    void downloadAndSaveImage(const QString& fileId, qint64 chatId,
+                              bool isEnglish);
+    void saveWorkspaceAsset(const QString& filename, const QByteArray& data,
+                            const QString& companionMarkdown = QString());
 
     // Chat session management
     TgChatSession& getOrCreateSession(qint64 chatId);

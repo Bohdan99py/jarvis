@@ -20,6 +20,11 @@
 #include <QSqlError>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QHttpMultiPart>
+#include <QHttpPart>
+#include <QtConcurrent>
 #include <QDebug>
 
 static const QString kTgApiBase = QStringLiteral("https://api.telegram.org/bot");
@@ -338,6 +343,15 @@ void J2JTelegramGateway::processUpdate(const QJsonObject& update)
                 : msg[QStringLiteral("audio")].toObject();
             TgChatSession& session = getOrCreateSession(chatId);
             handleVoiceMessage(chatId, voiceObj, session.isEnglish);
+            return;
+        }
+
+        // Photo upload
+        if (msg.contains(QStringLiteral("photo"))) {
+            QJsonArray photos = msg[QStringLiteral("photo")].toArray();
+            QString caption = msg[QStringLiteral("caption")].toString();
+            TgChatSession& session = getOrCreateSession(chatId);
+            handlePhotoMessage(chatId, photos, caption, session.isEnglish);
             return;
         }
 
@@ -962,6 +976,273 @@ void J2JTelegramGateway::downloadTelegramFile(const QString& fileId,
                     : QStringLiteral("⚠ Движок транскрипции недоступен."));
             }
         });
+    });
+}
+
+// ============================================================
+//  Desktop Media Workspace
+// ============================================================
+
+QString J2JTelegramGateway::workspaceOutputDir()
+{
+    const QString desktop = QStandardPaths::writableLocation(
+        QStandardPaths::DesktopLocation);
+    const QString dir = desktop + QStringLiteral("/JARVIS_Workspace/Outputs");
+    QDir().mkpath(dir);
+    return dir;
+}
+
+void J2JTelegramGateway::saveWorkspaceAsset(const QString& filename,
+                                              const QByteArray& data,
+                                              const QString& companionMarkdown)
+{
+    // Offload file I/O to a background thread
+    QtConcurrent::run([filename, data, companionMarkdown]() {
+        const QString dir = workspaceOutputDir();
+        const QString filePath = dir + QStringLiteral("/") + filename;
+
+        QFile file(filePath);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(data);
+            file.close();
+            qDebug() << "[TelegramGW] Asset saved:" << filePath
+                     << "(" << data.size() << "bytes)";
+        } else {
+            qWarning() << "[TelegramGW] Failed to save asset:" << filePath;
+        }
+
+        // Write companion Markdown guide alongside the asset
+        if (!companionMarkdown.isEmpty()) {
+            const QString baseName = QFileInfo(filename).completeBaseName();
+            const QString mdPath = dir + QStringLiteral("/") + baseName
+                                   + QStringLiteral("_guide.md");
+            QFile mdFile(mdPath);
+            if (mdFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                mdFile.write(companionMarkdown.toUtf8());
+                mdFile.close();
+            }
+        }
+    });
+}
+
+// ============================================================
+//  Inbound Image Handling (Telegram → Desktop)
+// ============================================================
+
+void J2JTelegramGateway::handlePhotoMessage(qint64 chatId,
+                                              const QJsonArray& photos,
+                                              const QString& caption,
+                                              bool isEnglish)
+{
+    if (photos.isEmpty()) return;
+
+    // Telegram sends multiple resolutions — pick the largest (last element)
+    QJsonObject bestPhoto = photos.last().toObject();
+    QString fileId = bestPhoto[QStringLiteral("file_id")].toString();
+    if (fileId.isEmpty()) return;
+
+    sendMessage(chatId, isEnglish
+        ? QStringLiteral("📷 Image received — saving to Desktop workspace...")
+        : QStringLiteral("📷 Изображение получено — сохраняю на Рабочий стол..."));
+
+    startTypingIndicator(chatId);
+    downloadAndSaveImage(fileId, chatId, isEnglish);
+}
+
+void J2JTelegramGateway::downloadAndSaveImage(const QString& fileId,
+                                                qint64 chatId,
+                                                bool isEnglish)
+{
+    // Step 1: resolve file_path via getFile
+    QUrl url(kTgApiBase + m_botToken + QStringLiteral("/getFile"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("file_id"), fileId);
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setTransferTimeout(10000);
+    QNetworkReply* reply = m_network->get(req);
+
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, chatId, isEnglish]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            stopTypingIndicator(chatId);
+            sendMessage(chatId, isEnglish
+                ? QStringLiteral("⚠ Failed to retrieve image metadata.")
+                : QStringLiteral("⚠ Не удалось получить метаданные изображения."));
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject root = doc.object();
+        if (!root[QStringLiteral("ok")].toBool()) {
+            stopTypingIndicator(chatId);
+            return;
+        }
+
+        QString remotePath = root[QStringLiteral("result")].toObject()
+                                 [QStringLiteral("file_path")].toString();
+        if (remotePath.isEmpty()) {
+            stopTypingIndicator(chatId);
+            return;
+        }
+
+        // Step 2: download the actual image bytes
+        QUrl dlUrl(QStringLiteral("https://api.telegram.org/file/bot")
+                   + m_botToken + QStringLiteral("/") + remotePath);
+        QNetworkRequest dlReq(dlUrl);
+        dlReq.setTransferTimeout(30000);
+        QNetworkReply* dlReply = m_network->get(dlReq);
+
+        connect(dlReply, &QNetworkReply::finished, this,
+                [this, dlReply, chatId, isEnglish, remotePath]() {
+            dlReply->deleteLater();
+            stopTypingIndicator(chatId);
+
+            if (dlReply->error() != QNetworkReply::NoError) {
+                sendMessage(chatId, isEnglish
+                    ? QStringLiteral("⚠ Image download failed.")
+                    : QStringLiteral("⚠ Скачивание изображения не удалось."));
+                return;
+            }
+
+            QByteArray imageData = dlReply->readAll();
+            if (imageData.isEmpty()) return;
+
+            // Determine extension from remote path
+            QString ext = QStringLiteral(".jpg");
+            if (remotePath.endsWith(QStringLiteral(".png")))       ext = QStringLiteral(".png");
+            else if (remotePath.endsWith(QStringLiteral(".webp"))) ext = QStringLiteral(".webp");
+            else if (remotePath.endsWith(QStringLiteral(".gif")))  ext = QStringLiteral(".gif");
+
+            // Timestamped filename
+            const QString timestamp = QDateTime::currentDateTime()
+                .toString(QStringLiteral("yyyyMMdd_HHmmss"));
+            const QString filename = QStringLiteral("IMG_%1%2").arg(timestamp, ext);
+
+            // Companion Markdown
+            QString markdown = QStringLiteral(
+                "# Image Asset: %1\n\n"
+                "| Field | Value |\n"
+                "|-------|-------|\n"
+                "| **Source** | Telegram Mobile Upload |\n"
+                "| **Chat ID** | %2 |\n"
+                "| **Received** | %3 |\n"
+                "| **Size** | %4 bytes |\n\n"
+                "![%1](%1)\n\n"
+                "---\n"
+                "_Saved by J.A.R.V.I.S. Media Workspace_\n"
+            ).arg(filename,
+                  QString::number(chatId),
+                  QDateTime::currentDateTime().toString(Qt::ISODate),
+                  QString::number(imageData.size()));
+
+            saveWorkspaceAsset(filename, imageData, markdown);
+
+            const QString savedPath = workspaceOutputDir()
+                                      + QStringLiteral("/") + filename;
+
+            sendMessage(chatId, (isEnglish
+                ? QStringLiteral("✅ Image saved to Desktop:\n`JARVIS_Workspace/Outputs/%1`")
+                : QStringLiteral("✅ Изображение сохранено на Рабочий стол:\n`JARVIS_Workspace/Outputs/%1`"))
+                .arg(filename));
+
+            emit imageReceived(chatId, savedPath);
+
+            qDebug() << "[TelegramGW] Image saved:" << savedPath;
+        });
+    });
+}
+
+// ============================================================
+//  Outbound Image Delivery (Desktop → Telegram)
+// ============================================================
+
+void J2JTelegramGateway::sendImageToMobile(qint64 chatId,
+                                            const QString& filePath,
+                                            const QString& caption)
+{
+    if (m_botToken.isEmpty()) return;
+
+    QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) {
+        qWarning() << "[TelegramGW] sendImageToMobile: file not found:" << filePath;
+        return;
+    }
+
+    // Read file in a background thread, then post from the main thread
+    QtConcurrent::run([this, chatId, filePath, caption, fi]() {
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            qWarning() << "[TelegramGW] Cannot open image for sending:" << filePath;
+            return;
+        }
+        QByteArray fileData = file.readAll();
+        file.close();
+
+        // Determine MIME type
+        QString mimeType = QStringLiteral("image/jpeg");
+        const QString suffix = fi.suffix().toLower();
+        if (suffix == QStringLiteral("png"))       mimeType = QStringLiteral("image/png");
+        else if (suffix == QStringLiteral("gif"))  mimeType = QStringLiteral("image/gif");
+        else if (suffix == QStringLiteral("webp")) mimeType = QStringLiteral("image/webp");
+        else if (suffix == QStringLiteral("bmp"))  mimeType = QStringLiteral("image/bmp");
+
+        // Must post the network request from the thread that owns m_network
+        QMetaObject::invokeMethod(this, [this, chatId, filePath, caption,
+                                          fileData, mimeType, fi]() {
+            QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendPhoto"));
+
+            auto* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+            // chat_id field
+            QHttpPart chatIdPart;
+            chatIdPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                 QStringLiteral("form-data; name=\"chat_id\""));
+            chatIdPart.setBody(QByteArray::number(chatId));
+            multiPart->append(chatIdPart);
+
+            // caption field
+            if (!caption.isEmpty()) {
+                QHttpPart captionPart;
+                captionPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                      QStringLiteral("form-data; name=\"caption\""));
+                captionPart.setBody(caption.toUtf8());
+                multiPart->append(captionPart);
+
+                QHttpPart parseModePart;
+                parseModePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                        QStringLiteral("form-data; name=\"parse_mode\""));
+                parseModePart.setBody(QByteArrayLiteral("Markdown"));
+                multiPart->append(parseModePart);
+            }
+
+            // photo file field
+            QHttpPart photoPart;
+            photoPart.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
+            photoPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                QStringLiteral("form-data; name=\"photo\"; filename=\"%1\"")
+                    .arg(fi.fileName()));
+            photoPart.setBody(fileData);
+            multiPart->append(photoPart);
+
+            QNetworkRequest req(url);
+            req.setTransferTimeout(30000);
+
+            QNetworkReply* reply = m_network->post(req, multiPart);
+            multiPart->setParent(reply);
+
+            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath]() {
+                reply->deleteLater();
+                if (reply->error() != QNetworkReply::NoError) {
+                    qWarning() << "[TelegramGW] Failed to send image:" << reply->errorString();
+                    return;
+                }
+                emit imageSent(chatId, filePath);
+                qDebug() << "[TelegramGW] Image sent to chat" << chatId << ":" << filePath;
+            });
+        }, Qt::QueuedConnection);
     });
 }
 
