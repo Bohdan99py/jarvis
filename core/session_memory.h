@@ -110,6 +110,9 @@ public:
     // Core Memory Stream: top-N time-decay scored events (RAG context)
     void setMemoryStreamContext(const QString& ctx) { m_memoryStreamContext = ctx; }
 
+    // Adaptive focus state from UserProfileManager
+    void setAdaptiveFocusContext(const QString& ctx) { m_adaptiveFocusContext = ctx; }
+
     // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
     void setLearningStats(int totalInteractions, int likedResponses,
                           int cachedResponses, int sessionsRecorded);
@@ -147,6 +150,7 @@ private:
     QString m_knowledgeSummary;
     QString m_activeUserName;
     QString m_memoryStreamContext;
+    QString m_adaptiveFocusContext;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;

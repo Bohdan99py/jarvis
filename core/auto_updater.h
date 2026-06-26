@@ -26,14 +26,14 @@ public:
     void downloadPendingUpdate();
 
     QString pendingVersion() const { return m_pendingVersion; }
+    QString pendingNotes()   const { return m_pendingNotes; }
     bool    hasUpdate()      const { return !m_pendingVersion.isEmpty(); }
 
     signals:
         void updateAvailable(const QString& version, const QString& releaseNotes, const QUrl& url);
     void noUpdateAvailable();
     void downloadProgress(int percent);          // 0..100
-    void downloadFinished(const QString& path);  // файл скачан на диск
-    void installerLaunched();                    // ShellExecuteW успешно запущен
+    void downloadFinished(const QString& path);  // file saved — UI opens folder
     void updateError(const QString& message);
 
 private:

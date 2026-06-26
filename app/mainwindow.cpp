@@ -170,19 +170,38 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
     connect(updater, &AutoUpdater::downloadFinished,
-            this, [this](const QString&) {
-        appendLog(Str::logSystem(), Str::updDownloaded(), Theme::LogColors::system);
-        hideUpdateBar();
-    });
-    connect(updater, &AutoUpdater::installerLaunched,
-            this, [this]() {
-        appendLog(Str::logSystem(),
-                  IS_EN ? QStringLiteral("Installer launched. Closing in 3 seconds...")
-                        : QStringLiteral("Установщик запущен. Закрываю через 3 секунды..."),
-                  Theme::LogColors::system);
-        QTimer::singleShot(3000, this, []() {
-            QCoreApplication::quit();
+            this, [this](const QString& path) {
+        m_updateProgress->setVisible(false);
+
+        m_updateBtn->setText(IS_EN ? QStringLiteral("Open Folder")
+                                   : QStringLiteral("Открыть папку"));
+        m_updateBtn->setVisible(true);
+        disconnect(m_updateBtn, nullptr, nullptr, nullptr);
+        connect(m_updateBtn, &QPushButton::clicked, this, [this, path]() {
+            QDesktopServices::openUrl(
+                QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
         });
+
+        const QString notes = m_jarvis->autoUpdater()->pendingNotes();
+        const auto& tc = ThemeManager::colors(m_themeIndex);
+        QString card = QStringLiteral(
+            "<div style='background:%1; border:1px solid %2; border-radius:10px; "
+            "padding:12px 16px; margin:4px 0;'>"
+            "<b style='color:%3;'>Update v%4 downloaded</b><br>"
+            "<span style='color:%5; font-size:12px;'>Saved to: %6</span>"
+        ).arg(tc.cardBg, tc.cardBorder, tc.system,
+              m_jarvis->autoUpdater()->pendingVersion(),
+              tc.timestamp, path);
+        if (!notes.isEmpty()) {
+            QString safeNotes = notes.toHtmlEscaped()
+                                     .replace(QStringLiteral("\n"), QStringLiteral("<br>"));
+            card += QStringLiteral("<hr style='border:none; border-top:1px solid %1; margin:8px 0;'>"
+                                   "<span style='color:%2; font-size:12px;'>%3</span>")
+                        .arg(tc.cardBorder, tc.timestamp, safeNotes);
+        }
+        card += QStringLiteral("</div>");
+        m_log->append(card);
+        m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
     });
     connect(updater, &AutoUpdater::updateError,
             this, [this](const QString& error) {
@@ -4035,22 +4054,17 @@ void MainWindow::buildUI()
 
     // === Нижняя панель ===
     auto* bottomBar = new QHBoxLayout();
+    bottomBar->setContentsMargins(4, 2, 4, 2);
+    bottomBar->setSpacing(6);
 
     auto* modeLabel = new QLabel(QStringLiteral("v") + QCoreApplication::applicationVersion(), this);
     modeLabel->setStyleSheet(
         QStringLiteral("color: #2a4a60; font-size: 11px; border: none; background: transparent;"));
-
-    auto* bSpacer = new QWidget(this);
-    bSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-
-    auto* kbBtn = new QPushButton(QStringLiteral("⌨"), this);
-    kbBtn->setObjectName(QStringLiteral("kbToggleBtn"));
-    kbBtn->setFixedWidth(40);
-    kbBtn->setToolTip(Str::menuKeyboard());
+    modeLabel->setFixedHeight(26);
 
     m_audioModeBtn = new QPushButton(m_audioManager->modeLabel(), this);
     m_audioModeBtn->setObjectName(QStringLiteral("audioModeBtn"));
-    m_audioModeBtn->setFixedWidth(44);
+    m_audioModeBtn->setFixedSize(36, 26);
     m_audioModeBtn->setToolTip(m_audioManager->modeTooltip());
     connect(m_audioModeBtn, &QPushButton::clicked, this, [this]() {
         m_audioManager->cycleMode();
@@ -4058,8 +4072,19 @@ void MainWindow::buildUI()
         m_audioModeBtn->setToolTip(m_audioManager->modeTooltip());
     });
 
+    auto* kbBtn = new QPushButton(QStringLiteral("⌨"), this);
+    kbBtn->setObjectName(QStringLiteral("kbToggleBtn"));
+    kbBtn->setFixedSize(36, 26);
+    kbBtn->setToolTip(Str::menuKeyboard());
+
+    m_likeBtn->setFixedSize(36, 26);
+
+    auto* bSpacer = new QWidget(this);
+    bSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    bSpacer->setFixedHeight(26);
+
     bottomBar->addWidget(modeLabel);
-    bottomBar->addWidget(m_likeBtn);   // 👍 кнопка лайка
+    bottomBar->addWidget(m_likeBtn);
     bottomBar->addWidget(m_audioModeBtn);
     bottomBar->addWidget(bSpacer);
     bottomBar->addWidget(kbBtn);

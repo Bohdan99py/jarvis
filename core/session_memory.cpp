@@ -789,6 +789,11 @@ QString SessionMemory::buildSystemPrompt() const
             "'according to my memory stream'.\n\n");
     }
 
+    // --- Adaptive Focus: auto-detected from Memory Stream ---
+    if (!m_adaptiveFocusContext.isEmpty()) {
+        prompt += m_adaptiveFocusContext;
+    }
+
     bool hasTaskBlock = false;
     QString taskBlock;
     if (!m_taskContext.currentTask.isEmpty()) {

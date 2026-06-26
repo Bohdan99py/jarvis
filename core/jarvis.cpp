@@ -15,8 +15,9 @@
 #include "attachments_manager.h"
 #include "brain.h"
 #include "pc_command_registry.h"
-#include "database_manager.h"  // response_cache для offline-ответов
+#include "database_manager.h"
 #include "activity_tracker.h"
+#include "user_profile_manager.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -871,6 +872,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             ev.importance = isCodingIntent(s) ? 0.7 : 0.4;
             DatabaseManager::instance().addMemoryEvent(ev);
         }
+
+        // Adaptive Focus: auto-detect from recent memory stream
+        m_memory->setAdaptiveFocusContext(
+            UserProfileManager::buildFocusContext(m_currentUserId));
     }
 
     // 1. Системные команды из реестра (только явные prefix-команды:
@@ -2128,20 +2133,65 @@ QString Jarvis::cmdSetGeminiKey(const QString& input)
 
 QString Jarvis::cmdHelp(const QString&)
 {
-    QString help = m_registry.helpText();
-    help += QStringLiteral("\n\n— Free conversation —\n"
-                           "Any question, task, or request → Claude API.\n"
-                           "'Find X', 'open Y', 'explain Z' — I'll figure out the rest.");
-    help += QStringLiteral("\n\n— File attachments —\n"
-                           "Click 📎 or drag files into the window.");
+    auto section = [](const QString& icon, const QString& title, const QString& body) {
+        return QStringLiteral(
+            "<div style='margin:6px 0; padding:10px 14px; "
+            "background:rgba(0,212,255,0.04); border:1px solid rgba(0,212,255,0.12); "
+            "border-radius:10px;'>"
+            "<b style='font-size:14px;'>%1 %2</b><br>"
+            "<span style='font-size:12px; line-height:1.6;'>%3</span>"
+            "</div>"
+        ).arg(icon, title, body);
+    };
+
+    QString html;
+    html += QStringLiteral("<b style='font-size:16px;'>J.A.R.V.I.S. — User Guide</b><br>");
+
+    html += section(QStringLiteral("🎤"), QStringLiteral("Voice & Hotkeys"),
+        QStringLiteral("Click the <b>mic button</b> or say <b>\"Jarvis\"</b> to activate voice input. "
+                       "Supports English and Russian offline (Vosk). "
+                       "Press <b>Enter</b> to send, <b>Ctrl+O</b> to attach files."));
+
+    html += section(QStringLiteral("🔊"), QStringLiteral("Audio Mixer"),
+        QStringLiteral("<b>Full Sound</b> — speech + UI effects enabled.<br>"
+                       "<b>Mute Speech</b> — UI sounds only, JARVIS stays silent.<br>"
+                       "<b>Mute All</b> — complete silence. Click the audio icon in the bottom bar to cycle."));
+
+    html += section(QStringLiteral("🧠"), QStringLiteral("Dynamic Profiling"),
+        QStringLiteral("JARVIS analyzes your recent interactions to detect your current focus "
+                       "(Developer, Creative, Admin, or Casual) and adapts its system instructions "
+                       "accordingly. No manual configuration needed — it shifts automatically as your "
+                       "workflow changes."));
+
+    html += section(QStringLiteral("💬"), QStringLiteral("Productivity Commands"),
+        QStringLiteral("<b>remember</b> key=value — store a fact<br>"
+                       "<b>recall</b> key — recall a stored fact<br>"
+                       "<b>memory</b> — show all stored facts<br>"
+                       "<b>profile</b> — show learned work patterns<br>"
+                       "<b>stats</b> — command usage statistics<br>"
+                       "<b>index</b> path — index a project for code context<br>"
+                       "<b>symbol</b> name — search indexed symbols<br>"
+                       "<b>grep</b> text — search text across project"));
+
+    html += section(QStringLiteral("📂"), QStringLiteral("Project & Code"),
+        QStringLiteral("Index a project folder and JARVIS auto-attaches relevant code "
+                       "fragments when you ask coding questions. Supports C++, Python, JS/TS, "
+                       "and more. Drag files into the window to attach them."));
+
+    html += section(QStringLiteral("🎨"), QStringLiteral("Themes"),
+        QStringLiteral("Click the theme button in the toolbar to cycle between "
+                       "<b>Cyberpunk</b> (dark neon), <b>Soft Light</b> (gentle porcelain), "
+                       "and <b>Glass</b> (frosted translucent)."));
+
     if (m_indexer->fileCount() > 0) {
-        help += QStringLiteral("\n\n— Project '")
-              + QFileInfo(m_indexer->projectRoot()).fileName()
-              + QStringLiteral("' indexed —\n")
-              + QString::number(m_indexer->fileCount()) + QStringLiteral(" files, ")
-              + QString::number(m_indexer->symbolCount()) + QStringLiteral(" symbols");
+        html += section(QStringLiteral("📁"), QStringLiteral("Active Project"),
+            QStringLiteral("<b>%1</b> — %2 files, %3 symbols indexed")
+                .arg(QFileInfo(m_indexer->projectRoot()).fileName())
+                .arg(m_indexer->fileCount())
+                .arg(m_indexer->symbolCount()));
     }
-    return help;
+
+    return html;
 }
 
 // ============================================================
