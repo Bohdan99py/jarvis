@@ -87,6 +87,11 @@ public:
     bool removePairedDevice(const QString& deviceId);
     int  pairedDeviceCount() const;
 
+    // Direct pairing from Telegram: returns true if PIN matched and device was bound
+    bool tryPairViaTelegram(const QString& pin, const QString& chatId,
+                            const QString& displayName);
+    static bool looksLikePin(const QString& text);
+
     // --- Wake-on-LAN Exporter ---
     QList<NetworkInterfaceInfo> discoverNetworkInterfaces() const;
     QString generateWolShortcutUrl(const NetworkInterfaceInfo& iface) const;

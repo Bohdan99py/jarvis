@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "j2j_telegram_gateway.h"
+#include "mobile_pairing_manager.h"
 #include "database_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
@@ -375,49 +376,101 @@ void J2JTelegramGateway::processUpdate(const QJsonObject& update)
 }
 
 // ============================================================
-//  Message Handling
+//  Message Handling — strict priority hierarchy:
+//    1. Pairing PIN  (highest — must not be swallowed by LLM)
+//    2. Slash commands (/start, /menu, /cancel, /help)
+//    3. Bug wizard (if a wizard session is active)
+//    4. Free-dialogue LLM routing (lowest)
 // ============================================================
 
 void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
                                         const QString& firstName)
 {
-    TgChatSession& session = getOrCreateSession(chatId);
-    bool en = session.isEnglish;
-
     emit messageReceived(chatId, text);
 
-    // Slash commands
+    // ── 1. TOP PRIORITY: Pairing PIN ────────────────────────
+    if (handlePairing(chatId, text, firstName))
+        return;
+
+    // ── 2. Slash commands ───────────────────────────────────
     if (text.startsWith(QLatin1Char('/'))) {
         const QString cmd = text.section(QLatin1Char(' '), 0, 0).toLower();
 
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
+            TgChatSession& session = getOrCreateSession(chatId);
             session.wizardStep = QaWizardStep::Idle;
-            sendMainMenu(chatId, en);
+            sendMainMenu(chatId, session.isEnglish);
             return;
         }
         if (cmd == QStringLiteral("/cancel")) {
+            TgChatSession& session = getOrCreateSession(chatId);
             if (session.wizardStep != QaWizardStep::Idle) {
                 session.wizardStep = QaWizardStep::Idle;
                 session.pendingBug = QaBugReport();
-                sendMessage(chatId, localized(TgStringId::BugCancelled, en));
+                sendMessage(chatId, localized(TgStringId::BugCancelled, session.isEnglish));
             }
-            sendMainMenu(chatId, en);
+            sendMainMenu(chatId, session.isEnglish);
             return;
         }
         if (cmd == QStringLiteral("/help")) {
-            sendMessage(chatId, localized(TgStringId::HelpText, en));
+            TgChatSession& session = getOrCreateSession(chatId);
+            sendMessage(chatId, localized(TgStringId::HelpText, session.isEnglish));
             return;
         }
+        // Unknown slash command — fall through to LLM
     }
 
-    // If inside bug wizard, advance the state machine
+    // ── 3. Bug wizard (active session) ──────────────────────
+    TgChatSession& session = getOrCreateSession(chatId);
     if (session.wizardStep != QaWizardStep::Idle) {
         advanceBugWizard(session, text);
         return;
     }
 
-    // Free-dialogue: route non-command text to the LLM
-    routeToLlm(chatId, text, en);
+    // ── 4. Free-dialogue LLM routing (lowest priority) ──────
+    routeToLlm(chatId, text, session.isEnglish);
+}
+
+// ============================================================
+//  Pairing PIN Handler
+// ============================================================
+
+bool J2JTelegramGateway::handlePairing(qint64 chatId, const QString& text,
+                                        const QString& firstName)
+{
+    if (!m_pairing) return false;
+    if (!m_pairing->hasActiveSession()) return false;
+    if (!MobilePairingManager::looksLikePin(text)) return false;
+
+    const QString displayName = firstName.isEmpty()
+        ? QStringLiteral("Telegram User %1").arg(chatId)
+        : firstName;
+
+    bool paired = m_pairing->tryPairViaTelegram(
+        text, QString::number(chatId), displayName);
+
+    if (paired) {
+        // Re-resolve locale now that the device is bound
+        TgChatSession& session = getOrCreateSession(chatId);
+        resolveSessionLocale(session);
+        bool en = session.isEnglish;
+
+        sendMessage(chatId,
+            localized(TgStringId::PairSuccess, en).arg(session.boundRole));
+        sendMainMenu(chatId, en);
+
+        emit pairingCompleted(chatId, session.boundRole);
+
+        qDebug() << "[TelegramGW] Device paired via PIN:" << displayName
+                 << "→ role:" << session.boundRole;
+    } else {
+        // PIN format matched but didn't pair — wrong or expired PIN
+        sendMessage(chatId,
+            QStringLiteral("❌ Invalid or expired PIN. Please check and try again.\n"
+                           "❌ Неверный или истёкший PIN. Проверьте и попробуйте снова."));
+    }
+
+    return true;  // consumed: don't pass to LLM regardless of outcome
 }
 
 void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,

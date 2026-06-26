@@ -30,6 +30,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class Jarvis;
 class TranslationEngine;
+class MobilePairingManager;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -110,6 +111,7 @@ public:
     // Jarvis core binding (for free-dialogue routing)
     void setJarvisCore(Jarvis* jarvis) { m_jarvis = jarvis; }
     void setTranslationEngine(TranslationEngine* te) { m_translator = te; }
+    void setPairingManager(MobilePairingManager* pm) { m_pairing = pm; }
 
     // Localization dictionary
     static QString localized(TgStringId id, bool english);
@@ -134,6 +136,7 @@ signals:
     void voiceProcessed(qint64 chatId, const QString& transcript);
     void imageReceived(qint64 chatId, const QString& savedPath);
     void imageSent(qint64 chatId, const QString& filePath);
+    void pairingCompleted(qint64 chatId, const QString& role);
     void gatewayStarted();
     void gatewayStopped();
     void gatewayError(const QString& message);
@@ -150,6 +153,10 @@ private:
                              qint64 chatId, const QString& data);
     void handleVoiceMessage(qint64 chatId, const QJsonObject& voice,
                             bool isEnglish);
+
+    // Pairing PIN handler — returns true if text was consumed as a PIN
+    bool handlePairing(qint64 chatId, const QString& text,
+                       const QString& firstName);
 
     // Free-dialogue LLM routing
     void routeToLlm(qint64 chatId, const QString& text, bool english);
@@ -201,6 +208,7 @@ private:
 
     Jarvis*                m_jarvis     = nullptr;
     TranslationEngine*     m_translator = nullptr;
+    MobilePairingManager*  m_pairing    = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator

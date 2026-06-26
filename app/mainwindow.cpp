@@ -2407,6 +2407,8 @@ void MainWindow::buildMenuBar()
             // Bind Jarvis core + translation engine for free dialogue and voice
             gw->setJarvisCore(m_jarvis);
             gw->setTranslationEngine(m_jarvis->translationEngine());
+            mesh->initMobilePairing();
+            gw->setPairingManager(mesh->mobilePairing());
 
             auto* dlg = new QDialog(this);
             dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
@@ -2504,6 +2506,18 @@ void MainWindow::buildMenuBar()
                     QStringLiteral("🐛 QA Bug: [%1] %2 — %3")
                         .arg(report.severity, report.title, report.reporterRole),
                     QStringLiteral("#ff9800"));
+            });
+
+            // Pairing success → update status in UI
+            connect(gw, &J2JTelegramGateway::pairingCompleted, dlg,
+                    [this, statusLbl](qint64 chatId, const QString& role) {
+                statusLbl->setText(QStringLiteral("🟢 PAIRED — chat %1 → %2").arg(chatId).arg(role));
+                statusLbl->setStyleSheet(QStringLiteral("color: #66FCF1; font-weight: bold;"));
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    (IS_EN ? QStringLiteral("📱 Mobile paired via Telegram → role: %1")
+                           : QStringLiteral("📱 Мобильный подключён через Telegram → роль: %1"))
+                    .arg(role),
+                    QStringLiteral("#66FCF1"));
             });
 
             layout->addStretch(1);

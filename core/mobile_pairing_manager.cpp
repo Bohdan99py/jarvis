@@ -298,6 +298,37 @@ void MobilePairingManager::bindDeviceToRole(const QString& mobileHandle,
     emit devicePaired(displayName, role);
 }
 
+bool MobilePairingManager::looksLikePin(const QString& text)
+{
+    if (text.length() != PIN_LENGTH) return false;
+    static const QString validChars = QStringLiteral("ABCDEFGHJKLMNPQRSTUVWXYZ23456789");
+    for (QChar ch : text) {
+        if (!validChars.contains(ch.toUpper())) return false;
+    }
+    return true;
+}
+
+bool MobilePairingManager::tryPairViaTelegram(const QString& pin,
+                                               const QString& chatId,
+                                               const QString& displayName)
+{
+    QMutexLocker lock(&m_mutex);
+    if (m_currentSession.pin.isEmpty() || m_currentSession.consumed)
+        return false;
+    if (QDateTime::currentDateTimeUtc() >= m_currentSession.expiresAt)
+        return false;
+    if (pin.toUpper() != m_currentSession.pin.toUpper())
+        return false;
+
+    m_currentSession.consumed = true;
+    const QString role = m_currentSession.targetRole;
+    lock.unlock();
+
+    bindDeviceToRole(chatId, displayName, QStringLiteral("telegram"), role);
+    stopGatewayPolling();
+    return true;
+}
+
 void MobilePairingManager::persistPairedDevice(const MobilePairedDevice& device)
 {
     QMutexLocker lock(&m_mutex);
