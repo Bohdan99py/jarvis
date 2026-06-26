@@ -137,6 +137,8 @@ add_library(JarvisCore STATIC
         core/task_manager_dialog.cpp
         core/j2j_mesh_connector.h
         core/j2j_mesh_connector.cpp
+        core/translation_engine.h
+        core/translation_engine.cpp
         core/virtual_keyboard.h
         core/virtual_keyboard.cpp
 

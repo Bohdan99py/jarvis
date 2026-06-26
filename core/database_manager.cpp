@@ -416,6 +416,11 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=8");
         ver = 8;
     }
+    if (ver < 9) {
+        execQuery("ALTER TABLE users ADD COLUMN current_role TEXT NOT NULL DEFAULT 'Developer'");
+        execQuery("UPDATE schema_version SET version=9");
+        ver = 9;
+    }
     return true;
 }
 
@@ -455,11 +460,12 @@ bool DatabaseManager::updateUser(const DbUserProfile& p)
     auto db = connection();
     QSqlQuery q(db);
     q.prepare("UPDATE users SET name=:n,scenario=:s,language=:l,"
-              "preferences=:p,last_seen=datetime('now') WHERE id=:id");
+              "preferences=:p,current_role=:r,last_seen=datetime('now') WHERE id=:id");
     q.bindValue(":n",  p.name);
     q.bindValue(":s",  p.scenario);
     q.bindValue(":l",  p.language);
     q.bindValue(":p",  p.preferences);
+    q.bindValue(":r",  p.currentRole.isEmpty() ? QStringLiteral("Developer") : p.currentRole);
     q.bindValue(":id", p.id);
     if (!q.exec()) { logError("updateUser", q.lastError()); return false; }
     return true;
@@ -473,6 +479,8 @@ static DbUserProfile userFromQuery(QSqlQuery& q)
     p.scenario    = q.value("scenario").toString();
     p.language    = q.value("language").toString();
     p.preferences = q.value("preferences").toString();
+    p.currentRole = q.value("current_role").toString();
+    if (p.currentRole.isEmpty()) p.currentRole = QStringLiteral("Developer");
     p.createdAt   = QDateTime::fromString(q.value("created_at").toString(), Qt::ISODate);
     p.lastSeen    = QDateTime::fromString(q.value("last_seen").toString(),  Qt::ISODate);
     return p;

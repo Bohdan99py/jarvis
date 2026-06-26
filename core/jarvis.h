@@ -34,6 +34,7 @@ class AttachmentsManager;
 class PcCommandRegistry;
 class TrainingPipelineController;
 class J2JMeshConnector;
+class TranslationEngine;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -82,6 +83,7 @@ public:
     PcCommandRegistry*  pcCommands()         const { return m_pcCommands; }
     ActivityTracker*    activityTracker()    const { return m_activity; }
     J2JMeshConnector*   meshConnector()      const { return m_mesh; }
+    TranslationEngine*  translationEngine()  const { return m_translator; }
 
     // Multi-user: switch active user (all data scoped to userId)
     void setCurrentUserId(qint64 id) { m_currentUserId = id; }
@@ -207,6 +209,7 @@ private:
     ActivityTracker*    m_activity     = nullptr;  // deep context awareness + knowledge base
     TrainingPipelineController* m_trainingPipeline = nullptr; // background voice→training data
     J2JMeshConnector*   m_mesh             = nullptr;  // P2P mesh network
+    TranslationEngine*  m_translator       = nullptr;  // multilingual translation + audio pipeline
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 

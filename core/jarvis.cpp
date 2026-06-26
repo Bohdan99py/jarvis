@@ -24,6 +24,7 @@
 #include "system_manifest.h"
 #include "task_manager_dialog.h"
 #include "j2j_mesh_connector.h"
+#include "translation_engine.h"
 #include "jarvis_paths.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
@@ -109,6 +110,12 @@ Jarvis::Jarvis(QObject* parent)
                            .arg(node, title));
     });
     m_mesh->start();
+
+    // Translation engine: FR/EN/RU translation + audio pipeline
+    m_translator = new TranslationEngine(this);
+    m_translator->setLlmApi(m_claudeApi);
+    m_translator->setTracker(m_activity);
+    m_translator->setUserId(m_currentUserId);
 
     // Автообновление
     m_updater = new AutoUpdater(

@@ -41,6 +41,7 @@ struct DbUserProfile {
     QString   scenario;               // "game_dev" | "gamer" | "qa" | "artist"
     QString   language;               // "ru" | "en" | "auto"
     QString   preferences;            // JSON доп. настроек
+    QString   currentRole;            // "Developer" | "QA_Tester" | "Student_Academic" | ...
     QDateTime createdAt;
     QDateTime lastSeen;
 };
@@ -260,5 +261,5 @@ private:
     QString        m_lastError;
     mutable QMutex m_mutex;
 
-    static constexpr int k_schemaVersion = 8;
+    static constexpr int k_schemaVersion = 9;
 };

@@ -27,7 +27,9 @@
 #include <QSqlQuery>
 #include "local_trainer.h"
 #include "task_manager_dialog.h"
+#include "translation_engine.h"
 #include "VoskSetupDialog.h"
+#include <QClipboard>
 #include "activity_tracker.h"
 #include "user_profile.h"
 #include <QFileDialog>
@@ -1916,6 +1918,149 @@ void MainWindow::buildMenuBar()
                     warnings, Theme::LogColors::error);
             }
         });
+    }
+
+    // --- Translation & Role ---
+    {
+        auto* toolsMenu = menuBar->addMenu(
+            IS_EN ? QStringLiteral("🌐 Tools") : QStringLiteral("🌐 Инструменты"));
+
+        // Translation pair toggle
+        auto* transMenu = toolsMenu->addMenu(
+            IS_EN ? QStringLiteral("Translation Pair") : QStringLiteral("Пара перевода"));
+
+        struct LangPair { QString label; QString src; QString tgt; };
+        const QList<LangPair> pairs = {
+            {QStringLiteral("FR → EN"), QStringLiteral("fr"), QStringLiteral("en")},
+            {QStringLiteral("FR → RU"), QStringLiteral("fr"), QStringLiteral("ru")},
+            {QStringLiteral("EN → RU"), QStringLiteral("en"), QStringLiteral("ru")},
+            {QStringLiteral("RU → EN"), QStringLiteral("ru"), QStringLiteral("en")},
+            {QStringLiteral("EN → FR"), QStringLiteral("en"), QStringLiteral("fr")},
+            {QStringLiteral("RU → FR"), QStringLiteral("ru"), QStringLiteral("fr")},
+        };
+        auto* langGroup = new QActionGroup(transMenu);
+        langGroup->setExclusive(true);
+        for (const auto& p : pairs) {
+            auto* act = transMenu->addAction(p.label);
+            act->setCheckable(true);
+            if (p.src == QStringLiteral("fr") && p.tgt == QStringLiteral("en"))
+                act->setChecked(true);
+            langGroup->addAction(act);
+            const QString src = p.src, tgt = p.tgt;
+            connect(act, &QAction::triggered, this, [this, src, tgt]() {
+                m_jarvis->translationEngine()->setSourceLang(src);
+                m_jarvis->translationEngine()->setTargetLang(tgt);
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    QStringLiteral("Translation pair: %1 → %2").arg(src.toUpper(), tgt.toUpper()),
+                    Theme::LogColors::system);
+            });
+        }
+
+        toolsMenu->addSeparator();
+
+        // Quick translate clipboard
+        auto* actTranslate = toolsMenu->addAction(
+            IS_EN ? QStringLiteral("Translate Clipboard")
+                  : QStringLiteral("Перевести буфер обмена"));
+        connect(actTranslate, &QAction::triggered, this, [this]() {
+            QString text = QApplication::clipboard()->text().trimmed();
+            if (text.isEmpty()) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("Clipboard is empty.") : QStringLiteral("Буфер обмена пуст."),
+                    Theme::LogColors::error);
+                return;
+            }
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                IS_EN ? QStringLiteral("Translating...") : QStringLiteral("Перевожу..."),
+                Theme::LogColors::system);
+            m_jarvis->translationEngine()->translateText(text,
+                m_jarvis->translationEngine()->targetLang(),
+                [this](bool ok, const QString& result) {
+                    if (ok) {
+                        appendLog(QStringLiteral("J.A.R.V.I.S."), result, Theme::LogColors::jarvis);
+                        QApplication::clipboard()->setText(result);
+                    } else {
+                        appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
+                            result, Theme::LogColors::error);
+                    }
+                });
+        });
+
+        // Process audio file
+        auto* actAudioTranslate = toolsMenu->addAction(
+            IS_EN ? QStringLiteral("Process Audio File...")
+                  : QStringLiteral("Обработать аудиофайл..."));
+        connect(actAudioTranslate, &QAction::triggered, this, [this]() {
+            QString path = QFileDialog::getOpenFileName(this,
+                IS_EN ? QStringLiteral("Select Audio File") : QStringLiteral("Выберите аудиофайл"),
+                QDir::homePath(),
+                QStringLiteral("Audio (*.wav *.pcm *.raw);;All (*)"));
+            if (path.isEmpty()) return;
+
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                (IS_EN ? QStringLiteral("Processing audio: ") : QStringLiteral("Обработка аудио: "))
+                + QFileInfo(path).fileName(),
+                Theme::LogColors::system);
+
+            auto* te = m_jarvis->translationEngine();
+            connect(te, &TranslationEngine::audioProcessingProgress, this,
+                    [this](const QString& stage) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    stage, Theme::LogColors::system);
+            }, Qt::SingleShotConnection);
+            connect(te, &TranslationEngine::audioTranscribed, this,
+                    [this](const QString& transcript, const QString& lang) {
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    QStringLiteral("[Transcript %1]: %2").arg(lang.toUpper(), transcript.left(500)),
+                    Theme::LogColors::jarvis);
+            }, Qt::SingleShotConnection);
+            connect(te, &TranslationEngine::audioSummaryReady, this,
+                    [this](const QString& summary) {
+                appendLog(QStringLiteral("J.A.R.V.I.S."), summary, Theme::LogColors::jarvis);
+            }, Qt::SingleShotConnection);
+            connect(te, &TranslationEngine::audioProcessingError, this,
+                    [this](const QString& err) {
+                appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
+                    err, Theme::LogColors::error);
+            }, Qt::SingleShotConnection);
+
+            te->processAudioFile(path, te->targetLang());
+        });
+
+        toolsMenu->addSeparator();
+
+        // Role switcher
+        auto* roleMenu = toolsMenu->addMenu(
+            IS_EN ? QStringLiteral("Switch Role") : QStringLiteral("Сменить роль"));
+        struct RoleEntry { QString label; QString role; };
+        const QList<RoleEntry> roles = {
+            {IS_EN ? QStringLiteral("Developer") : QStringLiteral("Разработчик"),
+             QStringLiteral("Developer")},
+            {IS_EN ? QStringLiteral("QA Tester") : QStringLiteral("QA Тестировщик"),
+             QStringLiteral("QA_Tester")},
+            {IS_EN ? QStringLiteral("Student / Academic") : QStringLiteral("Студент / Академия"),
+             QStringLiteral("Student_Academic")},
+        };
+        auto* roleGroup = new QActionGroup(roleMenu);
+        roleGroup->setExclusive(true);
+        for (const auto& r : roles) {
+            auto* act = roleMenu->addAction(r.label);
+            act->setCheckable(true);
+            if (r.role == QStringLiteral("Developer")) act->setChecked(true);
+            roleGroup->addAction(act);
+            const QString roleName = r.role;
+            connect(act, &QAction::triggered, this, [this, roleName]() {
+                auto& db = DatabaseManager::instance();
+                auto user = db.getUser(m_jarvis->currentUserId());
+                if (user) {
+                    user->currentRole = roleName;
+                    db.updateUser(*user);
+                }
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    (IS_EN ? QStringLiteral("Role switched to: ") : QStringLiteral("Роль: ")) + roleName,
+                    Theme::LogColors::system);
+            });
+        }
     }
 
     // --- Обновление ---
