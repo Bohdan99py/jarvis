@@ -18,8 +18,6 @@
 
 #include "command_registry.h"
 #include "applauncher.h"
-#include "user_profile.h"
-#include "activity_tracker.h"
 
 class KeyEmulator;
 class SessionMemory;
@@ -31,6 +29,8 @@ class AutoUpdater;
 class ProjectIndexer;
 class CodeActions;
 class AttachmentsManager;
+class UserProfile;
+class ActivityTracker;
 class PcCommandRegistry;
 class TrainingPipelineController;
 class J2JMeshConnector;

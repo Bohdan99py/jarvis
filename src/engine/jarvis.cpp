@@ -18,6 +18,7 @@
 #include "database_manager.h"
 #include <QSqlQuery>
 #include <QSqlDatabase>
+#include "user_profile.h"
 #include "activity_tracker.h"
 #include "user_profile_manager.h"
 #include "training_processing_worker.h"
