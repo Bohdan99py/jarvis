@@ -51,7 +51,7 @@ QString MediaRoutingManager::detectMediaType(const QString& filePath)
     if (kImageExts.contains(ext)) return QStringLiteral("image");
     if (kVideoExts.contains(ext)) return QStringLiteral("video");
 
-    return QStringLiteral("unknown");
+    return QStringLiteral("document");
 }
 
 // ============================================================
@@ -69,16 +69,13 @@ void MediaRoutingManager::routeMedia(const QString& filePath,
     }
 
     const QString mediaType = detectMediaType(filePath);
-    if (mediaType == QStringLiteral("unknown")) {
-        qWarning() << "[MediaRouter] Unsupported media type:" << fi.suffix();
-        return;
+
+    // ── 1. Local route: display in preview window (images/videos only) ──
+    if (mediaType != QStringLiteral("document")) {
+        if (!m_preview)
+            m_preview = new MediaPreviewWidget;
+        m_preview->displayMedia(filePath, mediaType);
     }
-
-    // ── 1. Local route: display in preview window ──────────
-    if (!m_preview)
-        m_preview = new MediaPreviewWidget;
-
-    m_preview->displayMedia(filePath, mediaType);
 
     // ── 2. Remote route: send to Telegram ──────────────────
     if (m_gateway && targetChatId != 0) {
@@ -86,6 +83,8 @@ void MediaRoutingManager::routeMedia(const QString& filePath,
             m_gateway->sendImageToMobile(targetChatId, filePath, caption);
         } else if (mediaType == QStringLiteral("video")) {
             m_gateway->sendVideoToMobile(targetChatId, filePath, caption);
+        } else {
+            m_gateway->sendDocumentToMobile(targetChatId, filePath, caption);
         }
     } else {
         qDebug() << "[MediaRouter] No gateway or chatId — local preview only";

@@ -133,6 +133,13 @@ public:
                            const QString& caption = QString());
     void sendVideoToMobile(qint64 chatId, const QString& filePath,
                            const QString& caption = QString());
+    void sendDocumentToMobile(qint64 chatId, const QString& filePath,
+                              const QString& caption = QString());
+
+    // Send photo from an in-memory buffer (e.g. rendered schematic)
+    void sendPhotoFromBuffer(qint64 chatId, const QByteArray& imageData,
+                             const QString& filename,
+                             const QString& caption = QString());
 
     static constexpr int POLL_INTERVAL_MS    = 2000;
     static constexpr int TYPING_INTERVAL_MS  = 3000;
@@ -145,6 +152,7 @@ signals:
     void imageReceived(qint64 chatId, const QString& savedPath);
     void imageSent(qint64 chatId, const QString& filePath);
     void videoSent(qint64 chatId, const QString& filePath);
+    void documentSent(qint64 chatId, const QString& filePath);
     void pairingCompleted(qint64 chatId, const QString& role);
     void gatewayStarted();
     void gatewayStopped();

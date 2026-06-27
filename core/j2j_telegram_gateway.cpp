@@ -1447,42 +1447,42 @@ void J2JTelegramGateway::sendImageToMobile(qint64 chatId,
     QFileInfo fi(filePath);
     if (!fi.exists() || !fi.isFile()) {
         qWarning() << "[TelegramGW] sendImageToMobile: file not found:" << filePath;
+        sendMessage(chatId, QStringLiteral("⚠ Image not found: `%1`").arg(fi.fileName()));
         return;
     }
 
-    // Read file in a background thread, then post from the main thread
     (void)QtConcurrent::run([this, chatId, filePath, caption, fi]() {
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly)) {
             qWarning() << "[TelegramGW] Cannot open image for sending:" << filePath;
+            QMetaObject::invokeMethod(this, [this, chatId, fi]() {
+                sendMessage(chatId, QStringLiteral("⚠ Cannot read image: `%1`").arg(fi.fileName()));
+            }, Qt::QueuedConnection);
             return;
         }
         QByteArray fileData = file.readAll();
         file.close();
 
-        // Determine MIME type
         QString mimeType = QStringLiteral("image/jpeg");
         const QString suffix = fi.suffix().toLower();
         if (suffix == QStringLiteral("png"))       mimeType = QStringLiteral("image/png");
         else if (suffix == QStringLiteral("gif"))  mimeType = QStringLiteral("image/gif");
         else if (suffix == QStringLiteral("webp")) mimeType = QStringLiteral("image/webp");
         else if (suffix == QStringLiteral("bmp"))  mimeType = QStringLiteral("image/bmp");
+        else if (suffix == QStringLiteral("svg"))  mimeType = QStringLiteral("image/svg+xml");
 
-        // Must post the network request from the thread that owns m_network
         QMetaObject::invokeMethod(this, [this, chatId, filePath, caption,
                                           fileData, mimeType, fi]() {
             QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendPhoto"));
 
             auto* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
-            // chat_id field
             QHttpPart chatIdPart;
             chatIdPart.setHeader(QNetworkRequest::ContentDispositionHeader,
                                  QStringLiteral("form-data; name=\"chat_id\""));
             chatIdPart.setBody(QByteArray::number(chatId));
             multiPart->append(chatIdPart);
 
-            // caption field
             if (!caption.isEmpty()) {
                 QHttpPart captionPart;
                 captionPart.setHeader(QNetworkRequest::ContentDispositionHeader,
@@ -1497,7 +1497,6 @@ void J2JTelegramGateway::sendImageToMobile(qint64 chatId,
                 multiPart->append(parseModePart);
             }
 
-            // photo file field
             QHttpPart photoPart;
             photoPart.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
             photoPart.setHeader(QNetworkRequest::ContentDispositionHeader,
@@ -1512,10 +1511,20 @@ void J2JTelegramGateway::sendImageToMobile(qint64 chatId,
             QNetworkReply* reply = m_network->post(req, multiPart);
             multiPart->setParent(reply);
 
-            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath]() {
+            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath, fi, caption]() {
                 reply->deleteLater();
                 if (reply->error() != QNetworkReply::NoError) {
-                    qWarning() << "[TelegramGW] Failed to send image:" << reply->errorString();
+                    qWarning() << "[TelegramGW] sendPhoto failed:" << reply->errorString()
+                               << "— falling back to sendDocument";
+                    sendDocumentToMobile(chatId, filePath, caption);
+                    return;
+                }
+                const QByteArray body = reply->readAll();
+                const QJsonObject resp = QJsonDocument::fromJson(body).object();
+                if (!resp[QStringLiteral("ok")].toBool()) {
+                    qWarning() << "[TelegramGW] sendPhoto API error:" << body
+                               << "— falling back to sendDocument";
+                    sendDocumentToMobile(chatId, filePath, caption);
                     return;
                 }
                 emit imageSent(chatId, filePath);
@@ -1536,6 +1545,7 @@ void J2JTelegramGateway::sendVideoToMobile(qint64 chatId,
     QFileInfo fi(filePath);
     if (!fi.exists() || !fi.isFile()) {
         qWarning() << "[TelegramGW] sendVideoToMobile: file not found:" << filePath;
+        sendMessage(chatId, QStringLiteral("⚠ Video not found: `%1`").arg(fi.fileName()));
         return;
     }
 
@@ -1543,6 +1553,9 @@ void J2JTelegramGateway::sendVideoToMobile(qint64 chatId,
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly)) {
             qWarning() << "[TelegramGW] Cannot open video for sending:" << filePath;
+            QMetaObject::invokeMethod(this, [this, chatId, fi]() {
+                sendMessage(chatId, QStringLiteral("⚠ Cannot read video: `%1`").arg(fi.fileName()));
+            }, Qt::QueuedConnection);
             return;
         }
         QByteArray fileData = file.readAll();
@@ -1596,16 +1609,194 @@ void J2JTelegramGateway::sendVideoToMobile(qint64 chatId,
             QNetworkReply* reply = m_network->post(req, multiPart);
             multiPart->setParent(reply);
 
-            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath]() {
+            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath, fi, caption]() {
                 reply->deleteLater();
                 if (reply->error() != QNetworkReply::NoError) {
-                    qWarning() << "[TelegramGW] Failed to send video:" << reply->errorString();
+                    qWarning() << "[TelegramGW] sendVideo failed:" << reply->errorString()
+                               << "— falling back to sendDocument";
+                    sendDocumentToMobile(chatId, filePath, caption);
+                    return;
+                }
+                const QByteArray body = reply->readAll();
+                const QJsonObject resp = QJsonDocument::fromJson(body).object();
+                if (!resp[QStringLiteral("ok")].toBool()) {
+                    qWarning() << "[TelegramGW] sendVideo API error:" << body
+                               << "— falling back to sendDocument";
+                    sendDocumentToMobile(chatId, filePath, caption);
                     return;
                 }
                 emit videoSent(chatId, filePath);
                 qDebug() << "[TelegramGW] Video sent to chat" << chatId << ":" << filePath;
             });
         }, Qt::QueuedConnection);
+    });
+}
+
+// ── Document delivery via Telegram Bot API /sendDocument ─────
+
+void J2JTelegramGateway::sendDocumentToMobile(qint64 chatId,
+                                               const QString& filePath,
+                                               const QString& caption)
+{
+    if (m_botToken.isEmpty()) return;
+
+    QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) {
+        qWarning() << "[TelegramGW] sendDocumentToMobile: file not found:" << filePath;
+        sendMessage(chatId, QStringLiteral("⚠ File not found: `%1`").arg(fi.fileName()));
+        return;
+    }
+
+    (void)QtConcurrent::run([this, chatId, filePath, caption, fi]() {
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            qWarning() << "[TelegramGW] Cannot open file for sending:" << filePath;
+            QMetaObject::invokeMethod(this, [this, chatId, fi]() {
+                sendMessage(chatId, QStringLiteral("⚠ Cannot read file: `%1`").arg(fi.fileName()));
+            }, Qt::QueuedConnection);
+            return;
+        }
+        QByteArray fileData = file.readAll();
+        file.close();
+
+        QMetaObject::invokeMethod(this, [this, chatId, filePath, caption,
+                                          fileData, fi]() {
+            QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendDocument"));
+
+            auto* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+            QHttpPart chatIdPart;
+            chatIdPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                 QStringLiteral("form-data; name=\"chat_id\""));
+            chatIdPart.setBody(QByteArray::number(chatId));
+            multiPart->append(chatIdPart);
+
+            if (!caption.isEmpty()) {
+                QHttpPart captionPart;
+                captionPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                      QStringLiteral("form-data; name=\"caption\""));
+                captionPart.setBody(caption.toUtf8());
+                multiPart->append(captionPart);
+
+                QHttpPart parseModePart;
+                parseModePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                        QStringLiteral("form-data; name=\"parse_mode\""));
+                parseModePart.setBody(QByteArrayLiteral("Markdown"));
+                multiPart->append(parseModePart);
+            }
+
+            QHttpPart docPart;
+            docPart.setHeader(QNetworkRequest::ContentTypeHeader,
+                              QStringLiteral("application/octet-stream"));
+            docPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                QStringLiteral("form-data; name=\"document\"; filename=\"%1\"")
+                    .arg(fi.fileName()));
+            docPart.setBody(fileData);
+            multiPart->append(docPart);
+
+            QNetworkRequest req(url);
+            req.setTransferTimeout(60000);
+
+            QNetworkReply* reply = m_network->post(req, multiPart);
+            multiPart->setParent(reply);
+
+            connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filePath, fi]() {
+                reply->deleteLater();
+                if (reply->error() != QNetworkReply::NoError) {
+                    qWarning() << "[TelegramGW] sendDocument failed:" << reply->errorString();
+                    sendMessage(chatId, QStringLiteral("⚠ Failed to send file `%1`: %2")
+                        .arg(fi.fileName(), reply->errorString()));
+                    return;
+                }
+                const QByteArray body = reply->readAll();
+                const QJsonObject resp = QJsonDocument::fromJson(body).object();
+                if (!resp[QStringLiteral("ok")].toBool()) {
+                    const QString desc = resp[QStringLiteral("description")].toString();
+                    qWarning() << "[TelegramGW] sendDocument API error:" << desc;
+                    sendMessage(chatId, QStringLiteral("⚠ Telegram rejected file `%1`: %2")
+                        .arg(fi.fileName(), desc));
+                    return;
+                }
+                emit documentSent(chatId, filePath);
+                qDebug() << "[TelegramGW] Document sent to chat" << chatId << ":" << filePath;
+            });
+        }, Qt::QueuedConnection);
+    });
+}
+
+// ── Photo from in-memory buffer ─────────────────────────────
+
+void J2JTelegramGateway::sendPhotoFromBuffer(qint64 chatId,
+                                              const QByteArray& imageData,
+                                              const QString& filename,
+                                              const QString& caption)
+{
+    if (m_botToken.isEmpty() || imageData.isEmpty()) return;
+
+    QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendPhoto"));
+
+    auto* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    QHttpPart chatIdPart;
+    chatIdPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                         QStringLiteral("form-data; name=\"chat_id\""));
+    chatIdPart.setBody(QByteArray::number(chatId));
+    multiPart->append(chatIdPart);
+
+    if (!caption.isEmpty()) {
+        QHttpPart captionPart;
+        captionPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                              QStringLiteral("form-data; name=\"caption\""));
+        captionPart.setBody(caption.toUtf8());
+        multiPart->append(captionPart);
+
+        QHttpPart parseModePart;
+        parseModePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                                QStringLiteral("form-data; name=\"parse_mode\""));
+        parseModePart.setBody(QByteArrayLiteral("Markdown"));
+        multiPart->append(parseModePart);
+    }
+
+    QString mimeType = QStringLiteral("image/png");
+    const QString ext = QFileInfo(filename).suffix().toLower();
+    if (ext == QStringLiteral("jpg") || ext == QStringLiteral("jpeg"))
+        mimeType = QStringLiteral("image/jpeg");
+    else if (ext == QStringLiteral("gif"))
+        mimeType = QStringLiteral("image/gif");
+    else if (ext == QStringLiteral("webp"))
+        mimeType = QStringLiteral("image/webp");
+
+    QHttpPart photoPart;
+    photoPart.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
+    photoPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+        QStringLiteral("form-data; name=\"photo\"; filename=\"%1\"")
+            .arg(filename.isEmpty() ? QStringLiteral("image.png") : filename));
+    photoPart.setBody(imageData);
+    multiPart->append(photoPart);
+
+    QNetworkRequest req(url);
+    req.setTransferTimeout(30000);
+
+    QNetworkReply* reply = m_network->post(req, multiPart);
+    multiPart->setParent(reply);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, chatId, filename]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "[TelegramGW] sendPhotoFromBuffer failed:" << reply->errorString();
+            sendMessage(chatId, QStringLiteral("⚠ Failed to send image `%1`: %2")
+                .arg(filename, reply->errorString()));
+            return;
+        }
+        const QByteArray body = reply->readAll();
+        const QJsonObject resp = QJsonDocument::fromJson(body).object();
+        if (!resp[QStringLiteral("ok")].toBool()) {
+            qWarning() << "[TelegramGW] sendPhotoFromBuffer API error:" << body;
+            sendMessage(chatId, QStringLiteral("⚠ Telegram rejected image `%1`").arg(filename));
+            return;
+        }
+        emit imageSent(chatId, filename);
+        qDebug() << "[TelegramGW] Buffer image sent to chat" << chatId << ":" << filename;
     });
 }
 
