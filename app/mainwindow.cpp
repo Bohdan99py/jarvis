@@ -3415,6 +3415,19 @@ recreate it on next launch. Session memory (<b>jarvis_memory.json</b>) is separa
 // Events
 // ============================================================
 
+bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    if (obj == m_input && event->type() == QEvent::KeyPress) {
+        auto* ke = static_cast<QKeyEvent*>(event);
+        if ((ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter)
+            && !(ke->modifiers() & Qt::ShiftModifier)) {
+            onSend();
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
+}
+
 void MainWindow::keyPressEvent(QKeyEvent* e)
 {
     if (e->key() == Qt::Key_Escape) {
@@ -3591,7 +3604,7 @@ bool MainWindow::tryOpenApp(const QString& userText, const Intent& intent)
 
 void MainWindow::onSend()
 {
-    QString text = m_input->text().trimmed();
+    QString text = m_input->toPlainText().trimmed();
 
     const bool hasAttach = !m_jarvis->attachments()->isEmpty();
     if (text.isEmpty() && !hasAttach) return;
@@ -3952,7 +3965,7 @@ void MainWindow::onClarificationChoice(int choice)
                 Theme::LogColors::jarvis);
         } else {
             // Отказался — отправляем в AI
-            m_input->setText(m_pendingInput);
+            m_input->setPlainText(m_pendingInput);
             onSend();
         }
         m_pendingSuggestionAction.clear();
@@ -3975,7 +3988,7 @@ void MainWindow::onClarificationChoice(int choice)
     }
 
     hideClarification();
-    m_input->setText(enriched);
+    m_input->setPlainText(enriched);
     onSend();
 }
 
@@ -4449,7 +4462,7 @@ void MainWindow::buildUI()
             IS_EN ? QStringLiteral("Search chat history:") : QStringLiteral("Поиск по истории:"),
             QLineEdit::Normal, QString(), &ok);
         if (ok && !query.trimmed().isEmpty()) {
-            m_input->setText(QStringLiteral("вспомни ") + query.trimmed());
+            m_input->setPlainText(QStringLiteral("вспомни ") + query.trimmed());
             onSend();
         }
     });
@@ -4622,7 +4635,7 @@ void MainWindow::buildUI()
 
     connect(m_suggestionBtn, &QPushButton::clicked, this, [this]() {
         if (!m_pendingSuggestionAction.isEmpty()) {
-            m_input->setText(m_pendingSuggestionAction);
+            m_input->setPlainText(m_pendingSuggestionAction);
             onSend();
         }
         m_suggestionBar->setVisible(false);
@@ -4734,9 +4747,26 @@ void MainWindow::buildUI()
                        "QPushButton:hover { background-color: #0f2438; color: #00d4ff; }"));
     connect(m_attachBtn, &QPushButton::clicked, this, &MainWindow::onAttachClicked);
 
-    m_input = new QLineEdit(this);
+    m_input = new QTextEdit(this);
     m_input->setObjectName(QStringLiteral("inputField"));
     m_input->setPlaceholderText(Str::inputPlaceholder());
+    m_input->setAcceptRichText(false);
+    m_input->setTabChangesFocus(true);
+    m_input->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_input->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_input->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    m_input->setFixedHeight(38);
+    m_input->document()->setDocumentMargin(0);
+    connect(m_input->document(), &QTextDocument::contentsChanged, this, [this]() {
+        const int docHeight = static_cast<int>(m_input->document()->size().height());
+        const int padding = 18;
+        const int minH = 38;
+        const int maxH = 160;
+        const int target = qBound(minH, docHeight + padding, maxH);
+        m_input->setFixedHeight(target);
+        m_input->setVerticalScrollBarPolicy(
+            target >= maxH ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
+    });
 
     auto* sendBtn = new QPushButton(QStringLiteral("▶"), this);
     sendBtn->setObjectName(QStringLiteral("sendBtn"));
@@ -4834,7 +4864,7 @@ void MainWindow::buildUI()
 
     // === Подключения ===
     connect(sendBtn, &QPushButton::clicked, this, &MainWindow::onSend);
-    connect(m_input, &QLineEdit::returnPressed, this, &MainWindow::onSend);
+    m_input->installEventFilter(this);
     connect(kbBtn, &QPushButton::clicked, this, &MainWindow::toggleKeyboard);
     connect(m_micBtn, &QPushButton::clicked, this, &MainWindow::onMicButtonClicked);
     connect(m_likeBtn, &QPushButton::clicked, this, &MainWindow::onLikeLastResponse);
@@ -5052,11 +5082,15 @@ void MainWindow::buildUI()
     });
 
     connect(m_keyboard, &VirtualKeyboardWidget::charPressed, this, [this](const QString& ch) {
-        m_input->insert(ch);
+        m_input->insertPlainText(ch);
         m_input->setFocus();
     });
     connect(m_keyboard, &VirtualKeyboardWidget::backspacePressed, this, [this]() {
-        m_input->backspace();
+        QTextCursor tc = m_input->textCursor();
+        if (!tc.atStart()) {
+            tc.deletePreviousChar();
+            m_input->setTextCursor(tc);
+        }
         m_input->setFocus();
     });
     connect(m_keyboard, &VirtualKeyboardWidget::enterPressed, this, &MainWindow::onSend);
@@ -5257,7 +5291,7 @@ void MainWindow::onVoiceText(const QString& text, const QString& lang)
               QStringLiteral("[%1] %2").arg(lang.toUpper(), text),
               QStringLiteral("#4a9a6a"));
 
-    m_input->setText(text);
+    m_input->setPlainText(text);
 
     // Помечаем что ввод голосовой — onAsyncResponse сохранит пару в voice_journal
     m_lastInputWasVoice = true;

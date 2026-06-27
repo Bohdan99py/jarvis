@@ -50,6 +50,7 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
     void keyPressEvent(QKeyEvent* e) override;
     void closeEvent(QCloseEvent* e) override;
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -115,7 +116,7 @@ private:
     // ── Основные виджеты ──────────────────────────────────
     Jarvis*                 m_jarvis     = nullptr;
     QTextEdit*              m_log        = nullptr;
-    QLineEdit*              m_input      = nullptr;
+    QTextEdit*              m_input      = nullptr;
     QLabel*                 m_dot        = nullptr;
     QLabel*                 m_status     = nullptr;
     QLabel*                 m_agentLabel = nullptr;

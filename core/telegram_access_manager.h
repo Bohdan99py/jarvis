@@ -69,6 +69,9 @@ public:
     bool         setRole(qint64 chatId, TelegramRole role);
     bool         isAdmin(qint64 chatId) const;
 
+    // Absolute admin override — primary owner always has full access
+    bool isPrimaryOwner(qint64 chatId) const;
+
     // First user to interact becomes Admin automatically
     void ensureRegistered(qint64 chatId, const QString& displayName);
 
@@ -91,8 +94,10 @@ signals:
 
 private:
     void ensureTables();
+    void resolvePrimaryOwner();
     static QMap<QString, TelegramRole> buildCommandAcl();
 
     mutable QMutex m_mutex;
+    mutable qint64 m_primaryOwnerId = 0;
     static const QMap<QString, TelegramRole> s_commandAcl;
 };

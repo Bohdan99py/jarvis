@@ -71,7 +71,18 @@ TelegramAccessManager::TelegramAccessManager(QObject* parent)
     : QObject(parent)
 {
     ensureTables();
-    qDebug() << "[AccessManager] Initialized";
+    resolvePrimaryOwner();
+    qDebug() << "[AccessManager] Initialized, primaryOwner:" << m_primaryOwnerId;
+}
+
+void TelegramAccessManager::resolvePrimaryOwner()
+{
+    QMutexLocker lock(&m_mutex);
+    QSqlQuery q(QSqlDatabase::database());
+    q.exec(QStringLiteral(
+        "SELECT chat_id FROM telegram_users ORDER BY registered_at ASC LIMIT 1"));
+    if (q.next())
+        m_primaryOwnerId = q.value(0).toLongLong();
 }
 
 void TelegramAccessManager::ensureTables()
@@ -116,8 +127,27 @@ TelegramRole TelegramAccessManager::minimumRoleFor(const QString& command)
     return TelegramRole::User;
 }
 
+bool TelegramAccessManager::isPrimaryOwner(qint64 chatId) const
+{
+    if (m_primaryOwnerId != 0)
+        return chatId == m_primaryOwnerId;
+
+    QMutexLocker lock(&m_mutex);
+    QSqlQuery q(QSqlDatabase::database());
+    q.exec(QStringLiteral(
+        "SELECT chat_id FROM telegram_users ORDER BY registered_at ASC LIMIT 1"));
+    if (q.next()) {
+        m_primaryOwnerId = q.value(0).toLongLong();
+        return chatId == m_primaryOwnerId;
+    }
+    return false;
+}
+
 bool TelegramAccessManager::hasAccess(qint64 chatId, const QString& command) const
 {
+    if (isPrimaryOwner(chatId))
+        return true;
+
     TelegramRole userRole = getRole(chatId);
     TelegramRole required = minimumRoleFor(command);
 
@@ -183,6 +213,15 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
         u.bindValue(QStringLiteral(":name"), displayName);
         u.bindValue(QStringLiteral(":cid"),  chatId);
         u.exec();
+
+        // Force-assign Admin to the primary owner on every registration
+        if (m_primaryOwnerId != 0 && chatId == m_primaryOwnerId) {
+            QSqlQuery fix(QSqlDatabase::database());
+            fix.prepare(QStringLiteral(
+                "UPDATE telegram_users SET role = 'Admin' WHERE chat_id = :cid"));
+            fix.bindValue(QStringLiteral(":cid"), chatId);
+            fix.exec();
+        }
         return;
     }
 
@@ -201,6 +240,9 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
     ins.bindValue(QStringLiteral(":name"), displayName);
     ins.bindValue(QStringLiteral(":role"), telegramRoleToString(role));
     ins.exec();
+
+    if (isFirst)
+        m_primaryOwnerId = chatId;
 
     lock.unlock();
     emit userRegistered(chatId, role);
