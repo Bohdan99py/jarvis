@@ -29,6 +29,8 @@ public:
     ~MediaPreviewWidget() override;
 
     void displayMedia(const QString& filePath, const QString& mediaType);
+    void displayImageBuffer(const QByteArray& imageData, const QString& title);
+    void clearPreview();
 
 signals:
     void closed();

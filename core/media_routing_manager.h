@@ -30,6 +30,9 @@ public:
                     const QString& caption,
                     qint64 targetChatId);
 
+    void previewImage(const QString& filePath);
+    void previewImageBuffer(const QByteArray& data, const QString& title);
+
 signals:
     void mediaRouted(const QString& filePath, const QString& mediaType);
 

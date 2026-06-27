@@ -11,6 +11,7 @@
 #include "llm_cache_manager.h"
 #include "jarvis_response.h"
 #include "voice_synthesis_manager.h"
+#include "media_routing_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
 #include "jarvis_paths.h"
@@ -477,8 +478,10 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             if (dr.handled) {
                 if (!dr.response.isEmpty())
                     sendMessage(chatId, fixPrefix + dr.response);
-                if (!dr.imagePath.isEmpty())
+                if (!dr.imagePath.isEmpty()) {
+                    MediaRoutingManager::instance().previewImage(dr.imagePath);
                     sendImageToMobile(chatId, dr.imagePath, QString());
+                }
                 return;
             }
         }
@@ -1417,6 +1420,8 @@ void J2JTelegramGateway::downloadAndSaveImage(const QString& fileId,
                 ? QStringLiteral("✅ Image saved to Desktop:\n`JARVIS_Workspace/Outputs/%1`")
                 : QStringLiteral("✅ Изображение сохранено на Рабочий стол:\n`JARVIS_Workspace/Outputs/%1`"))
                 .arg(filename));
+
+            MediaRoutingManager::instance().previewImage(savedPath);
 
             emit imageReceived(chatId, savedPath);
 

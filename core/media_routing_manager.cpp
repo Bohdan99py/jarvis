@@ -94,3 +94,29 @@ void MediaRoutingManager::routeMedia(const QString& filePath,
     qDebug() << "[MediaRouter] Routed" << mediaType
              << "to local + chat" << targetChatId;
 }
+
+// ============================================================
+//  Local-only preview (no Telegram send)
+// ============================================================
+
+void MediaRoutingManager::previewImage(const QString& filePath)
+{
+    const QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) return;
+
+    if (!m_preview)
+        m_preview = new MediaPreviewWidget;
+
+    m_preview->displayMedia(filePath, QStringLiteral("image"));
+}
+
+void MediaRoutingManager::previewImageBuffer(const QByteArray& data,
+                                              const QString& title)
+{
+    if (data.isEmpty()) return;
+
+    if (!m_preview)
+        m_preview = new MediaPreviewWidget;
+
+    m_preview->displayImageBuffer(data, title);
+}

@@ -10,6 +10,7 @@
 #include <QStackedLayout>
 #include <QResizeEvent>
 #include <QMouseEvent>
+#include <QImage>
 #include <QFileInfo>
 #include <QScreen>
 #include <QGuiApplication>
@@ -175,6 +176,51 @@ void MediaPreviewWidget::displayMedia(const QString& filePath, const QString& me
 }
 
 // ============================================================
+//  displayImageBuffer — show an in-memory image (no file on disk)
+// ============================================================
+
+void MediaPreviewWidget::displayImageBuffer(const QByteArray& imageData,
+                                             const QString& title)
+{
+    m_currentType = QStringLiteral("image");
+    stopVideo();
+    m_stack->setCurrentIndex(0);
+
+    m_originalPix = QPixmap();
+    QImage img;
+    if (!img.loadFromData(imageData) || img.isNull()) {
+        m_imageLabel->setText(QStringLiteral("⚠ Cannot decode image buffer"));
+        m_imageLabel->setStyleSheet(QStringLiteral(
+            "color: #ff4c4c; font-size: 14px; background: transparent;"));
+        return;
+    }
+
+    m_originalPix = QPixmap::fromImage(std::move(img));
+    rescalePixmap();
+
+    m_titleLabel->setText(
+        QStringLiteral("J.A.R.V.I.S. — %1").arg(
+            title.isEmpty() ? QStringLiteral("Buffer Image") : title));
+
+    show();
+    raise();
+    qDebug() << "[MediaPreview] Displaying buffer image:" << title
+             << m_originalPix.size();
+}
+
+// ============================================================
+//  clearPreview — release pixmap memory and hide
+// ============================================================
+
+void MediaPreviewWidget::clearPreview()
+{
+    stopVideo();
+    m_originalPix = QPixmap();
+    m_imageLabel->clear();
+    m_currentType.clear();
+}
+
+// ============================================================
 //  Image display
 // ============================================================
 
@@ -183,14 +229,18 @@ void MediaPreviewWidget::showImage(const QString& filePath)
     stopVideo();
     m_stack->setCurrentIndex(0);
 
-    m_originalPix = QPixmap(filePath);
-    if (m_originalPix.isNull()) {
+    m_originalPix = QPixmap();
+    m_imageLabel->clear();
+
+    QImage img(filePath);
+    if (img.isNull()) {
         m_imageLabel->setText(QStringLiteral("⚠ Cannot load image"));
         m_imageLabel->setStyleSheet(QStringLiteral(
             "color: #ff4c4c; font-size: 14px; background: transparent;"));
         return;
     }
 
+    m_originalPix = QPixmap::fromImage(std::move(img));
     rescalePixmap();
 }
 
