@@ -1,6 +1,9 @@
 ## src/intelligence — Brain, learning, prediction, indexing, search, OCR
 ## Depends on: common (context_snapshot.h in brain.h, user_profile.h)
 ## Private: db, llm (used in .cpp files only)
+##          network (j2j_telegram_gateway.h in curiosity_engine.cpp)
+##          Qt6::Widgets (QApplication::clipboard() in brain.cpp)
+##          Qt6::Sql (QSqlQuery in curiosity_engine.cpp)
 
 add_library(jarvis_intelligence OBJECT
     brain.h
@@ -42,7 +45,11 @@ target_include_directories(jarvis_intelligence PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+target_include_directories(jarvis_intelligence PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../network
+)
+
 target_link_libraries(jarvis_intelligence
     PUBLIC  jarvis_common Qt6::Core Qt6::Concurrent
-    PRIVATE jarvis_db jarvis_llm
+    PRIVATE jarvis_db jarvis_llm Qt6::Widgets Qt6::Gui Qt6::Sql
 )

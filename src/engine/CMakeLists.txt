@@ -26,7 +26,7 @@ target_include_directories(jarvis_engine PUBLIC
 
 target_link_libraries(jarvis_engine
     PUBLIC  jarvis_common jarvis_db jarvis_intelligence
-            Qt6::Core Qt6::Network
+            Qt6::Core Qt6::Network Qt6::Widgets Qt6::Sql
     PRIVATE jarvis_llm jarvis_voice jarvis_platform jarvis_network
             jarvis_media jarvis_modules jarvis_plugins
             advapi32 psapi PowrProf

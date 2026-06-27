@@ -1,6 +1,7 @@
 ## src/platform — PC control: mouse, keyboard, macros, screen agent, clipboard
 ## Depends on: common
-## Private: engine (forward-declared Jarvis* in clipboard_watcher.cpp)
+## Private .cpp deps: engine (jarvis.h, command_registry.h),
+##                    network (screen_agent.cpp uses QNetworkAccessManager)
 
 add_library(jarvis_platform OBJECT
     pc_controller.h
@@ -21,7 +22,11 @@ target_include_directories(jarvis_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+target_include_directories(jarvis_platform PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../engine
+)
+
 target_link_libraries(jarvis_platform
     PUBLIC  jarvis_common Qt6::Core Qt6::Gui Qt6::Widgets
-    PRIVATE user32 ole32 oleaut32 shell32
+    PRIVATE Qt6::Network user32 ole32 oleaut32 shell32
 )
