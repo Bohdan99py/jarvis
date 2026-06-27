@@ -1,5 +1,5 @@
 // -------------------------------------------------------
-// action_predictor.cpp — Предугадывание действий
+// action_predictor.cpp — Action prediction + binary ethics
 // -------------------------------------------------------
 
 #include "action_predictor.h"
@@ -12,10 +12,11 @@
 #include <QFile>
 #include <QStandardPaths>
 #include <QDir>
+#include <QDebug>
 #include <algorithm>
 
 // ============================================================
-// Конструктор
+// Constructor
 // ============================================================
 
 ActionPredictor::ActionPredictor(SessionMemory* memory, QObject* parent)
@@ -23,11 +24,13 @@ ActionPredictor::ActionPredictor(SessionMemory* memory, QObject* parent)
     , m_memory(memory)
 {
     initDefaultRules();
+    initEthicsDictionary();
     loadPatterns();
+    loadEthicsWeights();
 }
 
 // ============================================================
-// Правила по умолчанию (IF/THEN)
+// Default pattern rules (IF/THEN)
 // ============================================================
 
 void ActionPredictor::initDefaultRules()
@@ -72,7 +75,177 @@ void ActionPredictor::initDefaultRules()
 }
 
 // ============================================================
-// Запись последовательности команд
+// Ethics dictionary — hardcoded binary rules
+// ============================================================
+
+void ActionPredictor::initEthicsDictionary()
+{
+    m_ethicsRules = {
+        // === GOOD (+1.0) — always encouraged ===
+        {QStringLiteral("task_assistance"),
+         {QStringLiteral("help"), QStringLiteral("assist"), QStringLiteral("explain"),
+          QStringLiteral("помоги"), QStringLiteral("объясни"), QStringLiteral("подскажи")},
+         1.0},
+
+        {QStringLiteral("logical_reasoning"),
+         {QStringLiteral("analyze"), QStringLiteral("reason"), QStringLiteral("calculate"),
+          QStringLiteral("compare"), QStringLiteral("debug"), QStringLiteral("анализ"),
+          QStringLiteral("логика"), QStringLiteral("вычисли")},
+         1.0},
+
+        {QStringLiteral("learning"),
+         {QStringLiteral("learn"), QStringLiteral("study"), QStringLiteral("teach"),
+          QStringLiteral("tutorial"), QStringLiteral("учи"), QStringLiteral("урок")},
+         1.0},
+
+        {QStringLiteral("creativity"),
+         {QStringLiteral("create"), QStringLiteral("design"), QStringLiteral("build"),
+          QStringLiteral("write"), QStringLiteral("создай"), QStringLiteral("напиши"),
+          QStringLiteral("придумай")},
+         1.0},
+
+        {QStringLiteral("productivity"),
+         {QStringLiteral("organize"), QStringLiteral("plan"), QStringLiteral("schedule"),
+          QStringLiteral("task"), QStringLiteral("todo"), QStringLiteral("план"),
+          QStringLiteral("задач")},
+         1.0},
+
+        {QStringLiteral("code_review"),
+         {QStringLiteral("review"), QStringLiteral("refactor"), QStringLiteral("optimize"),
+          QStringLiteral("clean"), QStringLiteral("рефактор"), QStringLiteral("оптимизируй")},
+         0.9},
+
+        // === BAD (-1.0) — always blocked ===
+        {QStringLiteral("data_theft"),
+         {QStringLiteral("steal data"), QStringLiteral("exfiltrate"), QStringLiteral("dump credentials"),
+          QStringLiteral("скачай пароли"), QStringLiteral("слей данные")},
+         -1.0},
+
+        {QStringLiteral("policy_breach"),
+         {QStringLiteral("bypass security"), QStringLiteral("disable firewall"),
+          QStringLiteral("ignore policy"), QStringLiteral("обойди защиту"),
+          QStringLiteral("отключи фаервол")},
+         -1.0},
+
+        {QStringLiteral("destructive_action"),
+         {QStringLiteral("delete all"), QStringLiteral("format disk"), QStringLiteral("rm -rf /"),
+          QStringLiteral("drop database"), QStringLiteral("удали всё"),
+          QStringLiteral("форматируй диск")},
+         -1.0},
+
+        {QStringLiteral("social_engineering"),
+         {QStringLiteral("phishing"), QStringLiteral("impersonate"),
+          QStringLiteral("fake identity"), QStringLiteral("фишинг")},
+         -1.0},
+
+        // === NEUTRAL (0.0) — context-dependent, learned from feedback ===
+        {QStringLiteral("system_command"),
+         {QStringLiteral("shutdown"), QStringLiteral("restart"), QStringLiteral("reboot"),
+          QStringLiteral("выключи"), QStringLiteral("перезагрузи")},
+         0.0},
+
+        {QStringLiteral("web_search"),
+         {QStringLiteral("search"), QStringLiteral("find"), QStringLiteral("google"),
+          QStringLiteral("найди"), QStringLiteral("поищи")},
+         0.3},
+
+        {QStringLiteral("entertainment"),
+         {QStringLiteral("play"), QStringLiteral("music"), QStringLiteral("game"),
+          QStringLiteral("video"), QStringLiteral("играй"), QStringLiteral("музыку")},
+         0.2},
+    };
+}
+
+// ============================================================
+// Ethics evaluation
+// ============================================================
+
+EthicsEvaluation ActionPredictor::evaluateAction(const QString& action) const
+{
+    const QString lower = action.toLower().trimmed();
+    EthicsEvaluation best{0.0, QStringLiteral("uncategorized"), false};
+
+    for (const auto& rule : m_ethicsRules) {
+        for (const QString& keyword : rule.keywords) {
+            if (lower.contains(keyword)) {
+                double effectiveWeight = rule.weight;
+
+                if (qAbs(rule.weight) < 1.0) {
+                    const double learned = m_experienceWeights[rule.category].toDouble(0.0);
+                    effectiveWeight = qBound(-1.0, rule.weight + learned, 1.0);
+                }
+
+                if (qAbs(effectiveWeight) > qAbs(best.score)) {
+                    best.score = effectiveWeight;
+                    best.category = rule.category;
+                    best.hardcoded = (qAbs(rule.weight) >= 1.0);
+                }
+            }
+        }
+    }
+
+    return best;
+}
+
+double ActionPredictor::experienceScore(const QString& category) const
+{
+    return m_experienceWeights[category].toDouble(0.0);
+}
+
+// ============================================================
+// Binary feedback loop
+// ============================================================
+
+void ActionPredictor::recordFeedback(const QString& action, bool positive)
+{
+    const QString lower = action.toLower().trimmed();
+    m_interactionsSinceFeedback = 0;
+
+    for (const auto& rule : m_ethicsRules) {
+        if (qAbs(rule.weight) >= 1.0) continue;
+
+        for (const QString& keyword : rule.keywords) {
+            if (lower.contains(keyword)) {
+                double current = m_experienceWeights[rule.category].toDouble(0.0);
+                double delta = positive ? LEARNING_RATE : -LEARNING_RATE;
+                double updated = qBound(-0.5, current + delta, 0.5);
+                m_experienceWeights[rule.category] = updated;
+
+                qDebug() << "[ActionPredictor] Feedback for" << rule.category
+                         << ":" << (positive ? "+1" : "-1")
+                         << "-> weight" << updated;
+                break;
+            }
+        }
+    }
+
+    saveEthicsWeights();
+}
+
+bool ActionPredictor::shouldAskForFeedback() const
+{
+    return m_interactionsSinceFeedback >= FEEDBACK_INTERVAL;
+}
+
+void ActionPredictor::resetFeedbackCounter()
+{
+    m_interactionsSinceFeedback = 0;
+}
+
+QString ActionPredictor::buildFeedbackQuestion(bool english) const
+{
+    if (english) {
+        return QStringLiteral(
+            "💡 Quick check — was my last response helpful?\n"
+            "Reply **yes** or **no** to help me improve.");
+    }
+    return QStringLiteral(
+        "💡 Быстрый чек — мой последний ответ помог?\n"
+        "Ответь **да** или **нет**, чтобы я становился лучше.");
+}
+
+// ============================================================
+// Sequence recording
 // ============================================================
 
 void ActionPredictor::recordSequence(const QString& command)
@@ -85,9 +258,18 @@ void ActionPredictor::recordSequence(const QString& command)
         m_recentCommands.removeLast();
     }
 
-    // Обучение: если есть паттерн A→B, увеличиваем hitCount
+    ++m_interactionsSinceFeedback;
+    m_lastEvaluatedAction = command;
+
+    const EthicsEvaluation eval = evaluateAction(command);
+    if (eval.score <= -0.8) {
+        emit ethicsViolation(command, eval.score);
+        qWarning() << "[ActionPredictor] Ethics violation detected:"
+                   << eval.category << "score:" << eval.score;
+    }
+
     if (m_recentCommands.size() >= 2) {
-        QString prev = m_recentCommands[1];  // Предыдущая команда
+        QString prev = m_recentCommands[1];
         for (auto& rule : m_rules) {
             if (prev.contains(rule.trigger) &&
                 key.contains(rule.suggestedAction.split(QChar(' ')).first())) {
@@ -96,7 +278,6 @@ void ActionPredictor::recordSequence(const QString& command)
         }
     }
 
-    // Обучение: если B часто следует за A, создаём новое правило
     if (m_recentCommands.size() >= 2) {
         QString prev = m_recentCommands[1];
         QString curr = m_recentCommands[0];
@@ -110,20 +291,15 @@ void ActionPredictor::recordSequence(const QString& command)
             }
         }
 
-        // Проверяем, встречалась ли эта пара раньше в статистике
         if (!ruleExists) {
             QJsonObject stats = m_memory->commandStats();
             int prevCount = stats[prev].toInt(0);
             int currCount = stats[curr].toInt(0);
 
-            // Если обе команды часто используются, создаём правило
             if (prevCount >= 3 && currCount >= 3) {
                 PatternRule newRule;
                 newRule.trigger = prev;
 
-                // Если текущая команда начинается с глагола открытия —
-                // сохраняем как open_app: чтобы кнопка Yes её выполнила
-                // напрямую, не отправляя название приложения в AI как текст.
                 static const QStringList openPrefixes = {
                     QStringLiteral("открой "), QStringLiteral("запусти "),
                     QStringLiteral("open "),   QStringLiteral("launch "),
@@ -133,7 +309,6 @@ void ActionPredictor::recordSequence(const QString& command)
                 for (const QString& prefix : openPrefixes) {
                     if (curr.startsWith(prefix)) {
                         QString appName = curr.mid(prefix.length()).trimmed();
-                        // Капитализируем первую букву для красивого отображения
                         if (!appName.isEmpty()) appName[0] = appName[0].toUpper();
                         newRule.suggestedAction = QStringLiteral("open_app:") + appName;
                         newRule.description = QStringLiteral("Open '") + appName + QStringLiteral("'?");
@@ -153,7 +328,7 @@ void ActionPredictor::recordSequence(const QString& command)
 }
 
 // ============================================================
-// Предложения
+// Suggestions
 // ============================================================
 
 ActionSuggestion ActionPredictor::suggestAfter(const QString& lastCommand) const
@@ -166,6 +341,11 @@ ActionSuggestion ActionPredictor::suggestAfter(const QString& lastCommand) const
     for (const auto& rule : m_rules) {
         if (lower.contains(rule.trigger)) {
             double confidence = 0.3 + qMin(0.7, rule.hitCount * 0.1);
+
+            const EthicsEvaluation eval = evaluateAction(rule.suggestedAction);
+            if (!eval.isAcceptable()) continue;
+            confidence *= qMax(0.1, (1.0 + eval.score) / 2.0);
+
             if (confidence > best.confidence) {
                 best.action = rule.suggestedAction;
                 best.description = rule.description;
@@ -181,7 +361,6 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
 {
     QVector<ActionSuggestion> suggestions;
 
-    // 1. Паттерн-предложения на основе последней команды
     if (!m_recentCommands.isEmpty()) {
         auto suggestion = suggestAfter(m_recentCommands.first());
         if (suggestion.isValid()) {
@@ -189,7 +368,6 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
         }
     }
 
-    // 2. Самые частые команды (за вычетом уже предложенных)
     QJsonObject stats = m_memory->commandStats();
     QVector<QPair<QString, int>> sorted;
     for (auto it = stats.begin(); it != stats.end(); ++it) {
@@ -201,7 +379,6 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
     for (const auto& [cmd, count] : sorted) {
         if (suggestions.size() >= maxSuggestions) break;
 
-        // Не предлагать то, что уже в списке
         bool alreadySuggested = false;
         for (const auto& s : suggestions) {
             if (s.action.startsWith(cmd)) {
@@ -211,7 +388,6 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
         }
         if (alreadySuggested) continue;
 
-        // Не предлагать слишком редкие
         if (count < 2) continue;
 
         ActionSuggestion s;
@@ -227,7 +403,7 @@ QVector<ActionSuggestion> ActionPredictor::suggest(int maxSuggestions) const
 }
 
 // ============================================================
-// Сохранение / загрузка паттернов
+// Pattern persistence
 // ============================================================
 
 static QString patternsFilePath()
@@ -254,7 +430,6 @@ void ActionPredictor::loadPatterns()
         rule.description = obj[QStringLiteral("description")].toString();
         rule.hitCount = obj[QStringLiteral("hits")].toInt();
 
-        // Обновляем существующие или добавляем новые
         bool found = false;
         for (auto& existing : m_rules) {
             if (existing.trigger == rule.trigger &&
@@ -290,5 +465,34 @@ void ActionPredictor::savePatterns()
     QFile file(patternsFilePath());
     if (!file.open(QIODevice::WriteOnly)) return;
     file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    file.close();
+}
+
+// ============================================================
+// Ethics weights persistence
+// ============================================================
+
+static QString ethicsFilePath()
+{
+    return JarvisPaths::subPath(QStringLiteral("jarvis_ethics_weights.json"));
+}
+
+void ActionPredictor::loadEthicsWeights()
+{
+    QFile file(ethicsFilePath());
+    if (!file.open(QIODevice::ReadOnly)) return;
+
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+
+    if (doc.isObject())
+        m_experienceWeights = doc.object();
+}
+
+void ActionPredictor::saveEthicsWeights()
+{
+    QFile file(ethicsFilePath());
+    if (!file.open(QIODevice::WriteOnly)) return;
+    file.write(QJsonDocument(m_experienceWeights).toJson(QJsonDocument::Indented));
     file.close();
 }

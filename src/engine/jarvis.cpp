@@ -29,6 +29,7 @@
 #include "jarvis_response.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
+#include "curiosity_engine.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -185,6 +186,17 @@ Jarvis::Jarvis(QObject* parent)
                 }, Qt::QueuedConnection);
             }
         }
+    }
+
+    // Proactive Curiosity Engine — context-aware idle dialogue
+    {
+        auto& curiosity = CuriosityEngine::instance();
+        curiosity.setActivityTracker(m_activity);
+        curiosity.start(90);
+        connect(&curiosity, &CuriosityEngine::proactiveDialogue, this,
+                [this](const QString& message, CuriosityEngine::ProactiveCategory) {
+            emit asyncResponseReady(message);
+        });
     }
 }
 
@@ -889,7 +901,28 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     QString s = input.trimmed();
     if (s.isEmpty()) return QString();
 
+    // Binary feedback handler — intercepts yes/no replies to "was this helpful?"
+    {
+        const QString lower = s.trimmed().toLower();
+        if ((lower == QStringLiteral("да") || lower == QStringLiteral("yes")
+             || lower == QStringLiteral("нет") || lower == QStringLiteral("no"))
+            && m_predictor->shouldAskForFeedback() == false
+            && !m_lastFeedbackAction.isEmpty())
+        {
+            const bool positive = (lower == QStringLiteral("да") || lower == QStringLiteral("yes"));
+            m_predictor->recordFeedback(m_lastFeedbackAction, positive);
+            m_lastFeedbackAction.clear();
+            return positive
+                ? (m_uiEnglish ? QStringLiteral("Got it, thanks! I'll keep that in mind.")
+                               : QStringLiteral("Понял, спасибо! Учту на будущее."))
+                : (m_uiEnglish ? QStringLiteral("Noted. I'll adjust my approach next time.")
+                               : QStringLiteral("Принял. В следующий раз подойду иначе."));
+        }
+    }
+
     m_memory->addMessage(QStringLiteral("user"), s);
+
+    CuriosityEngine::instance().notifyUserActivity();
 
     // 0. Профиль предпочтений: фиксируем контекст + команду для обучения
     //    паттернов "сценарий/время суток → какие команды я обычно пишу".
@@ -972,6 +1005,15 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         auto suggestion = m_predictor->suggestAfter(s);
         if (suggestion.isValid() && suggestion.confidence >= 0.5) {
             emit suggestionAvailable(suggestion.description, suggestion.action);
+        }
+
+        if (m_predictor->shouldAskForFeedback()) {
+            m_predictor->resetFeedbackCounter();
+            m_lastFeedbackAction = s;
+            const QString fbQ = m_predictor->buildFeedbackQuestion(m_uiEnglish);
+            QTimer::singleShot(2000, this, [this, fbQ]() {
+                emit asyncResponseReady(fbQ);
+            });
         }
 
         return result.response;

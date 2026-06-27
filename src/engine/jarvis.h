@@ -199,6 +199,7 @@ private:
     OllamaApi*          m_geminiApi    = nullptr;   // Ollama — локальный LLM
     GeminiApi*          m_geminiBackup = nullptr;   // Gemini — fallback если Ollama недоступна
     ActionPredictor*    m_predictor    = nullptr;
+    QString             m_lastFeedbackAction;
     AutoUpdater*        m_updater      = nullptr;
     ProjectIndexer*     m_indexer      = nullptr;
     CodeActions*        m_codeActions  = nullptr;
