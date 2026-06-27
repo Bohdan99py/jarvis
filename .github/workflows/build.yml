@@ -92,7 +92,7 @@ jobs:
           }
           "@
           
-          Set-Content -Path "core/embedded_key.h" -Value $header -Encoding UTF8
+          Set-Content -Path "src/llm/embedded_key.h" -Value $header -Encoding UTF8
           Write-Host "API key injected ($($encrypted.Length) bytes encrypted)"
         shell: pwsh
 
