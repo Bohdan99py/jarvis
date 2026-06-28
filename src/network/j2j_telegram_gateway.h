@@ -224,6 +224,23 @@ private:
     void finalizeBugReport(TgChatSession& session);
     void persistBugReport(const QaBugReport& report);
 
+    // Persistent reply keyboard (shown above the input field)
+    void sendWithPersistentKeyboard(qint64 chatId, const QString& text,
+                                     bool english);
+    static QJsonObject buildPersistentKeyboard(bool english);
+
+    // Persistent button text → handler dispatch
+    bool handlePersistentButton(qint64 chatId, const QString& text,
+                                bool english);
+
+    // Sub-menu for Settings
+    void sendSettingsSubMenu(qint64 chatId, bool english);
+
+    // Inline context buttons (e.g., Yes/No confirmations)
+    static QJsonObject buildConfirmButtons(const QString& yesData,
+                                            const QString& noData,
+                                            bool english);
+
     // Inline keyboard builders
     static QJsonObject buildInlineKeyboard(const QJsonArray& rows);
     static QJsonArray  buildMainMenuButtons(bool english);

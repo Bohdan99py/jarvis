@@ -534,6 +534,13 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
     if (handlePairing(chatId, text, firstName))
         return;
 
+    // ── 1.3. Persistent reply keyboard buttons ─────────────
+    {
+        TgChatSession& ks = getOrCreateSession(chatId);
+        if (handlePersistentButton(chatId, text, ks.isEnglish))
+            return;
+    }
+
     // ── 1.5. Layout auto-correction for slash commands ──────
     QString effectiveText = text;
     bool layoutFixed = false;
@@ -876,13 +883,76 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
     }
 
     if (data == QStringLiteral("action_wake")) {
-        sendMessage(chatId, en ? QStringLiteral("⚡ Wake-on-LAN signal sent to desktop.")
-                               : QStringLiteral("⚡ Wake-on-LAN сигнал отправлен на ПК."));
+        // Delegate to the persistent button handler which has full WoL logic
+        handlePersistentButton(chatId, QStringLiteral("Wake PC"), en);
         return;
     }
 
     if (data == QStringLiteral("action_help")) {
         sendMessage(chatId, localized(TgStringId::HelpText, en));
+        return;
+    }
+
+    // ── Settings sub-menu callbacks ─────────────────────────
+    if (data == QStringLiteral("settings_model")) {
+        QString modelInfo;
+        if (en) {
+            modelInfo = QStringLiteral(
+                "🧠 *AI Model Configuration*\n\n"
+                "Configure these from the desktop app:\n"
+                "  *Models & Intelligence* menu\n\n"
+                "• Claude API: primary LLM\n"
+                "• Gemini API: backup/alternative\n"
+                "• Ollama: local offline model\n"
+                "• Agent Mode: routes chat → Ollama, code → Claude");
+        } else {
+            modelInfo = QStringLiteral(
+                "🧠 *Настройки моделей ИИ*\n\n"
+                "Настраивается через десктоп-приложение:\n"
+                "  меню *Модели и ИИ*\n\n"
+                "• Claude API: основная LLM\n"
+                "• Gemini API: резервная\n"
+                "• Ollama: локальная офлайн-модель\n"
+                "• Агент-режим: чат → Ollama, код → Claude");
+        }
+        sendMessage(chatId, modelInfo);
+        return;
+    }
+
+    if (data == QStringLiteral("settings_lang")) {
+        sendMessage(chatId, en
+            ? QStringLiteral("🌐 Language is auto-detected from your paired role.\n"
+                             "QA\\_Tester → English, others → Russian.\n"
+                             "Change role in desktop: *Models & Intelligence → Switch Role*")
+            : QStringLiteral("🌐 Язык определяется автоматически по роли.\n"
+                             "QA\\_Tester → English, остальные → Русский.\n"
+                             "Сменить роль: *Модели и ИИ → Сменить роль*"));
+        return;
+    }
+
+    if (data == QStringLiteral("settings_session")) {
+        auto pcSession = m_accessMgr->resolveSession(chatId);
+        QString sessionInfo;
+        if (pcSession.has_value()) {
+            sessionInfo = (en ? QStringLiteral("👤 *Your Session*\n\n")
+                              : QStringLiteral("👤 *Ваша сессия*\n\n"))
+                + QStringLiteral("Chat ID: `%1`\n").arg(chatId)
+                + QStringLiteral("Device: `%1`\n").arg(pcSession->deviceId.left(12))
+                + QStringLiteral("PC: %1\n").arg(pcSession->pcName)
+                + QStringLiteral("Status: %1\n").arg(pcSession->status)
+                + QStringLiteral("Last used: %1").arg(
+                      pcSession->lastUsed.toString(QStringLiteral("yyyy-MM-dd HH:mm")));
+        } else {
+            sessionInfo = en
+                ? QStringLiteral("👤 No active session. Send any message to auto-bind.")
+                : QStringLiteral("👤 Нет активной сессии. Отправьте сообщение для авто-привязки.");
+        }
+        sendMessage(chatId, sessionInfo);
+        return;
+    }
+
+    if (data == QStringLiteral("settings_back")) {
+        sendMainMenu(chatId, en);
         return;
     }
 
@@ -2092,8 +2162,15 @@ void J2JTelegramGateway::sendMessage(qint64 chatId, const QString& text,
 
 void J2JTelegramGateway::sendMainMenu(qint64 chatId, bool english)
 {
-    QJsonObject markup = buildInlineKeyboard(buildMainMenuButtons(english));
-    sendMessage(chatId, localized(TgStringId::MainMenu, english), markup);
+    // Send the inline menu (detailed actions)
+    QJsonObject inlineMarkup = buildInlineKeyboard(buildMainMenuButtons(english));
+    sendMessage(chatId, localized(TgStringId::MainMenu, english), inlineMarkup);
+
+    // Also set the persistent reply keyboard (stays visible)
+    sendMessage(chatId,
+                english ? QStringLiteral("⌨ Quick actions available below.")
+                        : QStringLiteral("⌨ Быстрые действия доступны ниже."),
+                buildPersistentKeyboard(english));
 }
 
 void J2JTelegramGateway::answerCallbackQuery(const QString& callbackId,
@@ -2115,6 +2192,294 @@ void J2JTelegramGateway::answerCallbackQuery(const QString& callbackId,
     QNetworkReply* reply = m_network->post(
         req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+// ============================================================
+//  Persistent Reply Keyboard — static buttons above input field
+// ============================================================
+
+QJsonObject J2JTelegramGateway::buildPersistentKeyboard(bool en)
+{
+    QJsonArray rows;
+
+    // Row 1: Wake PC + Status
+    QJsonArray row1;
+    row1.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("\xF0\x9F\x92\xBB Wake PC")      // 💻
+            : QStringLiteral("\xF0\x9F\x92\xBB Разбудить ПК")}
+    });
+    row1.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("\xF0\x9F\x93\x8A Status")       // 📊
+            : QStringLiteral("\xF0\x9F\x93\x8A Статус")}
+    });
+    rows.append(row1);
+
+    // Row 2: Files + Settings
+    QJsonArray row2;
+    row2.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("\xF0\x9F\x93\x82 Files")        // 📂
+            : QStringLiteral("\xF0\x9F\x93\x82 Файлы")}
+    });
+    row2.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("\xE2\x9A\x99\xEF\xB8\x8F Settings")  // ⚙️
+            : QStringLiteral("\xE2\x9A\x99\xEF\xB8\x8F Настройки")}
+    });
+    rows.append(row2);
+
+    QJsonObject keyboard;
+    keyboard[QStringLiteral("keyboard")]        = rows;
+    keyboard[QStringLiteral("resize_keyboard")]  = true;
+    keyboard[QStringLiteral("is_persistent")]    = true;
+    return keyboard;
+}
+
+void J2JTelegramGateway::sendWithPersistentKeyboard(qint64 chatId,
+                                                      const QString& text,
+                                                      bool english)
+{
+    sendMessage(chatId, text, buildPersistentKeyboard(english));
+}
+
+// ============================================================
+//  Persistent Button Handler — matches reply keyboard text
+// ============================================================
+
+bool J2JTelegramGateway::handlePersistentButton(qint64 chatId,
+                                                  const QString& text,
+                                                  bool en)
+{
+    const QString lower = text.toLower().trimmed();
+
+    // ── Wake PC ──────────────────────────────────────────────
+    if (lower.contains(QStringLiteral("wake pc"))
+        || lower.contains(QStringLiteral("разбудить"))) {
+        if (m_wakeAgent) {
+            PcRegistration localReg = m_wakeAgent->discoverLocalNetwork();
+            if (!localReg.macAddress.isEmpty()) {
+                bool sent = m_wakeAgent->sendWolPacket(
+                    localReg.macAddress, localReg.broadcastAddress);
+                if (sent) {
+                    sendWithPersistentKeyboard(chatId,
+                        en ? QStringLiteral("⚡ *Wake-on-LAN sent!*\n"
+                                            "Magic Packet → `%1`\n"
+                                            "Broadcast: `%2`")
+                               .arg(localReg.macAddress, localReg.broadcastAddress)
+                           : QStringLiteral("⚡ *Wake-on-LAN отправлен!*\n"
+                                            "Magic Packet → `%1`\n"
+                                            "Broadcast: `%2`")
+                               .arg(localReg.macAddress, localReg.broadcastAddress),
+                        en);
+                } else {
+                    sendWithPersistentKeyboard(chatId,
+                        en ? QStringLiteral("❌ WoL send failed. Check network.")
+                           : QStringLiteral("❌ Не удалось отправить WoL. Проверьте сеть."),
+                        en);
+                }
+            } else {
+                sendWithPersistentKeyboard(chatId,
+                    en ? QStringLiteral("❌ No network interface found for WoL.")
+                       : QStringLiteral("❌ Сетевой интерфейс для WoL не найден."),
+                    en);
+            }
+        } else {
+            sendWithPersistentKeyboard(chatId,
+                en ? QStringLiteral("⚡ Wake-on-LAN signal queued. "
+                                    "PC agent not initialized.")
+                   : QStringLiteral("⚡ WoL сигнал в очереди. "
+                                    "Агент ПК не инициализирован."),
+                en);
+        }
+        m_accessMgr->logActivity(chatId, QStringLiteral("button"),
+                                  QStringLiteral("wake_pc"));
+        return true;
+    }
+
+    // ── Status ───────────────────────────────────────────────
+    if (lower.contains(QStringLiteral("status"))
+        || lower.contains(QStringLiteral("статус"))) {
+
+        auto& db = DatabaseManager::instance();
+        int chatCount = 0, taskCount = 0, patternCount = 0;
+        {
+            QMutexLocker lock(&m_mutex);
+            QSqlQuery q(QSqlDatabase::database());
+            q.exec(QStringLiteral("SELECT COUNT(*) FROM chat_history WHERE user_id = 1"));
+            if (q.next()) chatCount = q.value(0).toInt();
+            q.exec(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE user_id = 1"));
+            if (q.next()) taskCount = q.value(0).toInt();
+            patternCount = db.patternCount(1);
+        }
+
+        auto pcSession = m_accessMgr->resolveSession(chatId);
+        QString pcInfo = pcSession.has_value()
+            ? QStringLiteral("PC: `%1` [%2]")
+                  .arg(pcSession->pcName, pcSession->status)
+            : QStringLiteral("PC: _not bound_");
+
+        QString pcStatus = QStringLiteral("Offline");
+        if (m_wakeAgent && m_wakeAgent->isRunning())
+            pcStatus = QStringLiteral("Online ✓");
+
+        QString status;
+        if (en) {
+            status = QStringLiteral(
+                "📊 *System Status*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "```\n"
+                "Messages:    %1\n"
+                "Tasks:       %2\n"
+                "Patterns:    %3\n"
+                "PC Status:   %4\n"
+                "```\n"
+                "%5")
+                .arg(chatCount).arg(taskCount).arg(patternCount)
+                .arg(pcStatus, pcInfo);
+        } else {
+            status = QStringLiteral(
+                "📊 *Статус системы*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "```\n"
+                "Сообщений:   %1\n"
+                "Задач:       %2\n"
+                "Паттернов:   %3\n"
+                "Статус ПК:   %4\n"
+                "```\n"
+                "%5")
+                .arg(chatCount).arg(taskCount).arg(patternCount)
+                .arg(pcStatus, pcInfo);
+        }
+
+        sendWithPersistentKeyboard(chatId, status, en);
+        m_accessMgr->logActivity(chatId, QStringLiteral("button"),
+                                  QStringLiteral("status"));
+        return true;
+    }
+
+    // ── Files ────────────────────────────────────────────────
+    if (lower.contains(QStringLiteral("files"))
+        || lower.contains(QStringLiteral("файлы"))) {
+
+        QString outputDir = workspaceOutputDir();
+        QDir dir(outputDir);
+        QStringList files = dir.entryList(
+            QDir::Files | QDir::NoDotAndDotDot, QDir::Time);
+
+        QString list;
+        if (files.isEmpty()) {
+            list = en ? QStringLiteral("📂 *Recent Files*\n\n_No files yet._")
+                      : QStringLiteral("📂 *Последние файлы*\n\n_Файлов пока нет._");
+        } else {
+            list = en ? QStringLiteral("📂 *Recent Files*\n")
+                      : QStringLiteral("📂 *Последние файлы*\n");
+            int count = 0;
+            for (const auto& f : files) {
+                if (++count > 15) {
+                    list += QStringLiteral("\n_... and %1 more_")
+                        .arg(files.size() - 15);
+                    break;
+                }
+                QFileInfo fi(dir.filePath(f));
+                QString size;
+                qint64 bytes = fi.size();
+                if (bytes < 1024)
+                    size = QStringLiteral("%1 B").arg(bytes);
+                else if (bytes < 1024 * 1024)
+                    size = QStringLiteral("%1 KB").arg(bytes / 1024);
+                else
+                    size = QStringLiteral("%1 MB").arg(bytes / (1024 * 1024));
+
+                list += QStringLiteral("  `%1` — %2\n").arg(f, size);
+            }
+        }
+
+        sendWithPersistentKeyboard(chatId, list, en);
+        m_accessMgr->logActivity(chatId, QStringLiteral("button"),
+                                  QStringLiteral("files"));
+        return true;
+    }
+
+    // ── Settings ─────────────────────────────────────────────
+    if (lower.contains(QStringLiteral("settings"))
+        || lower.contains(QStringLiteral("настройки"))) {
+        sendSettingsSubMenu(chatId, en);
+        m_accessMgr->logActivity(chatId, QStringLiteral("button"),
+                                  QStringLiteral("settings"));
+        return true;
+    }
+
+    return false;
+}
+
+// ============================================================
+//  Settings Sub-Menu (inline keyboard)
+// ============================================================
+
+void J2JTelegramGateway::sendSettingsSubMenu(qint64 chatId, bool en)
+{
+    QJsonArray rows;
+
+    QJsonArray row1;
+    row1.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("🧠 AI Model Info")
+            : QStringLiteral("🧠 Модель ИИ")},
+        {QStringLiteral("callback_data"), QStringLiteral("settings_model")}
+    });
+    row1.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("🌐 Language")
+            : QStringLiteral("🌐 Язык")},
+        {QStringLiteral("callback_data"), QStringLiteral("settings_lang")}
+    });
+    rows.append(row1);
+
+    QJsonArray row2;
+    row2.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("👤 My Session")
+            : QStringLiteral("👤 Моя сессия")},
+        {QStringLiteral("callback_data"), QStringLiteral("settings_session")}
+    });
+    row2.append(QJsonObject{
+        {QStringLiteral("text"),
+         en ? QStringLiteral("🔙 Back to Menu")
+            : QStringLiteral("🔙 Назад в меню")},
+        {QStringLiteral("callback_data"), QStringLiteral("settings_back")}
+    });
+    rows.append(row2);
+
+    sendMessage(chatId,
+                en ? QStringLiteral("⚙️ *Settings*\nChoose a category:")
+                   : QStringLiteral("⚙️ *Настройки*\nВыберите категорию:"),
+                buildInlineKeyboard(rows));
+}
+
+// ============================================================
+//  Inline Context Buttons (Yes/No confirmations)
+// ============================================================
+
+QJsonObject J2JTelegramGateway::buildConfirmButtons(const QString& yesData,
+                                                      const QString& noData,
+                                                      bool en)
+{
+    QJsonArray rows;
+    QJsonArray row;
+    row.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("✅ Yes")
+                                    : QStringLiteral("✅ Да")},
+        {QStringLiteral("callback_data"), yesData}
+    });
+    row.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("❌ No")
+                                    : QStringLiteral("❌ Нет")},
+        {QStringLiteral("callback_data"), noData}
+    });
+    rows.append(row);
+    return buildInlineKeyboard(rows);
 }
 
 // ============================================================
