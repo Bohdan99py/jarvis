@@ -9,6 +9,8 @@
 #include "database_manager.h"
 #include "system_manifest.h"
 #include "activity_tracker.h"
+#include "memory_consolidation.h"
+#include "user_profile_extended.h"
 
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -286,6 +288,12 @@ void J2JMeshConnector::processPacket(QTcpSocket* socket, const QJsonObject& pack
         handleSyncKnowledge(socket, packet[QStringLiteral("data")].toObject());
     else if (type == QStringLiteral("DelegateTask"))
         handleDelegateTask(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("DelegateAsset"))
+        handleDelegateAsset(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("RequestCache"))
+        handleRequestCache(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("ProfileSync"))
+        handleProfileSync(socket, packet[QStringLiteral("data")].toObject());
     else
         sendReply(socket, QStringLiteral("Error"),
                   QJsonObject{{QStringLiteral("message"), QStringLiteral("Unknown type")}}, false);
@@ -552,4 +560,218 @@ void J2JMeshConnector::initTelegramGateway()
     m_telegramGw = new J2JTelegramGateway(this);
     MediaRoutingManager::instance().setTelegramGateway(m_telegramGw);
     qDebug() << "[J2J] Telegram gateway initialized";
+}
+
+// ============================================================
+//  P2P Knowledge Delegation — asset offload + cache transfer
+// ============================================================
+
+bool J2JMeshConnector::hasPrimaryStorage() const
+{
+    return MemoryConsolidation::instance().isExternalAvailable();
+}
+
+void J2JMeshConnector::delegateRawAsset(const QString& peerId,
+                                          const QString& assetType,
+                                          const QString& fileName,
+                                          const QByteArray& data)
+{
+    if (!m_peers.contains(peerId)) return;
+    const J2JPeer& peer = m_peers[peerId];
+
+    auto* sock = new QTcpSocket(this);
+    const QString token = authToken();
+    const QString from  = m_nodeName;
+
+    connect(sock, &QTcpSocket::connected, this,
+            [sock, token, from, assetType, fileName, data]() {
+        QJsonObject packet;
+        packet[QStringLiteral("token")] = token;
+        packet[QStringLiteral("type")]  = QStringLiteral("DelegateAsset");
+        QJsonObject d;
+        d[QStringLiteral("fromNode")]  = from;
+        d[QStringLiteral("assetType")] = assetType;
+        d[QStringLiteral("fileName")]  = fileName;
+        d[QStringLiteral("dataB64")]   = QString::fromLatin1(data.toBase64());
+        packet[QStringLiteral("data")] = d;
+        sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact));
+        sock->flush();
+        sock->disconnectFromHost();
+        sock->deleteLater();
+    });
+
+    connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+    sock->connectToHost(peer.address, peer.tcpPort);
+    emit assetDelegated(peer.nodeName, assetType);
+}
+
+void J2JMeshConnector::handleDelegateAsset(QTcpSocket* socket,
+                                             const QJsonObject& data)
+{
+    const QString fromNode  = data[QStringLiteral("fromNode")].toString();
+    const QString assetType = data[QStringLiteral("assetType")].toString();
+    const QString fileName  = data[QStringLiteral("fileName")].toString();
+    const QByteArray rawData = QByteArray::fromBase64(
+        data[QStringLiteral("dataB64")].toString().toLatin1());
+
+    if (fileName.isEmpty() || rawData.isEmpty()) {
+        sendReply(socket, QStringLiteral("DelegateAsset"),
+                  QJsonObject{{QStringLiteral("message"),
+                               QStringLiteral("Empty asset")}}, false);
+        return;
+    }
+
+    // Store on our external drive (Tier 1)
+    auto& mc = MemoryConsolidation::instance();
+    const bool stored = mc.storeRawAsset(assetType, fileName, rawData);
+
+    sendReply(socket, QStringLiteral("DelegateAsset"),
+              QJsonObject{
+                  {QStringLiteral("stored"), stored},
+                  {QStringLiteral("fileName"), fileName},
+              }, stored);
+
+    if (stored)
+        qDebug() << "[J2J] Stored delegated asset from" << fromNode
+                 << ":" << fileName << "(" << rawData.size() / 1024 << "KB)";
+}
+
+void J2JMeshConnector::requestDistilledCache(const QString& peerId)
+{
+    if (!m_peers.contains(peerId)) return;
+    const J2JPeer& peer = m_peers[peerId];
+
+    auto* sock = new QTcpSocket(this);
+    const QString token = authToken();
+    const QString from  = m_nodeName;
+
+    connect(sock, &QTcpSocket::connected, this,
+            [sock, token, from]() {
+        QJsonObject packet;
+        packet[QStringLiteral("token")] = token;
+        packet[QStringLiteral("type")]  = QStringLiteral("RequestCache");
+        QJsonObject d;
+        d[QStringLiteral("fromNode")] = from;
+        packet[QStringLiteral("data")] = d;
+        sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact));
+        sock->flush();
+    });
+
+    // Handle response with distilled entries
+    connect(sock, &QTcpSocket::readyRead, this,
+            [this, sock]() {
+        const QByteArray raw = sock->readAll();
+        const QJsonObject resp = QJsonDocument::fromJson(raw).object();
+        const QJsonArray entries = resp[QStringLiteral("entries")].toArray();
+
+        auto& mc = MemoryConsolidation::instance();
+        int imported = 0;
+        for (const auto& val : entries) {
+            QJsonObject e = val.toObject();
+            ConsolidationEntry ce;
+            ce.sourceFile      = e[QStringLiteral("source")].toString();
+            ce.assetType       = e[QStringLiteral("type")].toString();
+            ce.summary         = e[QStringLiteral("summary")].toString();
+            ce.tokens          = e[QStringLiteral("tokens")].toString()
+                                     .split(QChar(','), Qt::SkipEmptyParts);
+            ce.importance      = e[QStringLiteral("importance")].toDouble();
+            if (mc.storeConsolidatedEntry(ce) >= 0) ++imported;
+        }
+
+        emit distilledCacheReceived(resp[QStringLiteral("fromNode")].toString(),
+                                     imported);
+        sock->disconnectFromHost();
+        sock->deleteLater();
+    });
+
+    connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+    sock->connectToHost(peer.address, peer.tcpPort);
+}
+
+void J2JMeshConnector::handleRequestCache(QTcpSocket* socket,
+                                            const QJsonObject& data)
+{
+    Q_UNUSED(data)
+
+    // Send our recent consolidated entries as lightweight Tier 2 cache
+    auto& mc = MemoryConsolidation::instance();
+    auto entries = mc.recentConsolidations(50);
+
+    QJsonArray arr;
+    for (const auto& e : entries) {
+        QJsonObject obj;
+        obj[QStringLiteral("source")]     = e.sourceFile;
+        obj[QStringLiteral("type")]       = e.assetType;
+        obj[QStringLiteral("summary")]    = e.summary;
+        obj[QStringLiteral("tokens")]     = e.tokens.join(QChar(','));
+        obj[QStringLiteral("importance")] = e.importance;
+        arr.append(obj);
+    }
+
+    QJsonObject reply;
+    reply[QStringLiteral("fromNode")] = m_nodeName;
+    reply[QStringLiteral("entries")]  = arr;
+    reply[QStringLiteral("success")]  = true;
+
+    socket->write(QJsonDocument(reply).toJson(QJsonDocument::Compact));
+    socket->flush();
+
+    qDebug() << "[J2J] Sent" << arr.size() << "distilled cache entries";
+}
+
+void J2JMeshConnector::syncUserProfile(const QString& peerId)
+{
+    if (!m_peers.contains(peerId)) return;
+    const J2JPeer& peer = m_peers[peerId];
+
+    auto& profile = UserProfileExtended::instance();
+    const QJsonObject profileData = profile.toJson(profile.currentUserId());
+
+    auto* sock = new QTcpSocket(this);
+    const QString token = authToken();
+    const QString from  = m_nodeName;
+    const QString uid   = profile.currentUserId();
+
+    connect(sock, &QTcpSocket::connected, this,
+            [sock, token, from, uid, profileData]() {
+        QJsonObject packet;
+        packet[QStringLiteral("token")] = token;
+        packet[QStringLiteral("type")]  = QStringLiteral("ProfileSync");
+        QJsonObject d;
+        d[QStringLiteral("fromNode")] = from;
+        d[QStringLiteral("userId")]   = uid;
+        d[QStringLiteral("profile")]  = profileData;
+        packet[QStringLiteral("data")] = d;
+        sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact));
+        sock->flush();
+        sock->disconnectFromHost();
+        sock->deleteLater();
+    });
+
+    connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+    sock->connectToHost(peer.address, peer.tcpPort);
+    emit profileSynced(peer.nodeName);
+}
+
+void J2JMeshConnector::handleProfileSync(QTcpSocket* socket,
+                                           const QJsonObject& data)
+{
+    const QString fromNode = data[QStringLiteral("fromNode")].toString();
+    const QString userId   = data[QStringLiteral("userId")].toString();
+    const QJsonObject prof = data[QStringLiteral("profile")].toObject();
+
+    if (userId.isEmpty() || prof.isEmpty()) {
+        sendReply(socket, QStringLiteral("ProfileSync"),
+                  QJsonObject{{QStringLiteral("message"),
+                               QStringLiteral("Empty profile")}}, false);
+        return;
+    }
+
+    UserProfileExtended::instance().fromJson(userId, prof);
+
+    sendReply(socket, QStringLiteral("ProfileSync"),
+              QJsonObject{{QStringLiteral("imported"), true}}, true);
+
+    qDebug() << "[J2J] Synced profile from" << fromNode
+             << "userId:" << userId.left(8);
 }

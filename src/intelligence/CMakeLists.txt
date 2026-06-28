@@ -39,6 +39,8 @@ add_library(jarvis_intelligence OBJECT
     pdf_distiller.cpp
     self_journal.h
     self_journal.cpp
+    user_profile_extended.h
+    user_profile_extended.cpp
     project_indexer.h
     project_indexer.cpp
     code_actions.h

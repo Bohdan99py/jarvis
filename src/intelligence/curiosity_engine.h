@@ -95,7 +95,8 @@ public:
         TimeAwareness,
         Casual,
         VisualContextual,  // question derived from screenshot context
-        DoubtVerification  // "What if I am wrong?" — asks user to verify
+        DoubtVerification, // "What if I am wrong?" — asks user to verify
+        PersonalProfiling  // calibration question for empty/low-conf profile fields
     };
     Q_ENUM(ProactiveCategory)
 
@@ -114,6 +115,7 @@ private:
     QString pickQuestion(ProactiveCategory category) const;
     QString buildVisualContextQuestion() const;
     QString buildDoubtVerificationQuestion() const;
+    QString buildPersonalProfilingQuestion() const;
     bool shouldInterrupt() const;
 
     J2JTelegramGateway* m_gateway          = nullptr;

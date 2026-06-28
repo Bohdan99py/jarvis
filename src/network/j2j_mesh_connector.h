@@ -53,6 +53,13 @@ public:
     void broadcastKnowledge(const QJsonArray& facts);
     void delegateTask(const QString& peerId, const QJsonObject& task);
 
+    // P2P knowledge delegation — secondary node offloads to primary
+    void delegateRawAsset(const QString& peerId, const QString& assetType,
+                          const QString& fileName, const QByteArray& data);
+    void requestDistilledCache(const QString& peerId);
+    void syncUserProfile(const QString& peerId);
+    bool hasPrimaryStorage() const;
+
     // Mobile pairing coordinator
     MobilePairingManager* mobilePairing() const { return m_mobilePairing; }
     void initMobilePairing();
@@ -67,6 +74,9 @@ signals:
     void peerAuthorized(const QString& nodeName, const QString& address);
     void knowledgeReceived(const QString& fromNode, int factCount);
     void taskReceived(const QString& fromNode, const QString& taskTitle);
+    void assetDelegated(const QString& toNode, const QString& assetType);
+    void distilledCacheReceived(const QString& fromNode, int entryCount);
+    void profileSynced(const QString& withNode);
     void meshError(const QString& message);
 
 private slots:
@@ -83,6 +93,9 @@ private:
     void handleHandshake(QTcpSocket* socket, const QJsonObject& data);
     void handleSyncKnowledge(QTcpSocket* socket, const QJsonObject& data);
     void handleDelegateTask(QTcpSocket* socket, const QJsonObject& data);
+    void handleDelegateAsset(QTcpSocket* socket, const QJsonObject& data);
+    void handleRequestCache(QTcpSocket* socket, const QJsonObject& data);
+    void handleProfileSync(QTcpSocket* socket, const QJsonObject& data);
     void sendReply(QTcpSocket* socket, const QString& type,
                    const QJsonObject& payload, bool success = true);
 

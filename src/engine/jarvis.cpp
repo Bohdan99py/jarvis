@@ -34,6 +34,7 @@
 #include "memory_consolidation.h"
 #include "pdf_distiller.h"
 #include "self_journal.h"
+#include "user_profile_extended.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -213,6 +214,22 @@ Jarvis::Jarvis(QObject* parent)
                 ? QStringLiteral("📀 External memory pool connected — consolidation active.")
                 : QStringLiteral("📀 External memory pool disconnected — operating from local cache.");
             emit asyncResponseReady(msg);
+        });
+    }
+
+    // Multi-user profile system — identity, preferences, mesh role
+    {
+        auto& prof = UserProfileExtended::instance();
+        prof.ensureTable();
+        connect(&prof, &UserProfileExtended::profileChanged, this,
+                [this](const QString& userId) {
+            Q_UNUSED(userId)
+            // Re-inject identity summary into session memory
+            m_memory->setUserProfileSummary(
+                m_profile->buildProfileSummary()
+                + QStringLiteral("\n")
+                + UserProfileExtended::instance().buildIdentitySummary(
+                      UserProfileExtended::instance().currentUserId()));
         });
     }
 
@@ -987,7 +1004,15 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             m_multiAgentMode
         );
         m_profile->recordObservation(ctx, s);
-        m_memory->setUserProfileSummary(m_profile->buildProfileSummary());
+        {
+            QString profileSummary = m_profile->buildProfileSummary();
+            const QString identitySummary =
+                UserProfileExtended::instance().buildIdentitySummary(
+                    UserProfileExtended::instance().currentUserId());
+            if (!identitySummary.isEmpty())
+                profileSummary += QStringLiteral("\n") + identitySummary;
+            m_memory->setUserProfileSummary(profileSummary);
+        }
 
         // Activity context: what the user is doing right now
         m_memory->setActivityContext(m_activity->buildActivityContext());

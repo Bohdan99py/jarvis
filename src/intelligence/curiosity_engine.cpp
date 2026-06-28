@@ -7,6 +7,7 @@
 #include "activity_tracker.h"
 #include "screenshot_learner.h"
 #include "self_journal.h"
+#include "user_profile_extended.h"
 
 #include <QSqlQuery>
 #include <QSqlDatabase>
@@ -218,6 +219,17 @@ CuriosityEngine::ProactiveCategory CuriosityEngine::selectCategory() const
             return ProactiveCategory::DoubtVerification;
     }
 
+    // Personal profiling — calibrate empty or low-confidence profile fields
+    {
+        auto& prof = UserProfileExtended::instance();
+        const auto empty = prof.emptyRequiredFields(prof.currentUserId());
+        const auto lowConf = prof.lowConfidenceFields(prof.currentUserId());
+        if (!empty.isEmpty() || !lowConf.isEmpty()) {
+            if (QRandomGenerator::global()->bounded(100) < 50)
+                return ProactiveCategory::PersonalProfiling;
+        }
+    }
+
     // Visual context available and fresh — ask about what user was doing
     if (m_visualCtx.isValid() && !m_visualCtx.isStale(600)) {
         const bool hasProjectSignals =
@@ -415,6 +427,13 @@ QString CuriosityEngine::pickQuestion(ProactiveCategory category) const
         category = ProactiveCategory::ProjectCheckIn;
     }
 
+    // Personal profiling — calibration question
+    if (category == ProactiveCategory::PersonalProfiling) {
+        const QString ppq = buildPersonalProfilingQuestion();
+        if (!ppq.isEmpty()) return ppq;
+        category = ProactiveCategory::Casual;
+    }
+
     // Visual contextual questions are built dynamically
     if (category == ProactiveCategory::VisualContextual) {
         const QString vcq = buildVisualContextQuestion();
@@ -472,6 +491,63 @@ QString CuriosityEngine::buildDoubtVerificationQuestion() const
 }
 
 // ============================================================
+//  Build personal profiling calibration question
+// ============================================================
+
+QString CuriosityEngine::buildPersonalProfilingQuestion() const
+{
+    auto& prof = UserProfileExtended::instance();
+    const QString uid = prof.currentUserId();
+    const QString nick = prof.nickname();
+    const QString name = nick.isEmpty() ? QStringLiteral("Boss") : nick;
+
+    // Priority 1: empty required fields
+    const auto empty = prof.emptyRequiredFields(uid);
+    if (!empty.isEmpty()) {
+        const QString& field = empty.first();
+
+        if (field == QStringLiteral("nickname"))
+            return QStringLiteral("Кстати, %1, как мне тебя называть? "
+                                  "Можешь задать никнейм в профиле, "
+                                  "или просто скажи — я запомню.").arg(name);
+
+        if (field == QStringLiteral("active_hours_start")
+            || field == QStringLiteral("active_hours_end"))
+            return QStringLiteral("%1, в какие часы ты обычно работаешь? "
+                                  "Хочу знать, когда лучше тебя не трогать, "
+                                  "а когда можно спрашивать.").arg(name);
+
+        if (field == QStringLiteral("dev_style"))
+            return QStringLiteral("%1, ты какой разработчик? "
+                                  "Любишь TDD и чистый код, или «сначала работает — потом рефакторим»? "
+                                  "Мне это поможет давать более точные советы.").arg(name);
+
+        if (field == QStringLiteral("ui_accent_color"))
+            return QStringLiteral("%1, у тебя есть предпочитаемый цвет для UI? "
+                                  "Я могу подстроить интерфейс под тебя.").arg(name);
+
+        if (field == QStringLiteral("mesh_role"))
+            return QStringLiteral("%1, этот компьютер — твоя основная рабочая станция (primary) "
+                                  "или дополнительный узел (secondary)? "
+                                  "Это определит, как я буду обрабатывать тяжёлые данные.").arg(name);
+    }
+
+    // Priority 2: low-confidence fields
+    const auto lowConf = prof.lowConfidenceFields(uid);
+    if (!lowConf.isEmpty()) {
+        const ProfileField& f = lowConf.first();
+
+        return QStringLiteral("%1, я заметил, что твой профиль указывает «%2 = %3», "
+                              "но я не очень уверен в этом (confidence: %4). "
+                              "Это всё ещё актуально, или стоит обновить?")
+            .arg(name, f.key, f.value.toString(),
+                 QString::number(f.confidence, 'f', 2));
+    }
+
+    return QString();
+}
+
+// ============================================================
 //  Post context-aware question
 // ============================================================
 
@@ -492,6 +568,7 @@ void CuriosityEngine::postContextAwareQuestion()
     case ProactiveCategory::Casual:           prefix = QStringLiteral("😊 "); break;
     case ProactiveCategory::VisualContextual: prefix = QStringLiteral("👁️ "); break;
     case ProactiveCategory::DoubtVerification: prefix = QStringLiteral("🤔 "); break;
+    case ProactiveCategory::PersonalProfiling: prefix = QStringLiteral("📋 "); break;
     }
 
     const QString msg = prefix + question;
