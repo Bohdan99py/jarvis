@@ -132,6 +132,18 @@ Intent Brain::analyze(const QString& input, const ContextSnapshot& ctx) const
     if (tryLocalAnswer(lower, intent))
         return intent;
 
+    // --- Уровень 0.5: high-priority conversational filter ---
+    // Pure chat / small-talk / greetings must be routed to the LLM
+    // immediately, bypassing all keyword scoring that could
+    // accidentally match a filesystem/search domain.
+    if (isConversational(lower)) {
+        intent.action     = Intent::Action::Ask;
+        intent.domain     = Intent::Domain::Philosophy_Chitchat;
+        intent.query      = input.trimmed();
+        intent.confidence = 1.0f;
+        return intent;
+    }
+
     // --- Уровень 1: лингвистика ---
     intent.action = detectAction(lower);
     intent.domain = detectDomainByKeywords(lower);
@@ -142,7 +154,7 @@ Intent Brain::analyze(const QString& input, const ContextSnapshot& ctx) const
     intent.targetApp  = extractTargetApp(lower);
 
     // --- Уровень 2: контекст ---
-    intent.domain = refineDomainByContext(intent.domain, lower, ctx);
+    intent.domain = refineDomainByContext(intent.domain, intent.action, lower, ctx);
     intent.confidence = boostConfidenceByContext(intent.confidence, intent, ctx);
 
     // Извлекаем чистый запрос (без командных слов)
@@ -378,6 +390,7 @@ float Brain::scoreActionConfidence(const QString& lower, Intent::Action action) 
 
 Intent::Domain Brain::refineDomainByContext(
     Intent::Domain      preliminary,
+    Intent::Action      action,
     const QString&      lower,
     const ContextSnapshot& ctx) const
 {
@@ -461,14 +474,21 @@ Intent::Domain Brain::refineDomainByContext(
         })) return Intent::Domain::BrowserHistory;
     }
 
-    // Если проект индексирован и ничего другого не подошло —
-    // поиск вероятнее в проекте (для разработчика это частый случай)
-    if (ctx.projectIndexed) {
-        return Intent::Domain::ProjectFiles;
+    // Only fall through to file-oriented domains when the action
+    // is actually Search/Open/Modify — otherwise generic Ask/Explain
+    // queries should stay domain-free and route to the LLM.
+    const bool fileOriented = (action == Intent::Action::Search
+                            || action == Intent::Action::Open
+                            || action == Intent::Action::Modify
+                            || action == Intent::Action::Create);
+    if (fileOriented) {
+        if (ctx.projectIndexed) {
+            return Intent::Domain::ProjectFiles;
+        }
+        return Intent::Domain::Filesystem;
     }
 
-    // Финальный дефолт — весь компьютер
-    return Intent::Domain::Filesystem;
+    return Intent::Domain::None;
 }
 
 float Brain::boostConfidenceByContext(
@@ -731,6 +751,73 @@ bool Brain::startsWithAny(const QString& text, const QStringList& words) const
     for (const auto& w : words) {
         if (text.startsWith(w)) return true;
     }
+    return false;
+}
+
+// ============================================================
+// isConversational — high-priority small-talk / chat filter
+//
+// Intercepts pure conversational phrases BEFORE any keyword
+// scoring. Without this, words like "важно" can accidentally
+// boost Filesystem and phrases like "поболтаем" get routed
+// to SearchRouter instead of the LLM.
+// ============================================================
+
+bool Brain::isConversational(const QString& lower) const
+{
+    // --- Explicit chat markers (RU + EN) ---
+    static const QStringList chatMarkers = {
+        // Direct requests to chat / small talk
+        QStringLiteral("поболтаем"),      QStringLiteral("поболтать"),
+        QStringLiteral("пообщаемся"),     QStringLiteral("пообщаться"),
+        QStringLiteral("давай поговорим"),QStringLiteral("просто поговорим"),
+        QStringLiteral("просто пообщаться"),
+        QStringLiteral("давай общаться"), QStringLiteral("давай болтать"),
+        QStringLiteral("let's chat"),     QStringLiteral("just chat"),
+        QStringLiteral("let's talk"),     QStringLiteral("just talk"),
+        QStringLiteral("wanna chat"),     QStringLiteral("want to chat"),
+
+        // Greetings
+        QStringLiteral("привет"),         QStringLiteral("здравствуй"),
+        QStringLiteral("здарова"),        QStringLiteral("приветик"),
+        QStringLiteral("hello"),          QStringLiteral("hi jarvis"),
+        QStringLiteral("hey jarvis"),     QStringLiteral("hi there"),
+        QStringLiteral("good morning"),   QStringLiteral("доброе утро"),
+        QStringLiteral("добрый день"),    QStringLiteral("добрый вечер"),
+
+        // How are you / mood
+        QStringLiteral("как дела"),       QStringLiteral("как ты"),
+        QStringLiteral("как жизнь"),      QStringLiteral("как поживаешь"),
+        QStringLiteral("как настроение"), QStringLiteral("что нового"),
+        QStringLiteral("how are you"),    QStringLiteral("what's up"),
+        QStringLiteral("how's it going"),
+
+        // Dismissals / topic drops that precede casual chat
+        QStringLiteral("не важно"),       QStringLiteral("неважно"),
+        QStringLiteral("ладно"),          QStringLiteral("забей"),
+        QStringLiteral("проехали"),       QStringLiteral("забудь"),
+        QStringLiteral("отстань"),        QStringLiteral("хватит"),
+        QStringLiteral("never mind"),     QStringLiteral("nevermind"),
+        QStringLiteral("doesn't matter"), QStringLiteral("forget it"),
+
+        // Boredom / idle
+        QStringLiteral("мне скучно"),     QStringLiteral("скучно"),
+        QStringLiteral("i'm bored"),      QStringLiteral("bored"),
+
+        // Farewell
+        QStringLiteral("пока"),           QStringLiteral("до свидания"),
+        QStringLiteral("спокойной ночи"), QStringLiteral("bye"),
+        QStringLiteral("good night"),     QStringLiteral("goodbye"),
+
+        // Thanks
+        QStringLiteral("спасибо"),        QStringLiteral("благодарю"),
+        QStringLiteral("thanks"),         QStringLiteral("thank you"),
+    };
+
+    for (const QString& marker : chatMarkers) {
+        if (lower.contains(marker)) return true;
+    }
+
     return false;
 }
 // ============================================================

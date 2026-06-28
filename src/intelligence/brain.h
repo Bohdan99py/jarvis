@@ -134,6 +134,7 @@ private:
     // --- Уровень 2: контекстный анализ ---
     Intent::Domain  refineDomainByContext(
                         Intent::Domain      preliminary,
+                        Intent::Action      action,
                         const QString&      lower,
                         const ContextSnapshot& ctx) const;
     float           boostConfidenceByContext(
@@ -152,6 +153,7 @@ private:
     QString         extractTargetApp(const QString& lower) const;
     bool            containsAny(const QString& text, const QStringList& words) const;
     bool            startsWithAny(const QString& text, const QStringList& words) const;
+    bool            isConversational(const QString& lower) const;
 
     // --- Пороги уверенности ---
     static constexpr float kClarifyThreshold = 0.55f;
