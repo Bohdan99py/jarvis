@@ -338,6 +338,17 @@ qint64 MemoryManager::store(const QString& tag,
 }
 
 // ============================================================
+//  Store Insight — synthesized conclusion, not raw dialogue
+// ============================================================
+
+qint64 MemoryManager::storeInsight(const QString& conclusion,
+                                    double importance)
+{
+    return store(QStringLiteral("insight"), conclusion,
+                 qBound(0.5, importance, 1.0));
+}
+
+// ============================================================
 //  Reinforce — boost an existing memory
 // ============================================================
 

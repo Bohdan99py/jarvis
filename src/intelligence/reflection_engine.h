@@ -7,66 +7,102 @@
 //   1. Cognitive shifts (opinion/value changes)
 //   2. Emotional state trends
 //   3. Productivity patterns
+//   4. Behavioral topology (goal-orientedness, context-switching)
 //
 // Produces a UserSummary and writes an evolving JSON profile.
 // The morning summary is queued as the first nudge of the day.
 //
-// Thread safety: QThread + QMutex. Never blocks the main
+// Thread safety: QtConcurrent + QMutex. Never blocks the main
 // Telegram event loop.
 // ============================================================
 
 #include <QObject>
-#include <QThread>
 #include <QTimer>
 #include <QMutex>
+#include <QReadWriteLock>
 #include <QString>
 #include <QStringList>
 #include <QDateTime>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QPair>
+#include <QList>
 
 class MemoryManager;
 class SocialPresenceEngine;
+
+// ── Emotion signal entry (top-level to avoid nested-struct moc issues) ──
+
+struct EmotionSignal
+{
+    QString keyword;
+    QString emotion;
+    double  weight = 0.0;
+};
 
 // ── Analysis Results ────────────────────────────────────────
 
 struct EmotionTrend
 {
-    QString dominant;              // "neutral", "positive", "stressed", "curious", "frustrated"
-    double  confidence = 0.0;      // 0.0–1.0
-    int     sampleCount = 0;
-    QStringList signals;           // evidence phrases
+    QString     dominant    = QStringLiteral("neutral");
+    double      confidence  = 0.0;
+    int         sampleCount = 0;
+    QStringList signals;
 };
 
 struct ProductivityPattern
 {
-    int     totalMessages      = 0;
-    int     questionCount      = 0;  // user asked questions
-    int     commandCount       = 0;  // slash commands used
-    int     topicSwitches      = 0;  // how often topic changed
-    double  focusScore         = 0.0; // 0–1: sustained single-topic vs scattered
+    int     totalMessages    = 0;
+    int     questionCount    = 0;
+    int     commandCount     = 0;
+    int     topicSwitches    = 0;
+    double  focusScore       = 0.0;
     QString dominantTopic;
     QStringList topicsDiscussed;
 };
 
 struct CognitiveShift
 {
-    QString topic;
-    QString previousStance;
-    QString currentStance;
-    double  shiftMagnitude = 0.0;  // 0–1
+    QString   topic;
+    QString   previousStance;
+    QString   currentStance;
+    double    shiftMagnitude = 0.0;
     QDateTime detectedAt;
 };
 
+// ── Behavioral Metrics — dialogue topology analysis ─────────
+
+struct BehavioralMetrics
+{
+    // Goal-orientedness: 0 = purely exploratory, 1 = laser-focused on task
+    double goalOrientedness    = 0.5;
+
+    // Context-switching frequency: avg switches per 10 messages
+    double contextSwitchRate   = 0.0;
+
+    // Whether the user is becoming more focused or more scattered
+    // over time. Positive = improving focus, negative = increasing scatter.
+    double focusEvolutionDelta = 0.0;
+
+    // Dominant interaction style for this window
+    QString interactionStyle;  // "task-driven", "exploratory", "mixed"
+
+    // Per-topic dwell times (topic → message count in that topic)
+    QList<QPair<QString, int>> topicDwellTimes;
+
+    QJsonObject toJson() const;
+};
+
+// ── UserSummary ─────────────────────────────────────────────
+
 struct UserSummary
 {
-    QDateTime           generatedAt;
-    EmotionTrend        emotion;
-    ProductivityPattern productivity;
-    QList<CognitiveShift> cognitiveShifts;
-
-    // Pre-formatted morning nudge text
-    QString             morningNudge;
+    QDateTime               generatedAt;
+    EmotionTrend            emotion;
+    ProductivityPattern     productivity;
+    QList<CognitiveShift>   cognitiveShifts;
+    BehavioralMetrics       behavior;
+    QString                 morningNudge;
 
     QJsonObject toJson() const;
 };
@@ -81,27 +117,27 @@ public:
     explicit ReflectionEngine(QObject* parent = nullptr);
     ~ReflectionEngine() override;
 
-    void setMemoryManager(MemoryManager* mm)        { m_memory = mm; }
-    void setSocialPresence(SocialPresenceEngine* sp) { m_presence = sp; }
+    void setMemoryManager(MemoryManager* mm);
+    void setSocialPresence(SocialPresenceEngine* sp);
 
-    // Start the background reflection loop
     void start(int checkIntervalMinutes = 30);
     void stop();
     bool isRunning() const;
 
-    // Force an immediate reflection cycle (for testing/debug)
     void triggerReflection();
 
-    // Access the latest summary
     UserSummary lastSummary() const;
 
-    // Path to the evolving UserProfile JSON
+    // Behavioral metrics — thread-safe read for SocialPresenceEngine
+    BehavioralMetrics currentBehavior() const;
+
     static QString profileJsonPath();
 
 signals:
     void reflectionComplete(const UserSummary& summary);
     void morningNudgeReady(const QString& nudgeText);
     void profileUpdated(const QString& path);
+    void behaviorUpdated(const BehavioralMetrics& metrics);
 
 private slots:
     void onCheckTimer();
@@ -115,37 +151,35 @@ private:
     EmotionTrend        analyzeEmotions(const QList<QPair<QString, QString>>& dialogue) const;
     ProductivityPattern analyzeProductivity(const QList<QPair<QString, QString>>& dialogue) const;
     QList<CognitiveShift> detectCognitiveShifts(const QList<QPair<QString, QString>>& dialogue) const;
+    BehavioralMetrics   analyzeBehavior(const QList<QPair<QString, QString>>& dialogue) const;
+
+    // Behavioral evolution — compares current metrics against historical
+    double calculateBehavioralEvolution(const BehavioralMetrics& current) const;
 
     // Output phases
     QString     composeMorningNudge(const UserSummary& summary) const;
     void        updateProfileJson(const UserSummary& summary);
     QJsonObject loadExistingProfile() const;
     void        saveProfile(const QJsonObject& profile) const;
+    void        storeReflectionMemories(const UserSummary& summary);
 
-    // Store reflection results into MemoryManager
-    void storeReflectionMemories(const UserSummary& summary);
-
-    // Emotional keyword matching
-    struct EmotionSignal { QString keyword; QString emotion; double weight; };
     static const QList<EmotionSignal>& emotionLexicon();
 
-    // Determine if a reflection should run
     bool shouldReflect() const;
 
-    MemoryManager*         m_memory     = nullptr;
-    SocialPresenceEngine*  m_presence   = nullptr;
+    MemoryManager*        m_memory   = nullptr;
+    SocialPresenceEngine* m_presence = nullptr;
 
-    QThread*  m_workerThread = nullptr;
-    QTimer*   m_checkTimer   = nullptr;
+    QTimer* m_checkTimer = nullptr;
 
-    UserSummary   m_lastSummary;
-    mutable QMutex m_summaryMutex;
+    UserSummary        m_lastSummary;
+    BehavioralMetrics  m_currentBehavior;
+    mutable QReadWriteLock m_summaryLock;
 
     QDateTime m_lastReflectionTime;
-    bool      m_morningNudgePending = false;
-    int       m_lastReflectionDay   = -1; // day-of-year of last morning summary
+    int       m_lastReflectionDay = -1;
 
-    static constexpr int    MIN_MESSAGES_FOR_REFLECTION = 5;
-    static constexpr int    MIN_HOURS_BETWEEN_REFLECTIONS = 4;
-    static constexpr double COGNITIVE_SHIFT_THRESHOLD = 0.3;
+    static constexpr int    MIN_MESSAGES_FOR_REFLECTION    = 5;
+    static constexpr int    MIN_HOURS_BETWEEN_REFLECTIONS  = 4;
+    static constexpr double COGNITIVE_SHIFT_THRESHOLD       = 0.3;
 };

@@ -80,6 +80,12 @@ public:
     // Reinforce an existing memory (boosts importance + decay resistance)
     void reinforce(qint64 chunkId);
 
+    // Store a synthesized insight — a conclusion about user personality,
+    // project style, or behavioral pattern. Higher default importance
+    // than raw dialogue chunks so insights surface more readily.
+    qint64 storeInsight(const QString& conclusion,
+                        double importance = 0.7);
+
     // ── Retrieval ──────────────────────────────────────────
     // Semantic search: returns top-K chunks most relevant to query
     QList<MemorySearchResult> search(const QString& query,

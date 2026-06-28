@@ -588,19 +588,36 @@ int SocialPresenceEngine::computeNudgeIntervalSec() const
             static_cast<double>(m_totalResponses) / m_totalNudgesSent;
 
         if (responseRatio > 0.8)
-            interval = BASE_NUDGE_INTERVAL_SEC * 0.7; // engaged user
+            interval = static_cast<int>(BASE_NUDGE_INTERVAL_SEC * 0.7);
         else if (responseRatio < 0.3)
-            interval = BASE_NUDGE_INTERVAL_SEC * 1.5; // user ignores nudges
+            interval = static_cast<int>(BASE_NUDGE_INTERVAL_SEC * 1.5);
+    }
+
+    // Behavioral adaptation from ReflectionEngine:
+    // High-focus user → lengthen interval (don't interrupt deep work)
+    // High-distraction user → shorten interval (suggest deep-work mode)
+    if (m_reflection) {
+        const BehavioralMetrics bm = m_reflection->currentBehavior();
+
+        if (bm.goalOrientedness > 0.7 && bm.contextSwitchRate < 2.0) {
+            // User is in deep, task-driven mode — back off significantly
+            interval = static_cast<int>(interval * 1.8);
+        } else if (bm.contextSwitchRate > 6.0 && bm.goalOrientedness < 0.3) {
+            // User is highly scattered and exploratory — nudge more often
+            interval = static_cast<int>(interval * 0.6);
+        } else if (bm.focusEvolutionDelta < -0.2) {
+            // Declining focus trend — gentle increase in frequency
+            interval = static_cast<int>(interval * 0.8);
+        }
     }
 
     // Time-of-day adjustment: less frequent at night
     const int hour = QDateTime::currentDateTime().time().hour();
     if (hour >= 0 && hour < 7)
-        interval *= 2; // night mode — double the interval
+        interval *= 2;
     else if (hour >= 22)
-        interval = static_cast<int>(interval * 1.5); // late evening
+        interval = static_cast<int>(interval * 1.5);
 
-    // Clamp
     if (interval < MIN_NUDGE_INTERVAL_SEC) interval = MIN_NUDGE_INTERVAL_SEC;
     if (interval > MAX_NUDGE_INTERVAL_SEC) interval = MAX_NUDGE_INTERVAL_SEC;
 
