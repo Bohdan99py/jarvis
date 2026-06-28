@@ -33,6 +33,11 @@
 #include "activity_tracker.h"
 #include "user_profile.h"
 #include "curiosity_engine.h"
+#include "user_profile_extended.h"
+#include "memory_consolidation.h"
+#include "self_journal.h"
+#include "pdf_distiller.h"
+#include "self_update_reflector.h"
 #include "mobile_pairing_manager.h"
 #include "j2j_mesh_connector.h"
 #include "j2j_telegram_gateway.h"
@@ -64,6 +69,7 @@
 #include <QKeyEvent>
 #include <QScreen>
 #include <QTime>
+#include <QDate>
 #include <QFont>
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
@@ -268,83 +274,12 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
 
-    // Приветствие
-    int hour = QTime::currentTime().hour();
-    QString g;
-    if      (hour < 6)  g = Str::greetNight();
-    else if (hour < 12) g = Str::greetMorning();
-    else if (hour < 18) g = Str::greetDay();
-    else                g = Str::greetEvening();
+    // Dynamic welcome dashboard — replaces all hardcoded greeting strings
+    showWelcomeDashboard();
 
-    appendLog(Str::logJarvis(),
-              g + QStringLiteral("! ") + Str::greetReady()
-              + QCoreApplication::applicationVersion(),
-              Theme::LogColors::jarvis);
-
-    if (m_jarvis->claudeApi()->hasApiKey()) {
-        appendLog(Str::logJarvis(), Str::apiClaudeConnected(), Theme::LogColors::system);
-    } else {
-        appendLog(Str::logJarvis(), Str::apiNoKey(), Theme::LogColors::jarvis);
-    }
-
-    // What's New — show once per version
-    {
-        QSettings cfg2(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
-        QString lastVer = cfg2.value(QStringLiteral("ui/last_seen_version")).toString();
-        QString currentVer = QCoreApplication::applicationVersion();
-        if (lastVer != currentVer) {
-            appendLog(Str::logJarvis(),
-                      Str::whatsNew().arg(currentVer),
-                      Theme::LogColors::jarvis);
-            cfg2.setValue(QStringLiteral("ui/last_seen_version"), currentVer);
-        }
-    }
-
-    // ── Статус базы данных ────────────────────────────────
-    // Показываем реальный путь к БД при каждом старте — это сразу
-    // видно если debug/release-сборки вдруг разошлись по путям.
-    {
-        auto& db = DatabaseManager::instance();
-        const QString dbPath = db.dbPath();
-        const bool dbOk      = db.isOpen();
-        if (dbOk) {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("💾 Database: %1").arg(dbPath)
-                      : QStringLiteral("💾 База данных: %1").arg(dbPath),
-                Theme::LogColors::system);
-        } else {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("❌ Database FAILED to open: %1\nPath: %2")
-                            .arg(db.lastError(), dbPath)
-                      : QStringLiteral("❌ База данных НЕ открылась: %1\nПуть: %2")
-                            .arg(db.lastError(), dbPath),
-                QStringLiteral("#ff4444"));
-        }
-    }
-
-    // Статус Gemini (встроенный fallback-ключ)
-    if (m_jarvis->geminiBackup() && m_jarvis->geminiBackup()->hasApiKey()) {
-        appendLog(Str::logSystem(),
-                  IS_EN ? QStringLiteral("♊ Gemini ready (built-in key). "
-                                         "Used as fallback when Ollama is unavailable.")
-                        : QStringLiteral("♊ Gemini готов (встроенный ключ). "
-                                         "Используется если Ollama недоступна."),
-                  QStringLiteral("#4a9a6a"));
-    }
-
-    if (m_jarvis->projectIndexer()->fileCount() > 0) {
-        appendLog(Str::logJarvis(),
-                  Str::projLoaded()
-                  + m_jarvis->projectIndexer()->projectRoot()
-                  + QStringLiteral(" (")
-                  + QString::number(m_jarvis->projectIndexer()->fileCount())
-                  + Str::projFiles(),
-                  Theme::LogColors::system);
+    // Sync project info if indexed
+    if (m_jarvis->projectIndexer()->fileCount() > 0)
         m_jarvis->syncProjectInfoToMemory();
-    }
-
-    // Random startup tip
-    appendLog(Str::logJarvis(), Str::startupTip(), QStringLiteral("#7c4dff"));
 
     m_input->setFocus();
 
@@ -2578,187 +2513,93 @@ R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.<
 // В меню "Помощь" — после actAbout
 // =============================================================================
 
-    // --- Что нового ---
+    // --- Что нового (auto-generated from git history) ---
     auto* actWhatsNew = helpMenu->addAction(
         IS_EN ? QStringLiteral("What's New") : QStringLiteral("Что нового"));
     connect(actWhatsNew, &QAction::triggered, this, [this]() {
-        // Левая колонка
-        const QString col1 = IS_EN ? QStringLiteral(
-R"w(<b>🎤 Voice Input (Vosk — offline)</b><br>
-• Model selection dialog on first launch<br>
-• 6 languages: EN fast/full, RU, DE, FR, ZH<br>
-• Download/delete models: Settings → Voice Models<br>
-• Wake word "Jarvis" — hands-free<br>
-• Auto RU/EN, whisper detection<br>
-<br>
-<b>🗄️ SQLite Database</b><br>
-• Chat history, commands, memory<br>
-• WAL mode, migrations, per-thread<br>
-• Token counter by model/month<br>
-<br>
-<b>📚 Fine-Tuning Dataset</b><br>
-• 👍 Like → saves to training dataset<br>
-• All AI responses auto-saved (rating=0)<br>
-• Export .jsonl for Unsloth/LLaMA-Factory<br>
-• Auto-cleanup of noise entries<br>
-<br>
-<b>🌐 Smart Browser Routing</b><br>
-• "Open YouTube" → browser, not app<br>
-• "I want to watch" → suggests YouTube<br>
-• "Play music" → YouTube Music/Spotify<br>
-• 30+ sites mapped automatically)w")
-        : QStringLiteral(
-            R"w(<b>🎤 Голосовой ввод (Vosk — офлайн)</b><br>
-• Диалог выбора моделей при первом запуске<br>
-• 6 языков: EN быстрый/полный, RU, DE, FR, ZH<br>
-• Докачать/удалить модели: Настройки → Голосовые модели<br>
-• Wake word "Джарвис" — без рук<br>
-• Авто RU/EN, шёпот детектируется<br>
-<br>
-<b>🗄️ База данных SQLite</b><br>
-• История, команды, память в jarvis.db<br>
-• WAL режим, миграции, потокобезопасно<br>
-• Счётчик токенов по модели/месяц<br>
-<br>
-<b>📚 Датасет для дообучения</b><br>
-• 👍 Лайк → сохраняет в датасет<br>
-• Все ответы AI автосохраняются (rating=0)<br>
-• Экспорт .jsonl для Unsloth/LLaMA-Factory<br>
-• Автоочистка мусорных записей<br>
-<br>
-<b>🌐 Умный браузерный routing</b><br>
-• "Открой YouTube" → браузер, не поиск<br>
-• "Хочу посмотреть" → предлагает YouTube<br>
-• "Включи музыку" → YouTube Music/Spotify<br>
-• 30+ сайтов в маппинге автоматически)w");
-
-        // Правая колонка
-        const QString col2 = IS_EN ? QStringLiteral(
-R"w(<b>🎙️ Passive Voice Recording</b><br>
-• Listens via tray → saves to journal<br>
-• Brain creates training pairs auto<br>
-• Weekly cleanup after 7 days<br>
-• Dataset folder on your 4TB drive<br>
-<br>
-<b>🤖 Background Learning</b><br>
-• Indexes .cpp/.h/.py of your project<br>
-• Extracts behavior patterns from chat<br>
-• Runs every 30 min at idle priority<br>
-<br>
-<b>😏 Character & Sarcasm</b><br>
-• Dry British humor, like MCU JARVIS<br>
-• No "Certainly!" or "Of course!"<br>
-• Direct, witty, human-like tone<br>
-• TTS reads summary, not symbols<br>
-<br>
-<b>📜 Legal (because why not)</b><br>
-• EULA — agreed from birth retroactively<br>
-• Privacy Policy — court of history clause<br>
-<br>
-<b>🐛 Fixed</b><br>
-• Qt 6.9.3 in CI (aqt limitation)<br>
-• Vosk DLL auto-copied in release<br>
-• Most Vexing Parse in QNetworkRequest)w")
-        : QStringLiteral(
-R"w(<b>🎙️ Пассивная запись голоса</b><br>
-• Слушает через трей → журнал<br>
-• Brain создаёт пары для обучения<br>
-• Еженедельная очистка через 7 дней<br>
-• Папка датасета на 4TB диске<br>
-<br>
-<b>🤖 Фоновое обучение</b><br>
-• Индексирует .cpp/.h/.py проекта<br>
-• Извлекает паттерны поведения из чата<br>
-• Каждые 30 мин с минимальным приоритетом<br>
-<br>
-<b>😏 Характер и сарказм</b><br>
-• Сухой британский юмор как у MCU JARVIS<br>
-• Никаких "Конечно!" и "Безусловно!"<br>
-• Прямолинейно, остроумно, по-человечески<br>
-• TTS читает резюме, не символы<br>
-<br>
-<b>📜 Юридическое (раз уж зашла речь)</b><br>
-• EULA — согласие с момента рождения<br>
-• Политика — суд истории припомнит<br>
-<br>
-<b>🐛 Исправлено</b><br>
-• Qt 6.9.3 в CI (ограничение aqt)<br>
-• Vosk DLL автокопируется в release<br>
-• Most Vexing Parse в QNetworkRequest)w");
+        auto& reflector = SelfUpdateReflector::instance();
+        const QString ver = QCoreApplication::applicationVersion();
+        reflector.markChangelogSeen(ver);
 
         auto* dlg = new QDialog(this);
-        dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New in J.A.R.V.I.S. v3.2")
-                                  : QStringLiteral("Что нового в J.A.R.V.I.S. v3.2"));
-        dlg->setMinimumSize(820, 560);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New — J.A.R.V.I.S.")
+                                  : QStringLiteral("Что нового — J.A.R.V.I.S."));
+        dlg->setMinimumSize(700, 500);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setStyleSheet(QStringLiteral(
-            "QDialog { background: #0a1018; color: #c8e0f0; }"
-            "QLabel  { color: #c8e0f0; font-size: 12px; }"
-            "QPushButton { background: #0f2438; color: #00d4ff; "
-            "border: 1px solid #1a5070; padding: 6px 24px; border-radius: 4px; }"
-            "QPushButton:hover { background: #1a3a5c; }"));
+            "QDialog { background: #0B0C10; color: #C5C6C7; }"
+            "QTextBrowser { background: rgba(11,12,16,220); color: #C5C6C7; "
+            "  border: 1px solid rgba(102,252,241,0.10); border-radius: 8px; padding: 12px; }"
+            "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
+            "  border: 1px solid rgba(102,252,241,0.18); padding: 7px 28px; border-radius: 6px; }"
+            "QPushButton:hover { background: rgba(102,252,241,0.15); }"));
 
-        auto* mainLayout = new QVBoxLayout(dlg);
-        mainLayout->setContentsMargins(20, 16, 20, 16);
-        mainLayout->setSpacing(12);
+        auto* layout = new QVBoxLayout(dlg);
+        auto* browser = new QTextBrowser(dlg);
+        browser->setOpenExternalLinks(true);
+        browser->setHtml(reflector.buildChangelogHtml(IS_EN));
+        layout->addWidget(browser, 1);
 
-        // Заголовок
-        auto* title = new QLabel(
-            IS_EN ? QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.2 — What's New</b>")
-                  : QStringLiteral("<b style='font-size:15px;color:#00d4ff;'>J.A.R.V.I.S. v3.2 — Что нового</b>"),
-            dlg);
-        title->setTextFormat(Qt::RichText);
-        title->setAlignment(Qt::AlignCenter);
-        mainLayout->addWidget(title);
-
-        // Разделитель
-        auto* line = new QFrame(dlg);
-        line->setFrameShape(QFrame::HLine);
-        line->setStyleSheet(QStringLiteral("color: #1a3050;"));
-        mainLayout->addWidget(line);
-
-        // Две колонки
-        auto* colLayout = new QHBoxLayout();
-        colLayout->setSpacing(24);
-
-        auto makeColumn = [&](const QString& html) -> QLabel* {
-            auto* lbl = new QLabel(html, dlg);
-            lbl->setTextFormat(Qt::RichText);
-            lbl->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-            lbl->setWordWrap(true);
-            lbl->setStyleSheet(QStringLiteral(
-                "QLabel { background: #0d1a28; border: 1px solid #1a3050; "
-                "border-radius: 6px; padding: 12px; }"));
-            return lbl;
-        };
-
-        colLayout->addWidget(makeColumn(col1), 1);
-        colLayout->addWidget(makeColumn(col2), 1);
-        mainLayout->addLayout(colLayout);
-
-        // Кнопка OK
-        auto* btnOk = new QPushButton(QStringLiteral("OK"), dlg);
-        btnOk->setFixedWidth(120);
-        connect(btnOk, &QPushButton::clicked, dlg, &QDialog::accept);
-        auto* btnLayout = new QHBoxLayout();
-        btnLayout->addStretch();
-        btnLayout->addWidget(btnOk);
-        btnLayout->addStretch();
-        mainLayout->addLayout(btnLayout);
+        auto* btn = new QPushButton(QStringLiteral("OK"), dlg);
+        btn->setFixedWidth(120);
+        connect(btn, &QPushButton::clicked, dlg, &QDialog::accept);
+        auto* row = new QHBoxLayout();
+        row->addStretch(); row->addWidget(btn); row->addStretch();
+        layout->addLayout(row);
 
         dlg->exec();
     });
 
-    // --- Инструкция ---
+    // --- Инструкция (auto-generated from active modules) ---
     auto* actHelp = helpMenu->addAction(
         IS_EN ? QStringLiteral("📖 User Guide") : QStringLiteral("📖 Руководство пользователя"));
     connect(actHelp, &QAction::triggered, this, [this]() {
-        // Диалог с разделами — как интерактивная книга
         auto* dlg = new QDialog(this);
-        dlg->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. — User Guide")
-                                  : QStringLiteral("J.A.R.V.I.S. — Руководство пользователя"));
-        dlg->setMinimumSize(900, 620);
+        dlg->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. — System Manual")
+                                  : QStringLiteral("J.A.R.V.I.S. — Системное руководство"));
+        dlg->setMinimumSize(780, 560);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+        // DYNAMIC MANUAL — replaces 400 lines of hardcoded sections
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog { background: #0B0C10; color: #C5C6C7; }"
+            "QTextBrowser { background: rgba(11,12,16,220); color: #C5C6C7; "
+            "  border: 1px solid rgba(102,252,241,0.10); border-radius: 8px; padding: 12px; "
+            "  font-family: 'Segoe UI', sans-serif; font-size: 13px; }"
+            "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
+            "  border: 1px solid rgba(102,252,241,0.18); padding: 7px 28px; border-radius: 6px; }"
+            "QPushButton:hover { background: rgba(102,252,241,0.15); }"));
+
+        auto* layout = new QVBoxLayout(dlg);
+        layout->setContentsMargins(16, 14, 16, 14);
+
+        auto* browser = new QTextBrowser(dlg);
+        browser->setOpenExternalLinks(true);
+        browser->setHtml(
+            SelfUpdateReflector::instance().buildDynamicManualHtml(IS_EN));
+        layout->addWidget(browser, 1);
+
+        auto* btnClose = new QPushButton(QStringLiteral("OK"), dlg);
+        btnClose->setFixedWidth(120);
+        connect(btnClose, &QPushButton::clicked, dlg, &QDialog::accept);
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch();
+        btnRow->addWidget(btnClose);
+        btnRow->addStretch();
+        layout->addLayout(btnRow);
+
+        dlg->exec();
+    });
+
+}
+
+// ============================================================
+// LEGACY_MANUAL_REMOVED — the following static content has been
+// replaced by SelfUpdateReflector::buildDynamicManualHtml()
+// which auto-generates the manual from active module introspection.
+// ============================================================
+
+#if 0  // DEAD CODE — kept for reference during transition
         dlg->setStyleSheet(QStringLiteral(
             "QDialog { background: #0B0C10; color: #C5C6C7; }"
             "QLabel { background: transparent; }"
@@ -3141,7 +2982,7 @@ recreate it on next launch. Session memory (<b>jarvis_memory.json</b>) is separa
 
         dlg->exec();
     });
-
+#endif
 }
 
 // ============================================================
@@ -4844,6 +4685,206 @@ void MainWindow::appendLog(const QString& who, const QString& text, const QStrin
     m_log->append(html);
     m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
 }
+
+// ============================================================
+// showWelcomeDashboard — dynamic signal-driven greeting panel
+// ============================================================
+
+void MainWindow::showWelcomeDashboard()
+{
+    // Render the initial welcome panel
+    m_log->setHtml(buildWelcomeHtml());
+
+    // Live signal connections — re-render on state changes
+    connect(&MemoryConsolidation::instance(),
+            &MemoryConsolidation::driveStatusChanged,
+            this, [this](bool) {
+        m_log->setHtml(buildWelcomeHtml());
+    });
+
+    connect(&UserProfileExtended::instance(),
+            &UserProfileExtended::profileChanged,
+            this, [this](const QString&) {
+        m_log->setHtml(buildWelcomeHtml());
+    });
+}
+
+QString MainWindow::buildWelcomeHtml() const
+{
+    const auto& tc = ThemeManager::colors(m_themeIndex);
+    const int hour = QTime::currentTime().hour();
+
+    // ── Identity greeting ─────────────────────────────────
+    const QString nickname = UserProfileExtended::instance().nickname();
+    QString greeting;
+    if (nickname.isEmpty()) {
+        greeting = IS_EN
+            ? QStringLiteral("System Initialized. Awaiting identity calibration...")
+            : QStringLiteral("Система инициализирована. Ожидание калибровки идентичности...");
+    } else {
+        QString timeGreet;
+        if      (hour < 6)  timeGreet = IS_EN ? QStringLiteral("Still up, %1?")   : QStringLiteral("Не спишь, %1?");
+        else if (hour < 12) timeGreet = IS_EN ? QStringLiteral("Morning, %1.")     : QStringLiteral("Доброе утро, %1.");
+        else if (hour < 18) timeGreet = IS_EN ? QStringLiteral("Afternoon, %1.")   : QStringLiteral("Добрый день, %1.");
+        else                timeGreet = IS_EN ? QStringLiteral("Evening, %1.")     : QStringLiteral("Добрый вечер, %1.");
+        greeting = timeGreet.arg(nickname);
+    }
+
+    // ── Version ───────────────────────────────────────────
+    const QString version = QCoreApplication::applicationVersion();
+
+    // ── Storage status ────────────────────────────────────
+    const auto driveStatus = MemoryConsolidation::instance().checkDriveStatus();
+    QString storageHtml;
+    if (driveStatus.connected) {
+        storageHtml = QStringLiteral(
+            "<span style='color:#66FCF1;'>&#9679;</span> "
+            "External Core [%1 GB] Connected — %2 GB free")
+            .arg(QString::number(driveStatus.totalGb(), 'f', 0),
+                 QString::number(driveStatus.freeGb(), 'f', 1));
+    } else {
+        storageHtml = QStringLiteral(
+            "<span style='color:#FFA726;'>&#9679;</span> "
+            "Running Autonomous (Local SSD Cache)");
+    }
+
+    // ── LLM status ────────────────────────────────────────
+    const bool claudeOk = m_jarvis->claudeApi() && m_jarvis->claudeApi()->hasApiKey();
+    const bool geminiOk = m_jarvis->geminiBackup() && m_jarvis->geminiBackup()->hasApiKey();
+    QString llmLine;
+    if (claudeOk)
+        llmLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Claude API Online");
+    else
+        llmLine = QStringLiteral("<span style='color:#ff4444;'>&#9679;</span> Claude API — no key");
+    if (geminiOk)
+        llmLine += QStringLiteral(" &nbsp;|&nbsp; <span style='color:#4a9a6a;'>&#9679;</span> Gemini Fallback Ready");
+
+    // ── Database status ───────────────────────────────────
+    const auto& db = DatabaseManager::instance();
+    QString dbLine;
+    if (db.isOpen())
+        dbLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Database Online");
+    else
+        dbLine = QStringLiteral("<span style='color:#ff4444;'>&#9679;</span> Database OFFLINE");
+
+    // ── Project status ────────────────────────────────────
+    QString projLine;
+    if (m_jarvis->projectIndexer()->fileCount() > 0) {
+        projLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Project: %1 (%2 files)")
+                       .arg(m_jarvis->projectIndexer()->projectRoot()
+                                .section(QChar('/'), -1),
+                            QString::number(m_jarvis->projectIndexer()->fileCount()));
+    }
+
+    // ── Current thought / reflection digest ───────────────
+    const auto doubts = SelfJournal::instance().topDoubtsForVerification(1);
+    const int doubtCount = SelfJournal::instance().unresolvedDoubtCount();
+    const int pdfChunks  = PdfDistiller::instance().totalChunks();
+    const int pdfDoubts  = PdfDistiller::instance().doubtCount();
+
+    QString thoughtLine;
+    if (!doubts.isEmpty()) {
+        const auto& d = doubts.first();
+        thoughtLine = QStringLiteral("Reflecting on: <em>\"%1\"</em> (confidence: %2)")
+                          .arg(d.content.left(80).toHtmlEscaped(),
+                               QString::number(d.confidence, 'f', 2));
+    } else if (pdfChunks > 0) {
+        thoughtLine = IS_EN
+            ? QStringLiteral("Knowledge base: %1 chunks distilled").arg(pdfChunks)
+            : QStringLiteral("База знаний: %1 фрагментов извлечено").arg(pdfChunks);
+    } else {
+        thoughtLine = IS_EN
+            ? QStringLiteral("Idle — awaiting new data to learn from")
+            : QStringLiteral("Ожидание — готов к обучению");
+    }
+
+    QString doubtBadge;
+    if (doubtCount > 0 || pdfDoubts > 0) {
+        const int total = doubtCount + pdfDoubts;
+        doubtBadge = QStringLiteral(
+            " &nbsp;<span style='background:#ff572233; color:#FF5722; "
+            "padding:2px 8px; border-radius:8px; font-size:11px;'>"
+            "&#10067; %1 unverified</span>").arg(total);
+    }
+
+    // ── Build the complete dashboard HTML ─────────────────
+    return QStringLiteral(
+        // Outer container
+        "<div style='margin:12px 8px; font-family:Segoe UI,sans-serif;'>"
+
+        // Header — JARVIS title + version
+        "<div style='text-align:center; padding:16px 0 8px 0;'>"
+        "<span style='color:%1; font-size:28px; font-weight:bold; "
+        "letter-spacing:6px; font-family:Segoe UI Semibold,sans-serif;'>"
+        "J.A.R.V.I.S.</span><br>"
+        "<span style='color:%2; font-size:11px; letter-spacing:2px;'>"
+        "v%3 &nbsp;|&nbsp; %4</span>"
+        "</div>"
+
+        // Greeting
+        "<div style='text-align:center; padding:8px 0 16px 0;'>"
+        "<span style='color:%5; font-size:15px;'>%6</span>"
+        "</div>"
+
+        // Status grid
+        "<div style='background:%7; border:1px solid %8; border-radius:10px; "
+        "padding:14px 18px; margin:4px 0;'>"
+
+        // Row: Storage
+        "<div style='color:%9; font-size:12px; padding:3px 0; "
+        "font-family:Consolas,monospace;'>%10</div>"
+
+        // Row: LLM
+        "<div style='color:%9; font-size:12px; padding:3px 0; "
+        "font-family:Consolas,monospace;'>%11</div>"
+
+        // Row: Database
+        "<div style='color:%9; font-size:12px; padding:3px 0; "
+        "font-family:Consolas,monospace;'>%12</div>"
+
+        // Row: Project (if any)
+        "%13"
+
+        "</div>"
+
+        // Current thought
+        "<div style='background:%7; border:1px solid %8; border-radius:10px; "
+        "padding:12px 18px; margin:6px 0;'>"
+        "<span style='color:%14; font-size:11px; letter-spacing:1px;'>"
+        "CURRENT THOUGHT</span>%15<br>"
+        "<span style='color:%9; font-size:12px; font-family:Consolas,monospace;'>"
+        "%16</span>"
+        "</div>"
+
+        "</div>"
+    )
+    .arg(
+        /* %1  title color */   QStringLiteral("#66FCF1"),
+        /* %2  subtitle color*/ QStringLiteral("rgba(102,252,241,0.6)"),
+        /* %3  version */       version,
+        /* %4  date */          QDate::currentDate().toString(QStringLiteral("dd MMM yyyy")),
+        /* %5  greeting color*/ QLatin1String(tc.jarvis),
+        /* %6  greeting text */ greeting,
+        /* %7  card bg */       QLatin1String(tc.cardBg),
+        /* %8  card border */   QLatin1String(tc.cardBorder),
+        /* %9  text color */    QLatin1String(tc.user)
+    )
+    .arg(
+        /* %10 storage */       storageHtml,
+        /* %11 llm */           llmLine,
+        /* %12 db */            dbLine,
+        /* %13 project */       projLine.isEmpty() ? QString()
+                                    : QStringLiteral("<div style='color:%1; font-size:12px; "
+                                                     "padding:3px 0; font-family:Consolas,monospace;'>"
+                                                     "%2</div>")
+                                          .arg(QLatin1String(tc.user),
+                                               projLine),
+        /* %14 label color */   QStringLiteral("#66FCF1"),
+        /* %15 doubt badge */   doubtBadge,
+        /* %16 thought */       thoughtLine
+    );
+}
+
 // ============================================================
 // onCommandLearned — уведомление о выученной команде
 // ============================================================

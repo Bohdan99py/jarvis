@@ -35,6 +35,7 @@
 #include "pdf_distiller.h"
 #include "self_journal.h"
 #include "user_profile_extended.h"
+#include "self_update_reflector.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -263,6 +264,16 @@ Jarvis::Jarvis(QObject* parent)
             qDebug() << "[JARVIS] New self-doubt registered:"
                      << content.left(80) << "| Reason:" << reason;
         });
+    }
+
+    // Self-Update Reflector — auto-generate changelog on new version
+    {
+        auto& reflector = SelfUpdateReflector::instance();
+        reflector.ensureChangelog(QCoreApplication::applicationVersion());
+
+        QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
+        cfg.setValue(QStringLiteral("update/previous_version"),
+                     QCoreApplication::applicationVersion());
     }
 }
 

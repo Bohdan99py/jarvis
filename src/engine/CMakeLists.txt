@@ -18,6 +18,8 @@ add_library(jarvis_engine OBJECT
     auto_updater.cpp
     bug_reporter.h
     bug_reporter.cpp
+    self_update_reflector.h
+    self_update_reflector.cpp
 )
 
 target_include_directories(jarvis_engine PUBLIC

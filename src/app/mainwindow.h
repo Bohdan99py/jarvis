@@ -97,6 +97,9 @@ private:
     void setThinkingState(bool thinking);
     void rebuildAttachmentsBar();
 
+    void showWelcomeDashboard();
+    QString buildWelcomeHtml() const;
+
     void showClarification(const QString& question, const QStringList& options);
     void hideClarification();
 
