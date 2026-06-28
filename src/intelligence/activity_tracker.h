@@ -92,14 +92,15 @@ public:
     // --- User role detection ---
     QString detectUserRole() const;
 
+    // App category classification (used by ScreenshotLearner + CuriosityEngine)
+    static QString categorizeApp(const QString& processName, const QString& windowTitle);
+
 signals:
     void activityChanged(const QString& newApp, const QString& category);
     void knowledgeLearned(const QString& key, const QString& value);
 
 private slots:
     void onCapture();
-
-    static QString categorizeApp(const QString& processName, const QString& windowTitle);
 
 private:
     void ensureTables();
