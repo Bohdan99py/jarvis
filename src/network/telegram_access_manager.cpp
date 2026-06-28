@@ -143,6 +143,22 @@ bool TelegramAccessManager::isPrimaryOwner(qint64 chatId) const
     return false;
 }
 
+qint64 TelegramAccessManager::primaryOwnerChatId() const
+{
+    if (m_primaryOwnerId != 0)
+        return m_primaryOwnerId;
+
+    QMutexLocker lock(&m_mutex);
+    QSqlQuery q(QSqlDatabase::database());
+    q.exec(QStringLiteral(
+        "SELECT chat_id FROM telegram_users ORDER BY registered_at ASC LIMIT 1"));
+    if (q.next()) {
+        m_primaryOwnerId = q.value(0).toLongLong();
+        return m_primaryOwnerId;
+    }
+    return 0;
+}
+
 bool TelegramAccessManager::hasAccess(qint64 chatId, const QString& command) const
 {
     if (isPrimaryOwner(chatId))

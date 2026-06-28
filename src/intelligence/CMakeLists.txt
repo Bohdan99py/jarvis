@@ -35,6 +35,8 @@ add_library(jarvis_intelligence OBJECT
     learned_commands.cpp
     curiosity_engine.h
     curiosity_engine.cpp
+    social_presence.h
+    social_presence.cpp
     pdf_distiller.h
     pdf_distiller.cpp
     self_journal.h

@@ -6,6 +6,7 @@
 #include "mobile_pairing_manager.h"
 #include "telegram_access_manager.h"
 #include "command_dispatcher_tg.h"
+#include "social_presence.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
@@ -254,6 +255,22 @@ void J2JTelegramGateway::setBotToken(const QString& token)
         QStringLiteral("telegram_bot_token"), token);
 }
 
+void J2JTelegramGateway::initSocialPresence(qint64 targetChatId)
+{
+    if (m_socialPresence) {
+        m_socialPresence->stop();
+        delete m_socialPresence;
+    }
+
+    m_socialPresence = new SocialPresenceEngine(this);
+    m_socialPresence->setTelegramGateway(this);
+    m_socialPresence->setTargetChatId(targetChatId);
+    m_socialPresence->start();
+
+    qDebug() << "[TelegramGW] Social Presence Engine initialized for chat"
+             << targetChatId;
+}
+
 void J2JTelegramGateway::start()
 {
     if (m_running) return;
@@ -264,6 +281,14 @@ void J2JTelegramGateway::start()
     m_running = true;
     m_pollTimer->start();
     emit gatewayStarted();
+
+    // Auto-init Social Presence for the primary owner if known
+    if (!m_socialPresence) {
+        const qint64 ownerChat = m_accessMgr->primaryOwnerChatId();
+        if (ownerChat != 0)
+            initSocialPresence(ownerChat);
+    }
+
     qDebug() << "[TelegramGW] Polling started (every" << POLL_INTERVAL_MS << "ms)";
 }
 
@@ -553,6 +578,53 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
         m_accessMgr->logActivity(chatId, QStringLiteral("wizard"), text.left(50));
         advanceBugWizard(session, text);
         return;
+    }
+
+    // ── 3.5. Social Presence — availability tracking & troll detection ──
+    // Auto-init on first message from the primary owner
+    if (!m_socialPresence && m_accessMgr->isPrimaryOwner(chatId))
+        initSocialPresence(chatId);
+
+    if (m_socialPresence) {
+        const auto statusBefore = m_socialPresence->currentStatus();
+        const QString sarcasticReply = m_socialPresence->processIncomingMessage(text);
+
+        if (!sarcasticReply.isEmpty()) {
+            sendMessage(chatId, sarcasticReply);
+            m_accessMgr->logActivity(chatId, QStringLiteral("troll"), text.left(50));
+            return;
+        }
+
+        const auto statusAfter = m_socialPresence->currentStatus();
+
+        // If this message just transitioned the user to BUSY/PAUSED, acknowledge
+        if (statusBefore != statusAfter) {
+            if (statusAfter == UserState::BUSY) {
+                const QString topic = m_socialPresence->currentTopic();
+                const QString ack = topic.isEmpty()
+                    ? (session.isEnglish
+                        ? QStringLiteral("👍 Got it. I'll hold my thoughts until you're free.")
+                        : QStringLiteral("👍 Понял. Подожду, пока освободишься."))
+                    : (session.isEnglish
+                        ? QStringLiteral("👍 Got it — you're *%1*. I'll save any thoughts for later.").arg(topic)
+                        : QStringLiteral("👍 Понял — ты *%1*. Сохраню мысли на потом.").arg(topic));
+                sendMessage(chatId, ack);
+                m_accessMgr->logActivity(chatId, QStringLiteral("status_busy"), text.left(50));
+                return;
+            }
+            if (statusAfter == UserState::PAUSED) {
+                sendMessage(chatId, session.isEnglish
+                    ? QStringLiteral("⏸ Paused. Send anything when you're back.")
+                    : QStringLiteral("⏸ На паузе. Напиши, когда вернёшься."));
+                m_accessMgr->logActivity(chatId, QStringLiteral("status_paused"), text.left(50));
+                return;
+            }
+            if (statusAfter == UserState::FREE && statusBefore != UserState::FREE) {
+                // Returning from BUSY/PAUSED — welcome back (nudge flush handled internally)
+                m_accessMgr->logActivity(chatId, QStringLiteral("status_free"), text.left(50));
+                // Don't return — let the message flow to LLM as usual
+            }
+        }
     }
 
     // ── 4. Free-dialogue LLM routing (lowest priority) ──────

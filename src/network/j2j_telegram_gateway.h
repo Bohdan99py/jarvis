@@ -33,6 +33,7 @@ class TranslationEngine;
 class MobilePairingManager;
 class TelegramAccessManager;
 class CommandDispatcherTg;
+class SocialPresenceEngine;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -115,6 +116,10 @@ public:
     void setTranslationEngine(TranslationEngine* te) { m_translator = te; }
     void setPairingManager(MobilePairingManager* pm) { m_pairing = pm; }
     TelegramAccessManager* accessManager() const { return m_accessMgr; }
+
+    // Social Presence — proactive nudge engine
+    SocialPresenceEngine* socialPresence() const { return m_socialPresence; }
+    void initSocialPresence(qint64 targetChatId);
 
     // Localization dictionary
     static QString localized(TgStringId id, bool english);
@@ -224,11 +229,12 @@ private:
     qint64                 m_lastUpdateId = 0;
     bool                   m_running    = false;
 
-    Jarvis*                m_jarvis     = nullptr;
-    TranslationEngine*     m_translator = nullptr;
-    MobilePairingManager*  m_pairing    = nullptr;
-    TelegramAccessManager* m_accessMgr  = nullptr;
-    CommandDispatcherTg*   m_dispatcher = nullptr;
+    Jarvis*                m_jarvis         = nullptr;
+    TranslationEngine*     m_translator     = nullptr;
+    MobilePairingManager*  m_pairing        = nullptr;
+    TelegramAccessManager* m_accessMgr      = nullptr;
+    CommandDispatcherTg*   m_dispatcher     = nullptr;
+    SocialPresenceEngine*  m_socialPresence = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator

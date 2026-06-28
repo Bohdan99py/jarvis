@@ -71,6 +71,7 @@ public:
 
     // Absolute admin override — primary owner always has full access
     bool isPrimaryOwner(qint64 chatId) const;
+    qint64 primaryOwnerChatId() const;
 
     // First user to interact becomes Admin automatically
     void ensureRegistered(qint64 chatId, const QString& displayName);
