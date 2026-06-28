@@ -16,6 +16,8 @@ add_library(jarvis_network OBJECT
     j2j_mesh_connector.cpp
     mobile_pairing_manager.h
     mobile_pairing_manager.cpp
+    pc_wake_agent.h
+    pc_wake_agent.cpp
 )
 
 target_include_directories(jarvis_network PUBLIC

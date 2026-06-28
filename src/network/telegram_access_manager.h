@@ -1,13 +1,18 @@
 #pragma once
 // ============================================================
-// telegram_access_manager.h — RBAC Middleware for Telegram
+// telegram_access_manager.h — RBAC + Multi-PC Session Middleware
 //
-// Provides role-based access control for Telegram bot commands.
-// Every incoming command passes through hasAccess() before
-// execution. Roles: Admin, Tester, User.
+// Provides role-based access control for Telegram bot commands,
+// AND binds each telegram chat_id to a specific PC via a unique
+// session token stored in the user_sessions table.
 //
-// Also tracks all Telegram activity in the activity_log_tg
-// table for /admin_stats aggregation.
+// When a user writes to the bot, the manager first resolves
+// which PC owns that session, then checks RBAC.
+//
+// Tables managed:
+//   telegram_users    — roster with roles
+//   user_sessions     — chat_id ↔ device_id ↔ auth_token binding
+//   activity_log_tg   — per-user activity log
 //
 // Thread safety: all DB access serialized via QMutex.
 // ============================================================
@@ -19,6 +24,7 @@
 #include <QMutex>
 #include <QList>
 #include <QDateTime>
+#include <optional>
 
 // ── Access roles (ordered by privilege) ──────────────────────
 enum class TelegramRole {
@@ -52,6 +58,17 @@ struct TgActivityEntry {
     QDateTime timestamp;
 };
 
+// ── User session — links a Telegram chat to a specific PC ────
+struct TgUserSession {
+    qint64    chatId      = 0;
+    QString   deviceId;       // unique PC identifier (machine-id or UUID)
+    QString   authToken;      // random token for authenticating this binding
+    QString   pcName;         // human-readable PC label
+    QString   status;         // "active" | "expired" | "revoked"
+    QDateTime createdAt;
+    QDateTime lastUsed;
+};
+
 // ── Access Manager class ─────────────────────────────────────
 
 class TelegramAccessManager : public QObject
@@ -59,12 +76,36 @@ class TelegramAccessManager : public QObject
     Q_OBJECT
 
 public:
-    explicit TelegramAccessManager(QObject* parent = nullptr);
+    explicit TelegramAccessManager(const QString& localDeviceId,
+                                   QObject* parent = nullptr);
 
-    // Core RBAC check — call before executing any command
+    // ── Session resolution (called before any command) ────────
+    // Returns true if chatId is bound to THIS PC's deviceId.
+    bool isSessionBoundHere(qint64 chatId) const;
+
+    // Full session info for a chat, or nullopt if none
+    std::optional<TgUserSession> resolveSession(qint64 chatId) const;
+
+    // Bind a Telegram chat to THIS local PC. Generates auth token.
+    // If a session already exists for another PC, replaces it.
+    TgUserSession bindSession(qint64 chatId, const QString& pcName = QString());
+
+    // Validate an auth token for a given chatId
+    bool validateToken(qint64 chatId, const QString& token) const;
+
+    // List all sessions (admin view)
+    QList<TgUserSession> allSessions() const;
+
+    // Revoke a session (admin action)
+    bool revokeSession(qint64 chatId);
+
+    // The device ID of THIS local PC instance
+    QString localDeviceId() const { return m_localDeviceId; }
+
+    // ── Core RBAC check — call before executing any command ───
     bool hasAccess(qint64 chatId, const QString& command) const;
 
-    // Role management
+    // ── Role management ──────────────────────────────────────
     TelegramRole getRole(qint64 chatId) const;
     bool         setRole(qint64 chatId, TelegramRole role);
     bool         isAdmin(qint64 chatId) const;
@@ -76,14 +117,14 @@ public:
     // First user to interact becomes Admin automatically
     void ensureRegistered(qint64 chatId, const QString& displayName);
 
-    // Activity tracking
+    // ── Activity tracking ────────────────────────────────────
     void logActivity(qint64 chatId, const QString& actionType,
                      const QString& detail = QString());
 
-    // Admin stats report
+    // ── Admin stats report ───────────────────────────────────
     QString buildStatsReport() const;
 
-    // Command → minimum role mapping
+    // ── Command → minimum role mapping ───────────────────────
     static TelegramRole minimumRoleFor(const QString& command);
 
     // All registered command names (for layout fixer lookups)
@@ -92,12 +133,17 @@ public:
 signals:
     void accessDenied(qint64 chatId, const QString& command);
     void userRegistered(qint64 chatId, TelegramRole role);
+    void sessionBound(qint64 chatId, const QString& deviceId);
+    void sessionRevoked(qint64 chatId);
+    void wrongPcSession(qint64 chatId, const QString& boundDeviceId);
 
 private:
     void ensureTables();
     void resolvePrimaryOwner();
     static QMap<QString, TelegramRole> buildCommandAcl();
+    static QString generateAuthToken();
 
+    QString        m_localDeviceId;
     mutable QMutex m_mutex;
     mutable qint64 m_primaryOwnerId = 0;
     static const QMap<QString, TelegramRole> s_commandAcl;

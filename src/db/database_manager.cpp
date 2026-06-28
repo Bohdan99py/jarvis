@@ -469,6 +469,31 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=12");
         ver = 12;
     }
+    if (ver < 13) {
+        execQuery(R"(CREATE TABLE IF NOT EXISTS user_sessions (
+            chat_id    INTEGER PRIMARY KEY,
+            device_id  TEXT NOT NULL,
+            auth_token TEXT NOT NULL,
+            pc_name    TEXT NOT NULL DEFAULT '',
+            status     TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used  TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (chat_id) REFERENCES telegram_users(chat_id)
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_sessions_device ON user_sessions(device_id)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_sessions_token  ON user_sessions(auth_token)");
+        execQuery(R"(CREATE TABLE IF NOT EXISTS pc_registry (
+            device_id         TEXT PRIMARY KEY,
+            mac_address       TEXT NOT NULL DEFAULT '',
+            broadcast_address TEXT NOT NULL DEFAULT '255.255.255.255',
+            pc_name           TEXT NOT NULL DEFAULT '',
+            status            TEXT NOT NULL DEFAULT 'UNKNOWN',
+            last_heartbeat    TEXT NOT NULL DEFAULT (datetime('now')),
+            wol_port          INTEGER NOT NULL DEFAULT 9
+        ))");
+        execQuery("UPDATE schema_version SET version=13");
+        ver = 13;
+    }
     return true;
 }
 

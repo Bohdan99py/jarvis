@@ -35,6 +35,7 @@ class TelegramAccessManager;
 class CommandDispatcherTg;
 class SocialPresenceEngine;
 class SemanticIntentManager;
+class PcWakeAgent;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -117,6 +118,7 @@ public:
     void setTranslationEngine(TranslationEngine* te) { m_translator = te; }
     void setPairingManager(MobilePairingManager* pm) { m_pairing = pm; }
     TelegramAccessManager* accessManager() const { return m_accessMgr; }
+    PcWakeAgent*           wakeAgent()     const { return m_wakeAgent; }
 
     // Social Presence — proactive nudge engine
     SocialPresenceEngine* socialPresence() const { return m_socialPresence; }
@@ -237,6 +239,7 @@ private:
     CommandDispatcherTg*   m_dispatcher     = nullptr;
     SocialPresenceEngine*  m_socialPresence = nullptr;
     SemanticIntentManager* m_intentMgr      = nullptr;
+    PcWakeAgent*           m_wakeAgent      = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator

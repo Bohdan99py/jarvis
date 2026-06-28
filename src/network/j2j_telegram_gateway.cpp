@@ -5,6 +5,7 @@
 #include "j2j_telegram_gateway.h"
 #include "mobile_pairing_manager.h"
 #include "telegram_access_manager.h"
+#include "pc_wake_agent.h"
 #include "command_dispatcher_tg.h"
 #include "social_presence.h"
 #include "memory_manager.h"
@@ -37,6 +38,7 @@
 #include <QStandardPaths>
 #include <QHttpMultiPart>
 #include <QHttpPart>
+#include <QUuid>
 #include <QtConcurrent>
 #include <QDebug>
 
@@ -215,9 +217,35 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
     connect(m_typingTimer, &QTimer::timeout,
             this, &J2JTelegramGateway::onTypingTimer);
 
-    m_accessMgr = new TelegramAccessManager(this);
+    // Resolve or generate a persistent device ID for this PC
+    auto& dbInst = DatabaseManager::instance();
+    QString deviceId = dbInst.getConfig(
+        QStringLiteral("local_device_id"), QString()).toString();
+    if (deviceId.isEmpty()) {
+        deviceId = QUuid::createUuid().toString(QUuid::WithoutBraces).left(16);
+        dbInst.setConfig(QStringLiteral("local_device_id"), deviceId);
+    }
+
+    m_accessMgr = new TelegramAccessManager(deviceId, this);
     m_dispatcher = new CommandDispatcherTg(this, m_accessMgr, this);
     m_intentMgr  = new SemanticIntentManager(this, this);
+
+    // Two-layer communication: WoL + cloud relay agent
+    m_wakeAgent = new PcWakeAgent(deviceId, this);
+    QString relayUrl = dbInst.getConfig(
+        QStringLiteral("relay_server_url"), QString()).toString();
+    if (!relayUrl.isEmpty())
+        m_wakeAgent->setRelayUrl(relayUrl);
+    QString relayKey = dbInst.getConfig(
+        QStringLiteral("relay_api_key"), QString()).toString();
+    if (!relayKey.isEmpty())
+        m_wakeAgent->setRelayApiKey(relayKey);
+
+    // Deliver queued messages that arrived while PC was asleep
+    connect(m_wakeAgent, &PcWakeAgent::queuedMessageReceived,
+            this, [this](qint64 chatId, const QString& text) {
+        handleMessage(chatId, text, QStringLiteral("queued"));
+    });
 
     // Ensure the qa_artifacts table exists
     {
@@ -304,6 +332,9 @@ void J2JTelegramGateway::start()
     m_pollTimer->start();
     emit gatewayStarted();
 
+    // Register this PC as ONLINE and start heartbeat
+    m_wakeAgent->start();
+
     // Auto-init Social Presence for the primary owner if known
     if (!m_socialPresence) {
         const qint64 ownerChat = m_accessMgr->primaryOwnerChatId();
@@ -319,6 +350,10 @@ void J2JTelegramGateway::stop()
     if (!m_running) return;
     m_running = false;
     m_pollTimer->stop();
+
+    // Mark this PC as OFFLINE in the relay
+    m_wakeAgent->stop();
+
     emit gatewayStopped();
     qDebug() << "[TelegramGW] Polling stopped";
 }
@@ -473,6 +508,22 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
 
     // Register user in RBAC system (first user → Admin)
     m_accessMgr->ensureRegistered(chatId, firstName);
+
+    // ── 0. Session check — verify this chat is bound to THIS PC ─
+    auto session = m_accessMgr->resolveSession(chatId);
+    if (session.has_value() && !m_accessMgr->isSessionBoundHere(chatId)) {
+        TgChatSession& cs = getOrCreateSession(chatId);
+        sendMessage(chatId, cs.isEnglish
+            ? QStringLiteral("🖥 This chat is bound to a different PC (`%1`). "
+                             "Use /bind_pc to re-bind to the current machine.")
+                .arg(session->pcName)
+            : QStringLiteral("🖥 Этот чат привязан к другому ПК (`%1`). "
+                             "Используйте /bind_pc чтобы привязать к текущей машине.")
+                .arg(session->pcName));
+        m_accessMgr->logActivity(chatId, QStringLiteral("wrong_pc"),
+                                  session->deviceId);
+        return;
+    }
 
     // ── 1. TOP PRIORITY: Pairing PIN ────────────────────────
     if (handlePairing(chatId, text, firstName))
