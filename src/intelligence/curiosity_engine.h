@@ -94,7 +94,8 @@ public:
         TechCuriosity,
         TimeAwareness,
         Casual,
-        VisualContextual   // question derived from screenshot context
+        VisualContextual,  // question derived from screenshot context
+        DoubtVerification  // "What if I am wrong?" — asks user to verify
     };
     Q_ENUM(ProactiveCategory)
 
@@ -112,6 +113,7 @@ private:
     ProactiveCategory selectCategory() const;
     QString pickQuestion(ProactiveCategory category) const;
     QString buildVisualContextQuestion() const;
+    QString buildDoubtVerificationQuestion() const;
     bool shouldInterrupt() const;
 
     J2JTelegramGateway* m_gateway          = nullptr;

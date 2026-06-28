@@ -32,6 +32,8 @@
 #include "llm_cache_manager.h"
 #include "curiosity_engine.h"
 #include "memory_consolidation.h"
+#include "pdf_distiller.h"
+#include "self_journal.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -211,6 +213,38 @@ Jarvis::Jarvis(QObject* parent)
                 ? QStringLiteral("📀 External memory pool connected — consolidation active.")
                 : QStringLiteral("📀 External memory pool disconnected — operating from local cache.");
             emit asyncResponseReady(msg);
+        });
+    }
+
+    // Self-Journal — reflection + doubt tracking (local SQLite mirror)
+    SelfJournal::instance().ensureTable();
+
+    // PDF Distiller — background knowledge extraction with self-doubt
+    {
+        auto& pdf = PdfDistiller::instance();
+        pdf.startBackgroundScan(30);
+
+        connect(&pdf, &PdfDistiller::scanComplete, this,
+                [this](int newChunks, int newDoubts) {
+            if (newChunks == 0) return;
+
+            // Write a reflection cycle after each scan pass
+            SelfJournal::instance().writeReflectionCycle();
+
+            if (newDoubts > 0) {
+                const QString msg = QStringLiteral(
+                    "📚 I studied %1 new knowledge chunks. "
+                    "%2 of them I'm not fully confident about — "
+                    "I'll ask you to verify when you're free.")
+                    .arg(newChunks).arg(newDoubts);
+                emit asyncResponseReady(msg);
+            }
+        });
+
+        connect(&pdf, &PdfDistiller::doubtRegistered, this,
+                [](const QString& content, const QString& reason) {
+            qDebug() << "[JARVIS] New self-doubt registered:"
+                     << content.left(80) << "| Reason:" << reason;
         });
     }
 }

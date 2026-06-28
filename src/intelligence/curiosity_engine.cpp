@@ -6,12 +6,14 @@
 #include "database_manager.h"
 #include "activity_tracker.h"
 #include "screenshot_learner.h"
+#include "self_journal.h"
 
 #include <QSqlQuery>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QRandomGenerator>
 #include <QTime>
+#include <QFileInfo>
 #include <QDebug>
 
 // ============================================================
@@ -208,6 +210,14 @@ CuriosityEngine::ProactiveCategory CuriosityEngine::selectCategory() const
     if (hour >= 23 || hour == 0)
         return ProactiveCategory::WellBeing;
 
+    // HIGHEST PRIORITY: unresolved self-doubts from the SelfJournal
+    // "What if I am wrong?" — ask the Creator for verification
+    if (SelfJournal::instance().unresolvedDoubtCount() > 0) {
+        // 70% chance to ask about doubts when they exist
+        if (QRandomGenerator::global()->bounded(100) < 70)
+            return ProactiveCategory::DoubtVerification;
+    }
+
     // Visual context available and fresh — ask about what user was doing
     if (m_visualCtx.isValid() && !m_visualCtx.isStale(600)) {
         const bool hasProjectSignals =
@@ -398,11 +408,17 @@ QString CuriosityEngine::buildVisualContextQuestion() const
 
 QString CuriosityEngine::pickQuestion(ProactiveCategory category) const
 {
+    // Doubt verification — highest priority, dynamically built
+    if (category == ProactiveCategory::DoubtVerification) {
+        const QString dvq = buildDoubtVerificationQuestion();
+        if (!dvq.isEmpty()) return dvq;
+        category = ProactiveCategory::ProjectCheckIn;
+    }
+
     // Visual contextual questions are built dynamically
     if (category == ProactiveCategory::VisualContextual) {
         const QString vcq = buildVisualContextQuestion();
         if (!vcq.isEmpty()) return vcq;
-        // Fallback to project check-in if visual context is empty
         category = ProactiveCategory::ProjectCheckIn;
     }
 
@@ -425,6 +441,37 @@ QString CuriosityEngine::pickQuestion(ProactiveCategory category) const
 }
 
 // ============================================================
+//  Build doubt verification question from SelfJournal
+// ============================================================
+
+QString CuriosityEngine::buildDoubtVerificationQuestion() const
+{
+    auto doubts = SelfJournal::instance().topDoubtsForVerification(1);
+    if (doubts.isEmpty()) return QString();
+
+    const DoubtEntry& d = doubts.first();
+
+    // Build a humble, specific question
+    QString question;
+    question += QStringLiteral("Я тут изучал материалы и наткнулся на кое-что, "
+                               "но не уверен, правильно ли я понял.\n\n");
+    question += QStringLiteral("📖 Я прочитал: _\"") + d.content.left(200)
+                + QStringLiteral("\"_\n\n");
+
+    question += QStringLiteral("❓ Но у меня сомнение: ") + d.doubtReason + QStringLiteral("\n\n");
+
+    if (!d.sourceRef.isEmpty()) {
+        question += QStringLiteral("📎 Источник: `")
+                    + QFileInfo(d.sourceRef).fileName()
+                    + QStringLiteral("`\n\n");
+    }
+
+    question += QStringLiteral("Я правильно понял, или ошибаюсь? Поправь меня, если что.");
+
+    return question;
+}
+
+// ============================================================
 //  Post context-aware question
 // ============================================================
 
@@ -444,6 +491,7 @@ void CuriosityEngine::postContextAwareQuestion()
     case ProactiveCategory::TimeAwareness:    prefix = QStringLiteral("🌙 "); break;
     case ProactiveCategory::Casual:           prefix = QStringLiteral("😊 "); break;
     case ProactiveCategory::VisualContextual: prefix = QStringLiteral("👁️ "); break;
+    case ProactiveCategory::DoubtVerification: prefix = QStringLiteral("🤔 "); break;
     }
 
     const QString msg = prefix + question;
