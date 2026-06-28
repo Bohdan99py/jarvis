@@ -2983,7 +2983,6 @@ recreate it on next launch. Session memory (<b>jarvis_memory.json</b>) is separa
         dlg->exec();
     });
 #endif
-}
 
 // ============================================================
 // Events
