@@ -387,7 +387,7 @@ QList<ModuleCapability> SelfUpdateReflector::activeModules() const
         QStringLiteral("Fully offline speech recognition via Vosk. Supports 6 languages, "
                        "wake word activation ('Jarvis'), whisper mode, and auto language detection."),
         QStringLiteral("Click microphone button or say 'Jarvis'. "
-                       "Manage models: Settings → Voice Models."),
+                       "Manage models: Models & Intelligence → Voice Models."),
         true
     });
 
@@ -417,8 +417,10 @@ QList<ModuleCapability> SelfUpdateReflector::activeModules() const
         QStringLiteral("telegram"), QStringLiteral("Telegram Bot Gateway"),
         QStringLiteral("📱"),
         QStringLiteral("Full JARVIS control from your phone via Telegram bot. "
-                       "Text commands, voice notes, file attachments, media routing."),
-        QStringLiteral("Settings → Telegram Gateway. Pair with your bot token."),
+                       "Text commands, voice notes, file attachments, media routing. "
+                       "Session-bound: each chat is linked to a specific PC."),
+        QStringLiteral("Phone & Server → Telegram QA Gateway. "
+                       "API keys and model selection: Models & Intelligence."),
         true
     });
 

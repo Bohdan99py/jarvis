@@ -662,8 +662,10 @@ void MainWindow::buildMenuBar()
         });
     }
 
-    // --- Настройки ---
-    auto* settingsMenu = menuBar->addMenu(Str::menuSettings());
+    // --- Models & Intelligence ---
+    auto* settingsMenu = menuBar->addMenu(
+        IS_EN ? QStringLiteral("🤖 Models && Intelligence")
+              : QStringLiteral("🤖 Модели и ИИ"));
 
     auto* actApiKey = settingsMenu->addAction(Str::menuApiKey());
     connect(actApiKey, &QAction::triggered, this, [this]() {
@@ -841,20 +843,43 @@ void MainWindow::buildMenuBar()
 
     settingsMenu->addSeparator();
 
-    auto* actKeepAttach = settingsMenu->addAction(Str::menuKeepAttach());
-    actKeepAttach->setCheckable(true);
-    actKeepAttach->setChecked(false);
-    connect(actKeepAttach, &QAction::toggled, this, [this](bool checked) {
-        m_jarvis->attachments()->setKeepAfterSend(checked);
-        appendLog(Str::logSystem(),
-                  checked ? Str::statusAttachKept() : Str::statusAttachOneShot(),
-                  Theme::LogColors::system);
-    });
-
-    settingsMenu->addSeparator();
-
-    auto* actKeyboard = settingsMenu->addAction(Str::menuKeyboard());
-    connect(actKeyboard, &QAction::triggered, this, &MainWindow::toggleKeyboard);
+    // Role switcher — moved here from Tools menu
+    auto* roleMenu = settingsMenu->addMenu(
+        IS_EN ? QStringLiteral("Switch Role") : QStringLiteral("Сменить роль"));
+    struct RoleEntry { QString label; QString role; };
+    const QList<RoleEntry> roles = {
+        {IS_EN ? QStringLiteral("Developer") : QStringLiteral("Разработчик"),
+         QStringLiteral("Developer")},
+        {IS_EN ? QStringLiteral("QA Tester") : QStringLiteral("QA Тестировщик"),
+         QStringLiteral("QA_Tester")},
+        {IS_EN ? QStringLiteral("Digital Artist / Illustrator")
+               : QStringLiteral("Цифровой художник / Иллюстратор"),
+         QStringLiteral("Digital_Artist")},
+        {IS_EN ? QStringLiteral("Casual / Friend") : QStringLiteral("Дружеский / Casual"),
+         QStringLiteral("Casual_Friend")},
+        {IS_EN ? QStringLiteral("Student / Academic") : QStringLiteral("Студент / Академия"),
+         QStringLiteral("Student_Academic")},
+    };
+    auto* roleGroup = new QActionGroup(roleMenu);
+    roleGroup->setExclusive(true);
+    for (const auto& r : roles) {
+        auto* act = roleMenu->addAction(r.label);
+        act->setCheckable(true);
+        if (r.role == QStringLiteral("Developer")) act->setChecked(true);
+        roleGroup->addAction(act);
+        const QString roleName = r.role;
+        connect(act, &QAction::triggered, this, [this, roleName]() {
+            auto& db = DatabaseManager::instance();
+            auto user = db.getUser(m_jarvis->currentUserId());
+            if (user) {
+                user->currentRole = roleName;
+                db.updateUser(*user);
+            }
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                (IS_EN ? QStringLiteral("Role switched to: ") : QStringLiteral("Роль: ")) + roleName,
+                Theme::LogColors::system);
+        });
+    }
 
     settingsMenu->addSeparator();
 
@@ -1594,236 +1619,14 @@ void MainWindow::buildMenuBar()
         });
     }
 
-    // --- Translation & Role ---
+    // --- Phone & Server ---
     {
-        auto* toolsMenu = menuBar->addMenu(
-            IS_EN ? QStringLiteral("🌐 Tools") : QStringLiteral("🌐 Инструменты"));
-
-        // Translation pair toggle
-        auto* transMenu = toolsMenu->addMenu(
-            IS_EN ? QStringLiteral("Translation Pair") : QStringLiteral("Пара перевода"));
-
-        struct LangPair { QString label; QString src; QString tgt; };
-        const QList<LangPair> pairs = {
-            {QStringLiteral("FR → EN"), QStringLiteral("fr"), QStringLiteral("en")},
-            {QStringLiteral("FR → RU"), QStringLiteral("fr"), QStringLiteral("ru")},
-            {QStringLiteral("EN → RU"), QStringLiteral("en"), QStringLiteral("ru")},
-            {QStringLiteral("RU → EN"), QStringLiteral("ru"), QStringLiteral("en")},
-            {QStringLiteral("EN → FR"), QStringLiteral("en"), QStringLiteral("fr")},
-            {QStringLiteral("RU → FR"), QStringLiteral("ru"), QStringLiteral("fr")},
-        };
-        auto* langGroup = new QActionGroup(transMenu);
-        langGroup->setExclusive(true);
-        for (const auto& p : pairs) {
-            auto* act = transMenu->addAction(p.label);
-            act->setCheckable(true);
-            if (p.src == QStringLiteral("fr") && p.tgt == QStringLiteral("en"))
-                act->setChecked(true);
-            langGroup->addAction(act);
-            const QString src = p.src, tgt = p.tgt;
-            connect(act, &QAction::triggered, this, [this, src, tgt]() {
-                m_jarvis->translationEngine()->setSourceLang(src);
-                m_jarvis->translationEngine()->setTargetLang(tgt);
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    QStringLiteral("Translation pair: %1 → %2").arg(src.toUpper(), tgt.toUpper()),
-                    Theme::LogColors::system);
-            });
-        }
-
-        toolsMenu->addSeparator();
-
-        // Quick translate clipboard
-        auto* actTranslate = toolsMenu->addAction(
-            IS_EN ? QStringLiteral("Translate Clipboard")
-                  : QStringLiteral("Перевести буфер обмена"));
-        connect(actTranslate, &QAction::triggered, this, [this]() {
-            QString text = QApplication::clipboard()->text().trimmed();
-            if (text.isEmpty()) {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    IS_EN ? QStringLiteral("Clipboard is empty.") : QStringLiteral("Буфер обмена пуст."),
-                    Theme::LogColors::error);
-                return;
-            }
-            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                IS_EN ? QStringLiteral("Translating...") : QStringLiteral("Перевожу..."),
-                Theme::LogColors::system);
-            m_jarvis->translationEngine()->translateText(text,
-                m_jarvis->translationEngine()->targetLang(),
-                [this](bool ok, const QString& result) {
-                    if (ok) {
-                        appendLog(QStringLiteral("J.A.R.V.I.S."), result, Theme::LogColors::jarvis);
-                        QApplication::clipboard()->setText(result);
-                    } else {
-                        appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
-                            result, Theme::LogColors::error);
-                    }
-                });
-        });
-
-        // Process audio file
-        auto* actAudioTranslate = toolsMenu->addAction(
-            IS_EN ? QStringLiteral("Process Audio File...")
-                  : QStringLiteral("Обработать аудиофайл..."));
-        connect(actAudioTranslate, &QAction::triggered, this, [this]() {
-            QString path = QFileDialog::getOpenFileName(this,
-                IS_EN ? QStringLiteral("Select Audio File") : QStringLiteral("Выберите аудиофайл"),
-                QDir::homePath(),
-                QStringLiteral("Audio (*.wav *.pcm *.raw);;All (*)"));
-            if (path.isEmpty()) return;
-
-            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                (IS_EN ? QStringLiteral("Processing audio: ") : QStringLiteral("Обработка аудио: "))
-                + QFileInfo(path).fileName(),
-                Theme::LogColors::system);
-
-            auto* te = m_jarvis->translationEngine();
-            connect(te, &TranslationEngine::audioProcessingProgress, this,
-                    [this](const QString& stage) {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    stage, Theme::LogColors::system);
-            }, Qt::SingleShotConnection);
-            connect(te, &TranslationEngine::audioTranscribed, this,
-                    [this](const QString& transcript, const QString& lang) {
-                appendLog(QStringLiteral("J.A.R.V.I.S."),
-                    QStringLiteral("[Transcript %1]: %2").arg(lang.toUpper(), transcript.left(500)),
-                    Theme::LogColors::jarvis);
-            }, Qt::SingleShotConnection);
-            connect(te, &TranslationEngine::audioSummaryReady, this,
-                    [this](const QString& summary) {
-                appendLog(QStringLiteral("J.A.R.V.I.S."), summary, Theme::LogColors::jarvis);
-            }, Qt::SingleShotConnection);
-            connect(te, &TranslationEngine::audioProcessingError, this,
-                    [this](const QString& err) {
-                appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
-                    err, Theme::LogColors::error);
-            }, Qt::SingleShotConnection);
-
-            te->processAudioFile(path, te->targetLang());
-        });
-
-        toolsMenu->addSeparator();
-
-        // Role switcher
-        auto* roleMenu = toolsMenu->addMenu(
-            IS_EN ? QStringLiteral("Switch Role") : QStringLiteral("Сменить роль"));
-        struct RoleEntry { QString label; QString role; };
-        const QList<RoleEntry> roles = {
-            {IS_EN ? QStringLiteral("Developer") : QStringLiteral("Разработчик"),
-             QStringLiteral("Developer")},
-            {IS_EN ? QStringLiteral("QA Tester") : QStringLiteral("QA Тестировщик"),
-             QStringLiteral("QA_Tester")},
-            {IS_EN ? QStringLiteral("Digital Artist / Illustrator")
-                   : QStringLiteral("Цифровой художник / Иллюстратор"),
-             QStringLiteral("Digital_Artist")},
-            {IS_EN ? QStringLiteral("Casual / Friend") : QStringLiteral("Дружеский / Casual"),
-             QStringLiteral("Casual_Friend")},
-            {IS_EN ? QStringLiteral("Student / Academic") : QStringLiteral("Студент / Академия"),
-             QStringLiteral("Student_Academic")},
-        };
-        auto* roleGroup = new QActionGroup(roleMenu);
-        roleGroup->setExclusive(true);
-        for (const auto& r : roles) {
-            auto* act = roleMenu->addAction(r.label);
-            act->setCheckable(true);
-            if (r.role == QStringLiteral("Developer")) act->setChecked(true);
-            roleGroup->addAction(act);
-            const QString roleName = r.role;
-            connect(act, &QAction::triggered, this, [this, roleName]() {
-                auto& db = DatabaseManager::instance();
-                auto user = db.getUser(m_jarvis->currentUserId());
-                if (user) {
-                    user->currentRole = roleName;
-                    db.updateUser(*user);
-                }
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    (IS_EN ? QStringLiteral("Role switched to: ") : QStringLiteral("Роль: ")) + roleName,
-                    Theme::LogColors::system);
-            });
-        }
-
-        toolsMenu->addSeparator();
-
-        // User Analytics & Statistics
-        auto* actAnalytics = toolsMenu->addAction(
-            IS_EN ? QStringLiteral("📊 User Analytics & Statistics")
-                  : QStringLiteral("📊 Аналитика и статистика"));
-        connect(actAnalytics, &QAction::triggered, this, [this]() {
-            auto& db = DatabaseManager::instance();
-            auto dbConn = QSqlDatabase::database(QStringLiteral("jarvis_main"));
-            if (!dbConn.isOpen()) return;
-
-            // Aggregate Telegram activity by chat_id
-            QSqlQuery q(dbConn);
-            q.exec(QStringLiteral(
-                "SELECT chat_id, action_type, COUNT(*) as cnt "
-                "FROM activity_log_tg "
-                "GROUP BY chat_id, action_type "
-                "ORDER BY chat_id, cnt DESC"));
-
-            QString report = IS_EN
-                ? QStringLiteral("📊 <b>User Analytics Dashboard</b><br><br>")
-                : QStringLiteral("📊 <b>Дашборд аналитики пользователей</b><br><br>");
-
-            QMap<qint64, QMap<QString, int>> userData;
-            while (q.next()) {
-                qint64 cid = q.value(0).toLongLong();
-                QString actionType = q.value(1).toString();
-                int count = q.value(2).toInt();
-                userData[cid][actionType] = count;
-            }
-
-            if (userData.isEmpty()) {
-                report += IS_EN ? QStringLiteral("<i>No activity data yet.</i>")
-                                : QStringLiteral("<i>Данных об активности пока нет.</i>");
-            } else {
-                for (auto it = userData.begin(); it != userData.end(); ++it) {
-                    report += QStringLiteral("<b>Chat ID: %1</b><br>").arg(it.key());
-                    for (auto jt = it.value().begin(); jt != it.value().end(); ++jt)
-                        report += QStringLiteral("  • %1: %2<br>").arg(jt.key()).arg(jt.value());
-                    report += QStringLiteral("<br>");
-                }
-            }
-
-            // Total DB stats
-            int chatCount = 0;
-            {
-                QSqlQuery q2(dbConn);
-                q2.exec(QStringLiteral("SELECT COUNT(*) FROM chat_history"));
-                if (q2.next()) chatCount = q2.value(0).toInt();
-            }
-            int cacheCount = LlmCacheManager::instance().cacheEntryCount();
-
-            report += IS_EN
-                ? QStringLiteral("<b>Global Stats:</b><br>"
-                                 "  • Total messages: %1<br>"
-                                 "  • LLM cache entries: %2<br>")
-                    .arg(chatCount).arg(cacheCount)
-                : QStringLiteral("<b>Общая статистика:</b><br>"
-                                 "  • Всего сообщений: %1<br>"
-                                 "  • Записей в кэше LLM: %2<br>")
-                    .arg(chatCount).arg(cacheCount);
-
-            auto* dlg = new QDialog(this);
-            dlg->setWindowTitle(IS_EN ? QStringLiteral("User Analytics")
-                                      : QStringLiteral("Аналитика"));
-            dlg->setMinimumSize(520, 400);
-            dlg->setAttribute(Qt::WA_DeleteOnClose);
-            auto* lay = new QVBoxLayout(dlg);
-            auto* browser = new QTextEdit(dlg);
-            browser->setReadOnly(true);
-            browser->setHtml(report);
-            lay->addWidget(browser);
-            auto* closeBtn = new QPushButton(IS_EN ? QStringLiteral("Close")
-                                                    : QStringLiteral("Закрыть"), dlg);
-            connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::accept);
-            lay->addWidget(closeBtn);
-            dlg->show();
-        });
+        auto* phoneMenu = menuBar->addMenu(
+            IS_EN ? QStringLiteral("📱 Phone && Server")
+                  : QStringLiteral("📱 Телефон и Сервер"));
 
         // --- Mobile Sync (zero-config pairing) ---
-        toolsMenu->addSeparator();
-
-        auto* actMobileSync = toolsMenu->addAction(
+        auto* actMobileSync = phoneMenu->addAction(
             IS_EN ? QStringLiteral("📱 Mobile Sync...")
                   : QStringLiteral("📱 Мобильная синхронизация..."));
         connect(actMobileSync, &QAction::triggered, this, [this]() {
@@ -2039,7 +1842,8 @@ void MainWindow::buildMenuBar()
         });
 
         // Wake-on-LAN Shortcut Generator
-        auto* actWol = toolsMenu->addAction(
+        phoneMenu->addSeparator();
+        auto* actWol = phoneMenu->addAction(
             IS_EN ? QStringLiteral("⚡ Generate WoL Shortcut")
                   : QStringLiteral("⚡ Сгенерировать WoL ярлык"));
         connect(actWol, &QAction::triggered, this, [this]() {
@@ -2148,8 +1952,8 @@ void MainWindow::buildMenuBar()
         });
 
         // Telegram QA Gateway toggle
-        toolsMenu->addSeparator();
-        auto* actTelegram = toolsMenu->addAction(
+        phoneMenu->addSeparator();
+        auto* actTelegram = phoneMenu->addAction(
             IS_EN ? QStringLiteral("🤖 Telegram QA Gateway...")
                   : QStringLiteral("🤖 Telegram QA Шлюз..."));
         connect(actTelegram, &QAction::triggered, this, [this]() {
@@ -2280,21 +2084,180 @@ void MainWindow::buildMenuBar()
         });
     }
 
-    // --- Обновление ---
-    auto* updateMenu = menuBar->addMenu(Str::menuUpdate());
+    // --- System ---
+    {
+        auto* sysMenu = menuBar->addMenu(
+            IS_EN ? QStringLiteral("⚙ System") : QStringLiteral("⚙ Система"));
 
-    auto* actCheck = updateMenu->addAction(Str::menuCheckUpdate());
-    connect(actCheck, &QAction::triggered, this, [this]() {
-        appendLog(Str::logSystem(), Str::updChecking(), Theme::LogColors::system);
-        m_jarvis->autoUpdater()->checkForUpdates(false);
-    });
+        auto* actKeepAttach = sysMenu->addAction(Str::menuKeepAttach());
+        actKeepAttach->setCheckable(true);
+        actKeepAttach->setChecked(false);
+        connect(actKeepAttach, &QAction::toggled, this, [this](bool checked) {
+            m_jarvis->attachments()->setKeepAfterSend(checked);
+            appendLog(Str::logSystem(),
+                      checked ? Str::statusAttachKept() : Str::statusAttachOneShot(),
+                      Theme::LogColors::system);
+        });
 
-    updateMenu->addSeparator();
+        auto* actKeyboard = sysMenu->addAction(Str::menuKeyboard());
+        connect(actKeyboard, &QAction::triggered, this, &MainWindow::toggleKeyboard);
 
-    auto* actReleases = updateMenu->addAction(Str::menuReleasePage());
-    connect(actReleases, &QAction::triggered, this, []() {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/releases")));
-    });
+        sysMenu->addSeparator();
+
+        // Translation pair
+        auto* transMenu = sysMenu->addMenu(
+            IS_EN ? QStringLiteral("Translation Pair") : QStringLiteral("Пара перевода"));
+        struct LangPair { QString label; QString src; QString tgt; };
+        const QList<LangPair> pairs = {
+            {QStringLiteral("FR → EN"), QStringLiteral("fr"), QStringLiteral("en")},
+            {QStringLiteral("FR → RU"), QStringLiteral("fr"), QStringLiteral("ru")},
+            {QStringLiteral("EN → RU"), QStringLiteral("en"), QStringLiteral("ru")},
+            {QStringLiteral("RU → EN"), QStringLiteral("ru"), QStringLiteral("en")},
+            {QStringLiteral("EN → FR"), QStringLiteral("en"), QStringLiteral("fr")},
+            {QStringLiteral("RU → FR"), QStringLiteral("ru"), QStringLiteral("fr")},
+        };
+        auto* transGroup = new QActionGroup(transMenu);
+        transGroup->setExclusive(true);
+        for (const auto& p : pairs) {
+            auto* act = transMenu->addAction(p.label);
+            act->setCheckable(true);
+            if (p.src == QStringLiteral("fr") && p.tgt == QStringLiteral("en"))
+                act->setChecked(true);
+            transGroup->addAction(act);
+            const QString src = p.src, tgt = p.tgt;
+            connect(act, &QAction::triggered, this, [this, src, tgt]() {
+                m_jarvis->translationEngine()->setSourceLang(src);
+                m_jarvis->translationEngine()->setTargetLang(tgt);
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    QStringLiteral("Translation pair: %1 → %2").arg(src.toUpper(), tgt.toUpper()),
+                    Theme::LogColors::system);
+            });
+        }
+
+        auto* actTranslate = sysMenu->addAction(
+            IS_EN ? QStringLiteral("Translate Clipboard")
+                  : QStringLiteral("Перевести буфер обмена"));
+        connect(actTranslate, &QAction::triggered, this, [this]() {
+            QString text = QApplication::clipboard()->text().trimmed();
+            if (text.isEmpty()) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("Clipboard is empty.") : QStringLiteral("Буфер обмена пуст."),
+                    Theme::LogColors::error);
+                return;
+            }
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                IS_EN ? QStringLiteral("Translating...") : QStringLiteral("Перевожу..."),
+                Theme::LogColors::system);
+            m_jarvis->translationEngine()->translateText(text,
+                m_jarvis->translationEngine()->targetLang(),
+                [this](bool ok, const QString& result) {
+                    if (ok) {
+                        appendLog(QStringLiteral("J.A.R.V.I.S."), result, Theme::LogColors::jarvis);
+                        QApplication::clipboard()->setText(result);
+                    } else {
+                        appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
+                            result, Theme::LogColors::error);
+                    }
+                });
+        });
+
+        auto* actAudioTranslate = sysMenu->addAction(
+            IS_EN ? QStringLiteral("Process Audio File...")
+                  : QStringLiteral("Обработать аудиофайл..."));
+        connect(actAudioTranslate, &QAction::triggered, this, [this]() {
+            QString path = QFileDialog::getOpenFileName(this,
+                IS_EN ? QStringLiteral("Select Audio File") : QStringLiteral("Выберите аудиофайл"),
+                QDir::homePath(),
+                QStringLiteral("Audio (*.wav *.pcm *.raw);;All (*)"));
+            if (path.isEmpty()) return;
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                (IS_EN ? QStringLiteral("Processing audio: ") : QStringLiteral("Обработка аудио: "))
+                + QFileInfo(path).fileName(),
+                Theme::LogColors::system);
+            auto* te = m_jarvis->translationEngine();
+            connect(te, &TranslationEngine::audioProcessingProgress, this,
+                    [this](const QString& stage) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    stage, Theme::LogColors::system);
+            }, Qt::SingleShotConnection);
+            connect(te, &TranslationEngine::audioTranscribed, this,
+                    [this](const QString& transcript, const QString& lang) {
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    QStringLiteral("[Transcript %1]: %2").arg(lang.toUpper(), transcript.left(500)),
+                    Theme::LogColors::jarvis);
+            }, Qt::SingleShotConnection);
+            connect(te, &TranslationEngine::audioSummaryReady, this,
+                    [this](const QString& summary) {
+                appendLog(QStringLiteral("J.A.R.V.I.S."), summary, Theme::LogColors::jarvis);
+            }, Qt::SingleShotConnection);
+            connect(te, &TranslationEngine::audioProcessingError, this,
+                    [this](const QString& err) {
+                appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
+                    err, Theme::LogColors::error);
+            }, Qt::SingleShotConnection);
+            te->processAudioFile(path, te->targetLang());
+        });
+
+        sysMenu->addSeparator();
+
+        // Analytics
+        auto* actAnalytics = sysMenu->addAction(
+            IS_EN ? QStringLiteral("📊 User Analytics")
+                  : QStringLiteral("📊 Аналитика"));
+        connect(actAnalytics, &QAction::triggered, this, [this]() {
+            auto dbConn = QSqlDatabase::database(QStringLiteral("jarvis_main"));
+            if (!dbConn.isOpen()) return;
+            QSqlQuery q(dbConn);
+            q.exec(QStringLiteral(
+                "SELECT chat_id, action_type, COUNT(*) as cnt "
+                "FROM activity_log_tg GROUP BY chat_id, action_type "
+                "ORDER BY chat_id, cnt DESC"));
+            QString report = IS_EN
+                ? QStringLiteral("📊 <b>User Analytics</b><br><br>")
+                : QStringLiteral("📊 <b>Аналитика</b><br><br>");
+            QMap<qint64, QMap<QString, int>> userData;
+            while (q.next())
+                userData[q.value(0).toLongLong()][q.value(1).toString()] = q.value(2).toInt();
+            if (userData.isEmpty()) {
+                report += IS_EN ? QStringLiteral("<i>No data yet.</i>")
+                                : QStringLiteral("<i>Данных пока нет.</i>");
+            } else {
+                for (auto it = userData.begin(); it != userData.end(); ++it) {
+                    report += QStringLiteral("<b>Chat %1</b><br>").arg(it.key());
+                    for (auto jt = it.value().begin(); jt != it.value().end(); ++jt)
+                        report += QStringLiteral("  • %1: %2<br>").arg(jt.key()).arg(jt.value());
+                    report += QStringLiteral("<br>");
+                }
+            }
+            auto* dlg = new QDialog(this);
+            dlg->setWindowTitle(IS_EN ? QStringLiteral("Analytics") : QStringLiteral("Аналитика"));
+            dlg->setMinimumSize(480, 360);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            auto* lay = new QVBoxLayout(dlg);
+            auto* browser = new QTextEdit(dlg);
+            browser->setReadOnly(true);
+            browser->setHtml(report);
+            lay->addWidget(browser);
+            auto* closeBtn = new QPushButton(QStringLiteral("OK"), dlg);
+            connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::accept);
+            lay->addWidget(closeBtn);
+            dlg->show();
+        });
+
+        sysMenu->addSeparator();
+
+        // Updates (moved from standalone menu)
+        auto* actCheck = sysMenu->addAction(Str::menuCheckUpdate());
+        connect(actCheck, &QAction::triggered, this, [this]() {
+            appendLog(Str::logSystem(), Str::updChecking(), Theme::LogColors::system);
+            m_jarvis->autoUpdater()->checkForUpdates(false);
+        });
+
+        auto* actReleases = sysMenu->addAction(Str::menuReleasePage());
+        connect(actReleases, &QAction::triggered, this, []() {
+            QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/releases")));
+        });
+    }
 
     // --- Помощь ---
     auto* helpMenu = menuBar->addMenu(Str::menuHelp());
@@ -2506,49 +2469,7 @@ R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.<
         BugReporter::showDialog(this);
     });
 
-    // GitHub Issues убран — есть кнопка "Отправить баг"
-
-// =============================================================================
-// ВСТАВИТЬ в buildMenuBar() в mainwindow.cpp
-// В меню "Помощь" — после actAbout
-// =============================================================================
-
-    // --- Что нового (auto-generated from git history) ---
-    auto* actWhatsNew = helpMenu->addAction(
-        IS_EN ? QStringLiteral("What's New") : QStringLiteral("Что нового"));
-    connect(actWhatsNew, &QAction::triggered, this, [this]() {
-        auto& reflector = SelfUpdateReflector::instance();
-        const QString ver = QCoreApplication::applicationVersion();
-        reflector.markChangelogSeen(ver);
-
-        auto* dlg = new QDialog(this);
-        dlg->setWindowTitle(IS_EN ? QStringLiteral("What's New — J.A.R.V.I.S.")
-                                  : QStringLiteral("Что нового — J.A.R.V.I.S."));
-        dlg->setMinimumSize(700, 500);
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-        dlg->setStyleSheet(QStringLiteral(
-            "QDialog { background: #0B0C10; color: #C5C6C7; }"
-            "QTextBrowser { background: rgba(11,12,16,220); color: #C5C6C7; "
-            "  border: 1px solid rgba(102,252,241,0.10); border-radius: 8px; padding: 12px; }"
-            "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
-            "  border: 1px solid rgba(102,252,241,0.18); padding: 7px 28px; border-radius: 6px; }"
-            "QPushButton:hover { background: rgba(102,252,241,0.15); }"));
-
-        auto* layout = new QVBoxLayout(dlg);
-        auto* browser = new QTextBrowser(dlg);
-        browser->setOpenExternalLinks(true);
-        browser->setHtml(reflector.buildChangelogHtml(IS_EN));
-        layout->addWidget(browser, 1);
-
-        auto* btn = new QPushButton(QStringLiteral("OK"), dlg);
-        btn->setFixedWidth(120);
-        connect(btn, &QPushButton::clicked, dlg, &QDialog::accept);
-        auto* row = new QHBoxLayout();
-        row->addStretch(); row->addWidget(btn); row->addStretch();
-        layout->addLayout(row);
-
-        dlg->exec();
-    });
+    helpMenu->addSeparator();
 
     // --- Инструкция (auto-generated from active modules) ---
     auto* actHelp = helpMenu->addAction(

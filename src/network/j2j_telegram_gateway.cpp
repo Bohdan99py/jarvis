@@ -305,6 +305,7 @@ void J2JTelegramGateway::initSocialPresence(qint64 targetChatId)
 
     // Initialize the personality evolution engine
     auto* personality = new PersonalityEngine(this);
+    m_personalityEng = personality;
     m_socialPresence->setPersonalityEngine(personality);
 
     // Initialize the autonomous reflection engine
@@ -1094,6 +1095,22 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     QString langInstruction = english
         ? QStringLiteral("Respond in English. The user is a QA Tester.")
         : QStringLiteral("Отвечай на русском языке.");
+
+    // ── Emotional Tone Modulation — inject mood into system prompt ──
+    if (m_personalityEng) {
+        EmotionalState emo = m_personalityEng->emotionalState();
+        langInstruction += QStringLiteral(
+            "\n[SYSTEM_METADATA: Current Mood={joy: %1, frustration: %2, "
+            "curiosity: %3, boredom: %4}. "
+            "If frustration is high, your tone should be terse and impatient. "
+            "If joy is high, be more conversational and use emojis. "
+            "If curiosity is high, ask follow-up questions. "
+            "If boredom is high, be brief and suggest something new.]")
+            .arg(emo.joy,         0, 'f', 2)
+            .arg(emo.frustration, 0, 'f', 2)
+            .arg(emo.curiosity,   0, 'f', 2)
+            .arg(emo.boredom,     0, 'f', 2);
+    }
 
     QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
 

@@ -36,6 +36,7 @@ class CommandDispatcherTg;
 class SocialPresenceEngine;
 class SemanticIntentManager;
 class PcWakeAgent;
+class PersonalityEngine;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -240,6 +241,7 @@ private:
     SocialPresenceEngine*  m_socialPresence = nullptr;
     SemanticIntentManager* m_intentMgr      = nullptr;
     PcWakeAgent*           m_wakeAgent      = nullptr;
+    PersonalityEngine*     m_personalityEng = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator
