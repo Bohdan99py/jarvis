@@ -510,19 +510,21 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
     m_accessMgr->ensureRegistered(chatId, firstName);
 
     // ── 0. Session check — verify this chat is bound to THIS PC ─
-    auto session = m_accessMgr->resolveSession(chatId);
-    if (session.has_value() && !m_accessMgr->isSessionBoundHere(chatId)) {
-        TgChatSession& cs = getOrCreateSession(chatId);
-        sendMessage(chatId, cs.isEnglish
-            ? QStringLiteral("🖥 This chat is bound to a different PC (`%1`). "
-                             "Use /bind_pc to re-bind to the current machine.")
-                .arg(session->pcName)
-            : QStringLiteral("🖥 Этот чат привязан к другому ПК (`%1`). "
-                             "Используйте /bind_pc чтобы привязать к текущей машине.")
-                .arg(session->pcName));
-        m_accessMgr->logActivity(chatId, QStringLiteral("wrong_pc"),
-                                  session->deviceId);
-        return;
+    {
+        auto pcSession = m_accessMgr->resolveSession(chatId);
+        if (pcSession.has_value() && !m_accessMgr->isSessionBoundHere(chatId)) {
+            TgChatSession& cs = getOrCreateSession(chatId);
+            sendMessage(chatId, cs.isEnglish
+                ? QStringLiteral("🖥 This chat is bound to a different PC (`%1`). "
+                                 "Use /bind_pc to re-bind to the current machine.")
+                    .arg(pcSession->pcName)
+                : QStringLiteral("🖥 Этот чат привязан к другому ПК (`%1`). "
+                                 "Используйте /bind_pc чтобы привязать к текущей машине.")
+                    .arg(pcSession->pcName));
+            m_accessMgr->logActivity(chatId, QStringLiteral("wrong_pc"),
+                                      pcSession->deviceId);
+            return;
+        }
     }
 
     // ── 1. TOP PRIORITY: Pairing PIN ────────────────────────
