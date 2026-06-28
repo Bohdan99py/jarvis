@@ -16,6 +16,8 @@ add_library(jarvis_common OBJECT
     systemcontroller.h
     layout_fixer.h
     layout_fixer.cpp
+    mermaid_renderer.h
+    mermaid_renderer.cpp
 )
 
 target_include_directories(jarvis_common PUBLIC
@@ -25,4 +27,5 @@ target_include_directories(jarvis_common PUBLIC
 target_link_libraries(jarvis_common PUBLIC
     Qt6::Core
     Qt6::Gui
+    Qt6::Concurrent
 )

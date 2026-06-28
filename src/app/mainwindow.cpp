@@ -1969,6 +1969,13 @@ void MainWindow::buildMenuBar()
             mesh->initMobilePairing();
             gw->setPairingManager(mesh->mobilePairing());
 
+            // Connect diagram pipeline to desktop dashboard
+            connect(gw, &J2JTelegramGateway::diagramGenerated, this,
+                    [this](const QImage& img) {
+                m_visualInsights->showDiagram(img);
+                m_visualInsights->setVisible(true);
+            }, Qt::UniqueConnection);
+
             auto* dlg = new QDialog(this);
             dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
                                       : QStringLiteral("Telegram QA Шлюз"));
@@ -4095,6 +4102,11 @@ void MainWindow::buildUI()
     );
     m_log->document()->setMaximumBlockCount(300);
     vbox->addWidget(m_log, 1);
+
+    // === Visual Insights — diagram dashboard ===
+    m_visualInsights = new VisualInsightsWidget(this);
+    m_visualInsights->setVisible(false);
+    vbox->addWidget(m_visualInsights);
 
     // === Панель предложений ===
     m_suggestionBar = new QWidget(this);

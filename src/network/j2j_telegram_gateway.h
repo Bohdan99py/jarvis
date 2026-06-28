@@ -25,6 +25,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDateTime>
+#include <QImage>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -163,6 +164,7 @@ signals:
     void videoSent(qint64 chatId, const QString& filePath);
     void documentSent(qint64 chatId, const QString& filePath);
     void pairingCompleted(qint64 chatId, const QString& role);
+    void diagramGenerated(const QImage& image);
     void gatewayStarted();
     void gatewayStopped();
     void gatewayError(const QString& message);
@@ -186,6 +188,7 @@ private:
 
     // Free-dialogue LLM routing
     void routeToLlm(qint64 chatId, const QString& text, bool english);
+    void deliverLlmResponse(qint64 chatId, const QString& response);
     void finishLlmRequest(qint64 chatId);
     void sendChatAction(qint64 chatId, const QString& action);
     void startTypingIndicator(qint64 chatId);

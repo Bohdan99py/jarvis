@@ -5,6 +5,8 @@ target_sources(jarvis PRIVATE
     main.cpp
     mainwindow.h
     mainwindow.cpp
+    visual_insights_widget.h
+    visual_insights_widget.cpp
 )
 
 target_include_directories(jarvis PRIVATE

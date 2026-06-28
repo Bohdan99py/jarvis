@@ -12,6 +12,7 @@
 #include "reflection_engine.h"
 #include "personality_engine.h"
 #include "semantic_intent_manager.h"
+#include "mermaid_renderer.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
@@ -36,6 +37,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QBuffer>
 #include <QHttpMultiPart>
 #include <QHttpPart>
 #include <QUuid>
@@ -1112,14 +1114,24 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
             .arg(emo.boredom,     0, 'f', 2);
     }
 
+    // ── Visual Diagram Instruction — ask LLM to produce Mermaid ──
+    if (SemanticIntentManager::needsVisualExplanation(text)) {
+        langInstruction += QStringLiteral(
+            "\n[DIAGRAM_INSTRUCTION: The user is asking about architecture, "
+            "flow, or structure. Include a Mermaid diagram in your response "
+            "wrapped in <diagram>...</diagram> tags. Use Mermaid syntax "
+            "(graph TD, sequenceDiagram, classDiagram, etc). "
+            "Keep the diagram focused and readable. "
+            "Put explanatory text OUTSIDE the tags.]");
+    }
+
     QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
 
     if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
         finishLlmRequest(chatId);
 
         JarvisResponse dual = JarvisResponse::parse(syncResponse);
-        sendMessage(chatId, dual.fullText);
-        emit conversationResponse(chatId, dual.fullText);
+        deliverLlmResponse(chatId, dual.fullText);
         VoiceSynthesisManager::instance().say(dual.speechText);
         return;
     }
@@ -1146,8 +1158,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     *conn = connect(m_jarvis, &Jarvis::asyncResponseReady, this,
                     [this, chatId, cleanup, originalQuery](const QString& response) {
         cleanup();
-        sendMessage(chatId, response);
-        emit conversationResponse(chatId, response);
+        deliverLlmResponse(chatId, response);
 
         // ── Step 6b: Cache the successful LLM response asynchronously ──
         LlmCacheManager::instance().saveResponse(originalQuery, response);
@@ -1228,6 +1239,61 @@ void J2JTelegramGateway::finishLlmRequest(qint64 chatId)
     stopTypingIndicator(chatId);
     if (m_sessions.contains(chatId))
         m_sessions[chatId].awaitingLlm = false;
+}
+
+// ============================================================
+//  LLM Response Delivery — intercepts <diagram> tags
+// ============================================================
+
+void J2JTelegramGateway::deliverLlmResponse(qint64 chatId,
+                                              const QString& response)
+{
+    const QString diagramSource = MermaidRenderer::extractDiagramBlock(response);
+
+    if (diagramSource.isEmpty()) {
+        sendMessage(chatId, response);
+        emit conversationResponse(chatId, response);
+        return;
+    }
+
+    // Split: send text caption, render diagram, send as photo
+    const QString textPart = MermaidRenderer::stripDiagramBlock(response);
+
+    auto* renderer = new MermaidRenderer(this);
+    connect(renderer, &MermaidRenderer::renderFinished, this,
+            [this, chatId, textPart, renderer](const MermaidRenderResult& result) {
+        renderer->deleteLater();
+
+        if (result.success && !result.image.isNull()) {
+            // Convert QImage to PNG bytes for sendPhotoFromBuffer
+            QByteArray pngData;
+            QBuffer buf(&pngData);
+            buf.open(QIODevice::WriteOnly);
+            result.image.save(&buf, "PNG");
+            buf.close();
+
+            sendPhotoFromBuffer(chatId, pngData,
+                                QStringLiteral("diagram.png"),
+                                textPart.left(1024));
+
+            emit diagramGenerated(result.image);
+
+            qDebug() << "[TelegramGW] Diagram sent to chat" << chatId
+                     << "size:" << result.image.size();
+        } else {
+            // Render failed — send text only with error note
+            QString fallback = textPart;
+            if (!fallback.isEmpty())
+                fallback += QStringLiteral("\n\n");
+            fallback += QStringLiteral("📊 _Diagram rendering failed: %1_")
+                .arg(result.errorMessage.left(100));
+            sendMessage(chatId, fallback);
+        }
+
+        emit conversationResponse(chatId, textPart);
+    });
+
+    renderer->renderAsync(diagramSource);
 }
 
 // ============================================================

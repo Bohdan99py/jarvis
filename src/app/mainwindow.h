@@ -41,6 +41,7 @@ class QDropEvent;
 #include "activity_tracker.h"
 #include "audio_manager.h"
 #include "theme_manager.h"
+#include "visual_insights_widget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -192,4 +193,7 @@ private:
     // Audio notification system
     AudioManager*           m_audioManager  = nullptr;
     QPushButton*            m_audioModeBtn  = nullptr;
+
+    // Visual diagram dashboard
+    VisualInsightsWidget*   m_visualInsights = nullptr;
 };

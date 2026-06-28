@@ -280,6 +280,53 @@ bool SemanticIntentManager::isConversational(const IntentMatch& match)
     return !match.matched || match.confidence < 0.50;
 }
 
+bool SemanticIntentManager::needsVisualExplanation(const QString& text)
+{
+    const QString lower = text.toLower();
+    static const QStringList visualKeywords = {
+        QStringLiteral("architecture"), QStringLiteral("архитектур"),
+        QStringLiteral("flow"),         QStringLiteral("поток"),
+        QStringLiteral("structure"),    QStringLiteral("структур"),
+        QStringLiteral("diagram"),      QStringLiteral("диаграмм"),
+        QStringLiteral("schema"),       QStringLiteral("схем"),
+        QStringLiteral("pipeline"),     QStringLiteral("пайплайн"),
+        QStringLiteral("sequence"),     QStringLiteral("последовательност"),
+        QStringLiteral("dependency"),   QStringLiteral("зависимост"),
+        QStringLiteral("hierarchy"),    QStringLiteral("иерарх"),
+        QStringLiteral("memory model"), QStringLiteral("модель памяти"),
+        QStringLiteral("class diagram"),QStringLiteral("граф"),
+        QStringLiteral("покажи схему"), QStringLiteral("нарисуй"),
+        QStringLiteral("draw"),         QStringLiteral("visualize"),
+    };
+
+    static const QStringList visualVerbs = {
+        QStringLiteral("explain"),  QStringLiteral("show"),
+        QStringLiteral("describe"), QStringLiteral("объясни"),
+        QStringLiteral("покажи"),   QStringLiteral("расскажи"),
+        QStringLiteral("опиши"),    QStringLiteral("how does"),
+        QStringLiteral("как работает"), QStringLiteral("как устроен"),
+    };
+
+    bool hasKeyword = false;
+    bool hasVerb = false;
+
+    for (const auto& kw : visualKeywords) {
+        if (lower.contains(kw)) { hasKeyword = true; break; }
+    }
+    for (const auto& v : visualVerbs) {
+        if (lower.contains(v)) { hasVerb = true; break; }
+    }
+
+    // "нарисуй" / "draw" / "visualize" alone are strong enough
+    if (lower.contains(QStringLiteral("нарисуй"))
+        || lower.contains(QStringLiteral("draw"))
+        || lower.contains(QStringLiteral("visualize"))
+        || lower.contains(QStringLiteral("diagram")))
+        return true;
+
+    return hasKeyword && hasVerb;
+}
+
 // ============================================================
 //  Action Execution
 // ============================================================

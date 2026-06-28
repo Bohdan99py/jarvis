@@ -75,6 +75,9 @@ public:
     // Whether the message is purely conversational (no goal signal)
     static bool isConversational(const IntentMatch& match);
 
+    // Check if a user query would benefit from a visual diagram
+    static bool needsVisualExplanation(const QString& text);
+
 signals:
     void intentExecuted(const QString& goalId, int actionCount);
 
