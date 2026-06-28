@@ -8,6 +8,8 @@ add_library(jarvis_db OBJECT
     session_memory.cpp
     llm_cache_manager.h
     llm_cache_manager.cpp
+    memory_consolidation.h
+    memory_consolidation.cpp
 )
 
 target_include_directories(jarvis_db PUBLIC

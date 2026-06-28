@@ -31,6 +31,7 @@
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include "curiosity_engine.h"
+#include "memory_consolidation.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -197,6 +198,19 @@ Jarvis::Jarvis(QObject* parent)
         connect(&curiosity, &CuriosityEngine::proactiveDialogue, this,
                 [this](const QString& message, CuriosityEngine::ProactiveCategory) {
             emit asyncResponseReady(message);
+        });
+    }
+
+    // Two-Tier Memory Consolidation — external 4TB + local SSD cache
+    {
+        auto& mc = MemoryConsolidation::instance();
+        mc.startBackgroundConsolidation(15);
+        connect(&mc, &MemoryConsolidation::driveStatusChanged, this,
+                [this](bool connected) {
+            const QString msg = connected
+                ? QStringLiteral("📀 External memory pool connected — consolidation active.")
+                : QStringLiteral("📀 External memory pool disconnected — operating from local cache.");
+            emit asyncResponseReady(msg);
         });
     }
 }
@@ -969,9 +983,18 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                                       ev.content,
                                       QString::number(ev.importance, 'f', 2));
                 }
+                // Append consolidation digest (Tier 2 local cache summary)
+                const QString consolDigest =
+                    MemoryConsolidation::instance().buildMemoryDigest(5);
+                if (!consolDigest.isEmpty())
+                    msCtx += QStringLiteral("\n") + consolDigest;
+
                 m_memory->setMemoryStreamContext(msCtx);
             } else {
-                m_memory->setMemoryStreamContext(QString());
+                // No memory stream events — still include consolidation digest
+                const QString consolDigest =
+                    MemoryConsolidation::instance().buildMemoryDigest(5);
+                m_memory->setMemoryStreamContext(consolDigest);
             }
         }
 

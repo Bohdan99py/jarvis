@@ -99,10 +99,11 @@ signals:
 private slots:
     void onCapture();
 
+    static QString categorizeApp(const QString& processName, const QString& windowTitle);
+
 private:
     void ensureTables();
     void recordActivity(const QString& appName, const QString& windowTitle);
-    static QString categorizeApp(const QString& processName, const QString& windowTitle);
     static QString cleanAppName(const QString& processName);
 
     // Windows API
