@@ -3,6 +3,8 @@
 // ============================================================
 
 #include "screenshot_learner.h"
+#include "curiosity_engine.h"
+#include "activity_tracker.h"
 #include "jarvis_paths.h"
 
 #include <QSqlQuery>
@@ -288,6 +290,12 @@ void ScreenshotLearner::onCapture()
 
     m_lastAppName = appName;
     m_lastWindowTitle = title;
+
+    // Feed visual context into CuriosityEngine for proactive questions
+    {
+        const QString category = ActivityTracker::categorizeApp(processName, title);
+        CuriosityEngine::instance().updateVisualContext(appName, title, category);
+    }
 
     // Периодически проверяем — есть ли предложение
     checkSuggestions();

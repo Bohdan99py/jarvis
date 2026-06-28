@@ -32,6 +32,7 @@
 #include <QClipboard>
 #include "activity_tracker.h"
 #include "user_profile.h"
+#include "curiosity_engine.h"
 #include "mobile_pairing_manager.h"
 #include "j2j_mesh_connector.h"
 #include "j2j_telegram_gateway.h"
@@ -367,6 +368,9 @@ MainWindow::MainWindow(QWidget* parent)
             onSuggestion(desc, s.appName);
         }
     });
+    // Wire ScreenshotLearner → CuriosityEngine for visual context
+    CuriosityEngine::instance().setScreenshotLearner(m_appLearner);
+
     // Запускаем ПОСЛЕ полной инициализации окна
     QTimer::singleShot(3000, this, [this]() {
         if (m_appLearner) m_appLearner->start(2);
