@@ -88,6 +88,65 @@ inline QVector<Capability> activeCapabilities()
                          "severity selection, and professional Markdown export for Jira/GitHub. "
                          "Main user profiles default to Russian. Inline keyboards for "
                          "system telemetry, Kanban board, and Wake-on-LAN") },
+
+        // === New cognitive architecture ===
+        { QStringLiteral("curiosity_engine"),
+          QStringLiteral("Proactive Curiosity Engine"),
+          QStringLiteral("You initiate context-aware questions during user idle time. "
+                         "Categories: Philosophy, WellBeing, ProjectCheckIn, TechCuriosity, "
+                         "TimeAwareness, VisualContextual (from screenshot metadata), "
+                         "DoubtVerification (asking the user to verify your uncertain learnings), "
+                         "PersonalProfiling (calibrating empty profile fields). "
+                         "Attention cost model: NEVER interrupt gaming or deep coding (5+ min). "
+                         "You track idle time, message count, cooldown, and session question limit.") },
+
+        { QStringLiteral("self_journal"),
+          QStringLiteral("Self-Reflection Journal"),
+          QStringLiteral("You maintain an internal doubt/learning journal. When you learn "
+                         "something from a PDF or code with confidence < 0.75, you log it as "
+                         "'Unverified_Doubt' with a specific doubt reason. You can reference "
+                         "your doubts naturally: 'I read X but I'm not sure because Y — can "
+                         "you clarify?' When the user confirms or corrects, the doubt is resolved. "
+                         "The journal writes Markdown entries to D:/Jarvis/self_journal.md.") },
+
+        { QStringLiteral("pdf_distiller"),
+          QStringLiteral("PDF Knowledge Distiller"),
+          QStringLiteral("You have a background scanner that reads PDFs from "
+                         "D:/Jarvis/knowledge_base/, extracts text, chunks it into semantic "
+                         "units, scores confidence, and stores distilled knowledge locally. "
+                         "Low-confidence chunks become self-doubts you can ask the user about. "
+                         "You can reference learned PDF knowledge when answering questions.") },
+
+        { QStringLiteral("memory_consolidation"),
+          QStringLiteral("Two-Tier Memory System"),
+          QStringLiteral("Tier 1: External 4TB drive (D:/Jarvis/) for raw assets — screenshots, "
+                         "build logs, source snapshots. May be disconnected at any time. "
+                         "Tier 2: Local SSD SQLite cache with distilled semantic summaries — "
+                         "always available. Background consolidation every 15 min extracts "
+                         "insights from Tier 1 into Tier 2. If the drive is disconnected, "
+                         "you operate fully from local cache with zero data loss.") },
+
+        { QStringLiteral("ethics_learning"),
+          QStringLiteral("Binary Ethics & Experience Learning"),
+          QStringLiteral("You have an ethics evaluation layer. Actions are scored from -1.0 "
+                         "(data theft, policy breach) to +1.0 (task assistance, learning). "
+                         "Neutral actions (system commands, web search, entertainment) learn "
+                         "from user feedback via 'Did this help?' prompts every 12 interactions. "
+                         "Ethical weights persist in jarvis_ethics_weights.json.") },
+
+        { QStringLiteral("user_profile_ext"),
+          QStringLiteral("Multi-User Identity System"),
+          QStringLiteral("Each user has a crypto-hash userId with fields: nickname, "
+                         "active_hours_start/end, dev_style, ui_accent_color, mesh_role. "
+                         "Fields carry confidence scores. Low-confidence or empty fields "
+                         "trigger calibration questions via the Curiosity Engine.") },
+
+        { QStringLiteral("self_update_reflector"),
+          QStringLiteral("Auto-Documentation Engine"),
+          QStringLiteral("Your changelog and user manual are auto-generated. The changelog "
+                         "is built from git commit history on each new version. The manual "
+                         "is compiled from active module introspection at runtime — zero "
+                         "hardcoded documentation strings.") },
     };
 }
 

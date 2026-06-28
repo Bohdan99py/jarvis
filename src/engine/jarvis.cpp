@@ -1078,6 +1078,35 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             DatabaseManager::instance().addMemoryEvent(ev);
         }
 
+        // Refresh capabilities context with live reflection state
+        {
+            QString caps = SystemManifest::buildCapabilitiesContext();
+
+            // Inject live cognitive state
+            const int doubtCount = SelfJournal::instance().unresolvedDoubtCount();
+            const int pdfChunks  = PdfDistiller::instance().totalChunks();
+            const bool extDrive  = MemoryConsolidation::instance().isExternalAvailable();
+
+            caps += QStringLiteral("=== CURRENT COGNITIVE STATE ===\n");
+
+            if (doubtCount > 0)
+                caps += QStringLiteral("- You have %1 unresolved self-doubts. When idle, "
+                                       "ask the user to verify your least confident learning.\n")
+                            .arg(doubtCount);
+
+            if (pdfChunks > 0)
+                caps += QStringLiteral("- You have distilled %1 knowledge chunks from PDFs. "
+                                       "Reference this learned knowledge when relevant.\n")
+                            .arg(pdfChunks);
+
+            caps += extDrive
+                ? QStringLiteral("- External 4TB storage: CONNECTED. Full Tier 1+2 operational.\n")
+                : QStringLiteral("- External storage: DISCONNECTED. Operating from local SSD cache.\n");
+
+            caps += QStringLiteral("\n");
+            m_memory->setCapabilitiesContext(caps);
+        }
+
         // Adaptive Focus: auto-detect from recent memory stream
         m_memory->setAdaptiveFocusContext(
             UserProfileManager::buildFocusContext(m_currentUserId));
