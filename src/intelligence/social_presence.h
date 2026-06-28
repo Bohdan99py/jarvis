@@ -26,6 +26,8 @@
 #include <ctime>
 
 class J2JTelegramGateway;
+class MemoryManager;
+class ReflectionEngine;
 
 // ── User availability state machine ─────────────────────────
 
@@ -51,6 +53,11 @@ public:
 
     void setTelegramGateway(J2JTelegramGateway* gw);
     void setTargetChatId(qint64 chatId);
+    void setMemoryManager(MemoryManager* mm);
+    void setReflectionEngine(ReflectionEngine* re);
+
+    // Queue an external nudge (e.g., morning summary from ReflectionEngine)
+    void queueExternalNudge(const QString& text);
 
     void start();
     void stop();
@@ -94,6 +101,8 @@ private:
     int computeNudgeIntervalSec() const;
 
     J2JTelegramGateway* m_gateway      = nullptr;
+    MemoryManager*      m_memoryMgr    = nullptr;
+    ReflectionEngine*   m_reflection   = nullptr;
     QTimer*             m_nudgeTimer   = nullptr;
     qint64              m_targetChatId = 0;
 

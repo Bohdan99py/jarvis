@@ -37,6 +37,8 @@ add_library(jarvis_intelligence OBJECT
     curiosity_engine.cpp
     social_presence.h
     social_presence.cpp
+    reflection_engine.h
+    reflection_engine.cpp
     pdf_distiller.h
     pdf_distiller.cpp
     self_journal.h

@@ -7,6 +7,8 @@
 #include "telegram_access_manager.h"
 #include "command_dispatcher_tg.h"
 #include "social_presence.h"
+#include "memory_manager.h"
+#include "reflection_engine.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
@@ -262,12 +264,24 @@ void J2JTelegramGateway::initSocialPresence(qint64 targetChatId)
         delete m_socialPresence;
     }
 
+    // Initialize the vector memory store
+    MemoryManager::instance().initialize();
+
     m_socialPresence = new SocialPresenceEngine(this);
     m_socialPresence->setTelegramGateway(this);
     m_socialPresence->setTargetChatId(targetChatId);
+    m_socialPresence->setMemoryManager(&MemoryManager::instance());
+
+    // Initialize the autonomous reflection engine
+    auto* reflection = new ReflectionEngine(this);
+    reflection->setMemoryManager(&MemoryManager::instance());
+    reflection->setSocialPresence(m_socialPresence);
+    m_socialPresence->setReflectionEngine(reflection);
+    reflection->start(30);
+
     m_socialPresence->start();
 
-    qDebug() << "[TelegramGW] Social Presence Engine initialized for chat"
+    qDebug() << "[TelegramGW] Social Presence + Memory + Reflection initialized for chat"
              << targetChatId;
 }
 

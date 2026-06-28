@@ -4,6 +4,8 @@
 
 #include "social_presence.h"
 #include "j2j_telegram_gateway.h"
+#include "memory_manager.h"
+#include "reflection_engine.h"
 
 #include <QRandomGenerator>
 #include <QDebug>
@@ -230,6 +232,31 @@ void SocialPresenceEngine::setTargetChatId(qint64 chatId)
     m_targetChatId = chatId;
 }
 
+void SocialPresenceEngine::setMemoryManager(MemoryManager* mm)
+{
+    m_memoryMgr = mm;
+}
+
+void SocialPresenceEngine::setReflectionEngine(ReflectionEngine* re)
+{
+    m_reflection = re;
+
+    if (re) {
+        connect(re, &ReflectionEngine::morningNudgeReady,
+                this, &SocialPresenceEngine::queueExternalNudge);
+    }
+}
+
+void SocialPresenceEngine::queueExternalNudge(const QString& text)
+{
+    if (text.isEmpty()) return;
+
+    if (currentStatus() == UserState::FREE)
+        fireNudge(); // will pick up queued content
+    else
+        queueNudge(text);
+}
+
 void SocialPresenceEngine::start()
 {
     m_nudgeTimer->start();
@@ -298,6 +325,13 @@ QString SocialPresenceEngine::processIncomingMessage(const QString& text)
 
     m_lastResponseTime = QDateTime::currentDateTime();
     ++m_totalResponses;
+
+    // Store meaningful messages in vector memory
+    if (m_memoryMgr && text.length() > 10) {
+        m_memoryMgr->store(QStringLiteral("dialogue"),
+                           QStringLiteral("User: ") + text.left(500),
+                           0.4);
+    }
 
     // 1. Check for trolling/nonsense FIRST
     if (detectTrolling(lower)) {
@@ -462,7 +496,21 @@ void SocialPresenceEngine::fireNudge()
     if (!m_gateway || m_targetChatId == 0) return;
 
     const QString question = pickNudgeQuestion();
-    const QString message = QStringLiteral("🧠 ") + question;
+    QString message = QStringLiteral("🧠 ") + question;
+
+    // Enrich nudge with semantic context from MemoryManager
+    if (m_memoryMgr) {
+        const QString context = m_memoryMgr->buildSemanticContext(question, 2);
+        if (!context.isEmpty()) {
+            message += QStringLiteral("\n\n_Context from our history:_\n");
+            message += context;
+        }
+
+        // Store the nudge itself as a memory chunk
+        m_memoryMgr->store(QStringLiteral("dialogue"),
+                           QStringLiteral("JARVIS nudge: ") + question,
+                           0.3);
+    }
 
     m_gateway->sendOutboundMessage(m_targetChatId, message);
 

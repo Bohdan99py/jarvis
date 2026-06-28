@@ -10,6 +10,8 @@ add_library(jarvis_db OBJECT
     llm_cache_manager.cpp
     memory_consolidation.h
     memory_consolidation.cpp
+    memory_manager.h
+    memory_manager.cpp
 )
 
 target_include_directories(jarvis_db PUBLIC
