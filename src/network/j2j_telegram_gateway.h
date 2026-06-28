@@ -34,6 +34,7 @@ class MobilePairingManager;
 class TelegramAccessManager;
 class CommandDispatcherTg;
 class SocialPresenceEngine;
+class SemanticIntentManager;
 
 // ── Localization keys ────────────────────────────────────────
 enum class TgStringId {
@@ -235,6 +236,7 @@ private:
     TelegramAccessManager* m_accessMgr      = nullptr;
     CommandDispatcherTg*   m_dispatcher     = nullptr;
     SocialPresenceEngine*  m_socialPresence = nullptr;
+    SemanticIntentManager* m_intentMgr      = nullptr;
 
     QMap<qint64, TgChatSession> m_sessions;
     QSet<qint64>                m_typingChats;  // chats with active typing indicator

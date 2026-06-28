@@ -10,6 +10,8 @@ add_library(jarvis_network OBJECT
     telegram_access_manager.cpp
     command_dispatcher_tg.h
     command_dispatcher_tg.cpp
+    semantic_intent_manager.h
+    semantic_intent_manager.cpp
     j2j_mesh_connector.h
     j2j_mesh_connector.cpp
     mobile_pairing_manager.h

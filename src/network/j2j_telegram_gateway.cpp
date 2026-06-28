@@ -10,6 +10,7 @@
 #include "memory_manager.h"
 #include "reflection_engine.h"
 #include "personality_engine.h"
+#include "semantic_intent_manager.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
@@ -216,6 +217,7 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
 
     m_accessMgr = new TelegramAccessManager(this);
     m_dispatcher = new CommandDispatcherTg(this, m_accessMgr, this);
+    m_intentMgr  = new SemanticIntentManager(this, this);
 
     // Ensure the qa_artifacts table exists
     {
@@ -643,6 +645,33 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
                 // Returning from BUSY/PAUSED — welcome back (nudge flush handled internally)
                 m_accessMgr->logActivity(chatId, QStringLiteral("status_free"), text.left(50));
                 // Don't return — let the message flow to LLM as usual
+            }
+        }
+    }
+
+    // ── 3.7. Semantic Intent — goal-driven action execution ──
+    if (m_intentMgr) {
+        const IntentMatch intent = m_intentMgr->classifyIntent(text);
+        if (intent.matched) {
+            if (intent.confidence >= 0.85) {
+                // High confidence — execute silently, send acknowledgement
+                const QString ack = m_intentMgr->executeActions(intent);
+                if (!ack.isEmpty())
+                    sendMessage(chatId, ack);
+                m_accessMgr->logActivity(chatId, QStringLiteral("intent"),
+                    intent.goalId + QStringLiteral(":") + QString::number(intent.confidence, 'f', 2));
+                return;
+            }
+            if (intent.confidence >= 0.50) {
+                // Medium confidence — ask for confirmation
+                const QString question = (session.isEnglish
+                    ? QStringLiteral("I think you mean *%1*. Should I go ahead?")
+                    : QStringLiteral("Похоже, ты хочешь *%1*. Запустить?"))
+                    .arg(intent.goalLabel);
+                sendMessage(chatId, question);
+                m_accessMgr->logActivity(chatId, QStringLiteral("intent_confirm"),
+                    intent.goalId + QStringLiteral(":") + QString::number(intent.confidence, 'f', 2));
+                return;
             }
         }
     }
