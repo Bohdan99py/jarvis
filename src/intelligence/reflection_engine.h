@@ -30,6 +30,7 @@
 
 class MemoryManager;
 class SocialPresenceEngine;
+class PersonalityEngine;
 
 // ── Emotion signal entry (top-level to avoid nested-struct moc issues) ──
 
@@ -47,7 +48,7 @@ struct EmotionTrend
     QString     dominant    = QStringLiteral("neutral");
     double      confidence  = 0.0;
     int         sampleCount = 0;
-    QStringList signals;
+    QStringList evidenceWords;  // "signals" is a Qt macro — never use it as an identifier
 };
 
 struct ProductivityPattern
@@ -119,6 +120,7 @@ public:
 
     void setMemoryManager(MemoryManager* mm);
     void setSocialPresence(SocialPresenceEngine* sp);
+    void setPersonalityEngine(PersonalityEngine* pe);
 
     void start(int checkIntervalMinutes = 30);
     void stop();
@@ -167,8 +169,9 @@ private:
 
     bool shouldReflect() const;
 
-    MemoryManager*        m_memory   = nullptr;
-    SocialPresenceEngine* m_presence = nullptr;
+    MemoryManager*        m_memory      = nullptr;
+    SocialPresenceEngine* m_presence    = nullptr;
+    PersonalityEngine*    m_personality = nullptr;
 
     QTimer* m_checkTimer = nullptr;
 

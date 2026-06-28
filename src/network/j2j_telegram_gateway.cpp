@@ -9,6 +9,7 @@
 #include "social_presence.h"
 #include "memory_manager.h"
 #include "reflection_engine.h"
+#include "personality_engine.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
@@ -272,17 +273,22 @@ void J2JTelegramGateway::initSocialPresence(qint64 targetChatId)
     m_socialPresence->setTargetChatId(targetChatId);
     m_socialPresence->setMemoryManager(&MemoryManager::instance());
 
+    // Initialize the personality evolution engine
+    auto* personality = new PersonalityEngine(this);
+    m_socialPresence->setPersonalityEngine(personality);
+
     // Initialize the autonomous reflection engine
     auto* reflection = new ReflectionEngine(this);
     reflection->setMemoryManager(&MemoryManager::instance());
     reflection->setSocialPresence(m_socialPresence);
+    reflection->setPersonalityEngine(personality);
     m_socialPresence->setReflectionEngine(reflection);
     reflection->start(30);
 
     m_socialPresence->start();
 
-    qDebug() << "[TelegramGW] Social Presence + Memory + Reflection initialized for chat"
-             << targetChatId;
+    qDebug() << "[TelegramGW] Social Presence + Memory + Reflection + Personality "
+                "initialized for chat" << targetChatId;
 }
 
 void J2JTelegramGateway::start()

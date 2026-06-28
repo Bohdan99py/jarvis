@@ -28,6 +28,7 @@
 class J2JTelegramGateway;
 class MemoryManager;
 class ReflectionEngine;
+class PersonalityEngine;
 
 // ── User availability state machine ─────────────────────────
 
@@ -55,6 +56,7 @@ public:
     void setTargetChatId(qint64 chatId);
     void setMemoryManager(MemoryManager* mm);
     void setReflectionEngine(ReflectionEngine* re);
+    void setPersonalityEngine(PersonalityEngine* pe);
 
     // Queue an external nudge (e.g., morning summary from ReflectionEngine)
     void queueExternalNudge(const QString& text);
@@ -100,10 +102,11 @@ private:
     // Adaptive interval calculation based on user response patterns
     int computeNudgeIntervalSec() const;
 
-    J2JTelegramGateway* m_gateway      = nullptr;
-    MemoryManager*      m_memoryMgr    = nullptr;
-    ReflectionEngine*   m_reflection   = nullptr;
-    QTimer*             m_nudgeTimer   = nullptr;
+    J2JTelegramGateway* m_gateway        = nullptr;
+    MemoryManager*      m_memoryMgr      = nullptr;
+    ReflectionEngine*   m_reflection     = nullptr;
+    PersonalityEngine*  m_personalityEng = nullptr;
+    QTimer*             m_nudgeTimer     = nullptr;
     qint64              m_targetChatId = 0;
 
     UserState           m_state;

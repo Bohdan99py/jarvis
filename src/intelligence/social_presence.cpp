@@ -6,6 +6,7 @@
 #include "j2j_telegram_gateway.h"
 #include "memory_manager.h"
 #include "reflection_engine.h"
+#include "personality_engine.h"
 
 #include <QRandomGenerator>
 #include <QDebug>
@@ -247,6 +248,11 @@ void SocialPresenceEngine::setReflectionEngine(ReflectionEngine* re)
     }
 }
 
+void SocialPresenceEngine::setPersonalityEngine(PersonalityEngine* pe)
+{
+    m_personalityEng = pe;
+}
+
 void SocialPresenceEngine::queueExternalNudge(const QString& text)
 {
     if (text.isEmpty()) return;
@@ -334,7 +340,13 @@ QString SocialPresenceEngine::processIncomingMessage(const QString& text)
     }
 
     // 1. Check for trolling/nonsense FIRST
-    if (detectTrolling(lower)) {
+    const bool isTroll = detectTrolling(lower);
+
+    // Feed per-message emotional signal to the personality engine
+    if (m_personalityEng)
+        m_personalityEng->onUserMessage(text, isTroll);
+
+    if (isTroll) {
         const QString sarcasm = pickSarcasticResponse();
         emit trollDetected(sarcasm);
         qDebug() << "[SocialPresence] Troll detected. Responding with sass.";
@@ -496,7 +508,31 @@ void SocialPresenceEngine::fireNudge()
     if (!m_gateway || m_targetChatId == 0) return;
 
     const QString question = pickNudgeQuestion();
-    QString message = QStringLiteral("🧠 ") + question;
+
+    // Build personality-modulated prefix based on current DNA
+    QString prefix = QStringLiteral("🧠 ");
+    if (m_personalityEng) {
+        const PersonalityVector pv = m_personalityEng->personality();
+        const EmotionalState es    = m_personalityEng->emotionalState();
+
+        // Sarcasm level modulates tone
+        if (pv.sarcasm_level > 0.7)
+            prefix = QStringLiteral("😏 ");
+        else if (pv.formalism > 0.7)
+            prefix = QStringLiteral("📋 ");
+
+        // Emotional colouring
+        if (es.frustration > 0.6)
+            prefix = QStringLiteral("😤 ");
+        else if (es.joy > 0.7)
+            prefix = QStringLiteral("😊 ");
+        else if (es.boredom > 0.6)
+            prefix = QStringLiteral("🥱 ");
+        else if (es.curiosity > 0.7)
+            prefix = QStringLiteral("🤔 ");
+    }
+
+    QString message = prefix + question;
 
     // Enrich nudge with semantic context from MemoryManager
     if (m_memoryMgr) {
@@ -506,7 +542,6 @@ void SocialPresenceEngine::fireNudge()
             message += context;
         }
 
-        // Store the nudge itself as a memory chunk
         m_memoryMgr->store(QStringLiteral("dialogue"),
                            QStringLiteral("JARVIS nudge: ") + question,
                            0.3);
@@ -609,6 +644,15 @@ int SocialPresenceEngine::computeNudgeIntervalSec() const
             // Declining focus trend — gentle increase in frequency
             interval = static_cast<int>(interval * 0.8);
         }
+    }
+
+    // Personality-driven proactivity scaling:
+    // High proactivity → shorter intervals; low → longer
+    if (m_personalityEng) {
+        const double proact = m_personalityEng->personality().proactivity;
+        // proactivity 0.0 → ×1.5, proactivity 1.0 → ×0.6
+        const double scale = 1.5 - proact * 0.9;
+        interval = static_cast<int>(interval * scale);
     }
 
     // Time-of-day adjustment: less frequent at night

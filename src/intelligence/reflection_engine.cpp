@@ -5,6 +5,7 @@
 #include "reflection_engine.h"
 #include "memory_manager.h"
 #include "social_presence.h"
+#include "personality_engine.h"
 #include "database_manager.h"
 #include "jarvis_paths.h"
 
@@ -65,7 +66,7 @@ QJsonObject UserSummary::toJson() const
     emo[QStringLiteral("confidence")]   = emotion.confidence;
     emo[QStringLiteral("sample_count")] = emotion.sampleCount;
     QJsonArray sigs;
-    for (const auto& s : emotion.signals)
+    for (const auto& s : emotion.evidenceWords)
         sigs.append(s);
     emo[QStringLiteral("signals")] = sigs;
     obj[QStringLiteral("emotion")] = emo;
@@ -193,6 +194,11 @@ void ReflectionEngine::setSocialPresence(SocialPresenceEngine* sp)
     m_presence = sp;
 }
 
+void ReflectionEngine::setPersonalityEngine(PersonalityEngine* pe)
+{
+    m_personality = pe;
+}
+
 // ============================================================
 //  Lifecycle
 // ============================================================
@@ -306,6 +312,20 @@ void ReflectionEngine::runReflectionCycle()
     if (m_memory)
         storeReflectionMemories(summary);
 
+    // Feed the personality evolution engine
+    if (m_personality) {
+        const double responseRate =
+            (summary.productivity.totalMessages > 0)
+                ? static_cast<double>(summary.productivity.questionCount)
+                  / summary.productivity.totalMessages
+                : 0.5;
+        m_personality->updateFromReflection(
+            summary.productivity.focusScore,
+            summary.behavior.goalOrientedness,
+            responseRate,
+            summary.productivity.totalMessages);
+    }
+
     const int today = QDate::currentDate().dayOfYear();
     if (m_lastReflectionDay != today) {
         m_lastReflectionDay = today;
@@ -377,8 +397,8 @@ EmotionTrend ReflectionEngine::analyzeEmotions(
         for (const auto& sig : emotionLexicon()) {
             if (lower.contains(sig.keyword)) {
                 scores[sig.emotion] += sig.weight;
-                if (result.signals.size() < 10)
-                    result.signals.append(sig.keyword);
+                if (result.evidenceWords.size() < 10)
+                    result.evidenceWords.append(sig.keyword);
             }
         }
     }
@@ -862,7 +882,7 @@ void ReflectionEngine::storeReflectionMemories(const UserSummary& summary)
             .arg(summary.emotion.dominant)
             .arg(summary.emotion.confidence, 0, 'f', 2)
             .arg(summary.emotion.sampleCount)
-            .arg(summary.emotion.signals.join(QStringLiteral(", "))),
+            .arg(summary.emotion.evidenceWords.join(QStringLiteral(", "))),
         0.6 + summary.emotion.confidence * 0.3);
 
     // Productivity
