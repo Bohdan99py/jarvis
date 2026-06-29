@@ -18,6 +18,8 @@ add_library(jarvis_platform OBJECT
     clipboard_watcher.cpp
     camera_agent.h
     camera_agent.cpp
+    security_camera.h
+    security_camera.cpp
 )
 
 target_include_directories(jarvis_platform PUBLIC

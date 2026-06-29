@@ -28,6 +28,7 @@ target_include_directories(jarvis_network PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../engine
     ${CMAKE_CURRENT_SOURCE_DIR}/../voice
     ${CMAKE_CURRENT_SOURCE_DIR}/../intelligence
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform
 )
 
 target_link_libraries(jarvis_network

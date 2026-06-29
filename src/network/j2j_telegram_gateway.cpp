@@ -12,6 +12,7 @@
 #include "reflection_engine.h"
 #include "personality_engine.h"
 #include "semantic_intent_manager.h"
+#include "security_camera.h"
 #include "layout_fixer.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
@@ -39,6 +40,7 @@
 #include <QBuffer>
 #include <QSvgRenderer>
 #include <QPainter>
+#include <QProcess>
 #include <QHttpMultiPart>
 #include <QHttpPart>
 #include <QUuid>
@@ -656,6 +658,45 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
         return;
     }
 
+    // ── 3.3. Natural-language security companion answers ───
+    if (session.awaitingCompanionAnswer) {
+        const QString lo = text.toLower().trimmed();
+        static const QStringList okWords = {
+            QStringLiteral("да"), QStringLiteral("ок"), QStringLiteral("окей"),
+            QStringLiteral("нормально"), QStringLiteral("yes"), QStringLiteral("ok"),
+            QStringLiteral("okay"), QStringLiteral("fine"), QStringLiteral("ладно"),
+            QStringLiteral("всё хорошо"), QStringLiteral("это я"), QStringLiteral("свой"),
+        };
+        static const QStringList noWords = {
+            QStringLiteral("нет"), QStringLiteral("no"), QStringLiteral("блокируй"),
+            QStringLiteral("lock"), QStringLiteral("заблокируй"), QStringLiteral("не ок"),
+        };
+        bool isOk = false, isNo = false;
+        for (const auto& w : okWords)  if (lo.contains(w)) { isOk = true; break; }
+        for (const auto& w : noWords)  if (lo.contains(w)) { isNo = true; break; }
+
+        if (isOk) {
+            session.awaitingCompanionAnswer = false;
+            auto* sec = m_dispatcher->findChild<SecurityCamera*>();
+            if (sec) sec->confirmCompanionOk(30);
+            sendMessage(chatId, session.isEnglish
+                ? QStringLiteral("👍 Got it. Alerts off for 30 min.")
+                : QStringLiteral("👍 Понял. Алерты выключены на 30 минут."));
+            return;
+        }
+        if (isNo) {
+            session.awaitingCompanionAnswer = false;
+            auto* sec = m_dispatcher->findChild<SecurityCamera*>();
+            if (sec) sec->lockScreen();
+            sendMessage(chatId, session.isEnglish
+                ? QStringLiteral("🔒 Screen locked!")
+                : QStringLiteral("🔒 Экран заблокирован!"));
+            return;
+        }
+        // Not a clear yes/no → clear the flag and let it flow to LLM
+        session.awaitingCompanionAnswer = false;
+    }
+
     // ── 3.5. Social Presence — availability tracking & troll detection ──
     // Auto-init on first message from the primary owner
     if (!m_socialPresence && m_accessMgr->isPrimaryOwner(chatId))
@@ -944,6 +985,81 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
 
     if (data == QStringLiteral("settings_back")) {
         sendMainMenu(chatId, en);
+        return;
+    }
+
+    // ── Security camera inline buttons ────────────────────
+    if (data == QStringLiteral("sec_companion_ok")) {
+        if (auto* disp = qobject_cast<CommandDispatcherTg*>(m_dispatcher)) {
+            Q_UNUSED(disp) // security is accessed via dispatcher
+        }
+        // Find security camera via dispatcher
+        auto* sec = m_dispatcher->findChild<SecurityCamera*>();
+        if (sec) sec->confirmCompanionOk(30);
+        sendMessage(chatId, en
+            ? QStringLiteral("👍 OK. Alerts suppressed for 30 min.")
+            : QStringLiteral("👍 Понял. Алерты отключены на 30 минут."));
+        return;
+    }
+    if (data == QStringLiteral("sec_companion_lock")) {
+        auto* sec = m_dispatcher->findChild<SecurityCamera*>();
+        if (sec) sec->lockScreen();
+        sendMessage(chatId, en
+            ? QStringLiteral("🔒 Screen locked!")
+            : QStringLiteral("🔒 Экран заблокирован!"));
+        return;
+    }
+    if (data == QStringLiteral("sec_screenshot")) {
+        DispatchResult dr = m_dispatcher->dispatch(chatId,
+            QStringLiteral("/screenshot"), en);
+        if (dr.handled) {
+            if (!dr.response.isEmpty()) sendMessage(chatId, dr.response);
+            if (!dr.imagePath.isEmpty()) sendImageToMobile(chatId, dr.imagePath, QString());
+        }
+        return;
+    }
+    if (data == QStringLiteral("sec_webcam")) {
+        m_dispatcher->dispatch(chatId, QStringLiteral("/webcam"), en);
+        return;
+    }
+    if (data == QStringLiteral("sec_lock")) {
+        auto* sec = m_dispatcher->findChild<SecurityCamera*>();
+        if (sec) sec->lockScreen();
+        sendMessage(chatId, QStringLiteral("🔒 Locked"));
+        return;
+    }
+    if (data == QStringLiteral("sec_shutdown")) {
+        sendMessage(chatId, en
+            ? QStringLiteral("⚡ Shutting down in 60 seconds...")
+            : QStringLiteral("⚡ Выключение через 60 секунд..."));
+        QProcess::startDetached(QStringLiteral("shutdown"), {QStringLiteral("/s"), QStringLiteral("/t"), QStringLiteral("60")});
+        return;
+    }
+    if (data == QStringLiteral("sec_panel")) {
+        // Send full control panel with buttons
+        QJsonArray rows;
+
+        QJsonArray row1;
+        row1.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("📸 Скриншот")},
+                                {QStringLiteral("callback_data"), QStringLiteral("sec_screenshot")}});
+        row1.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("📷 Камера")},
+                                {QStringLiteral("callback_data"), QStringLiteral("sec_webcam")}});
+        rows.append(row1);
+
+        QJsonArray row2;
+        row2.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("🔒 Заблокировать")},
+                                {QStringLiteral("callback_data"), QStringLiteral("sec_lock")}});
+        row2.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("⚡ Выключить ПК")},
+                                {QStringLiteral("callback_data"), QStringLiteral("sec_shutdown")}});
+        rows.append(row2);
+
+        QJsonObject markup;
+        markup[QStringLiteral("inline_keyboard")] = rows;
+
+        sendMessage(chatId,
+            en ? QStringLiteral("🎛 *Remote Control*")
+               : QStringLiteral("🎛 *Пульт управления*"),
+            markup);
         return;
     }
 
@@ -1730,6 +1846,17 @@ void J2JTelegramGateway::sendOutboundMessage(qint64 chatId, const QString& text)
     sendMessage(chatId, text);
 }
 
+void J2JTelegramGateway::sendOutboundWithButtons(qint64 chatId, const QString& text,
+                                                   const QJsonObject& replyMarkup)
+{
+    sendMessage(chatId, text, replyMarkup);
+}
+
+void J2JTelegramGateway::markAwaitingCompanionAnswer(qint64 chatId)
+{
+    getOrCreateSession(chatId).awaitingCompanionAnswer = true;
+}
+
 // ============================================================
 //  Outbound Image Delivery (Desktop → Telegram)
 // ============================================================
@@ -2485,8 +2612,12 @@ QJsonArray J2JTelegramGateway::buildMainMenuButtons(bool en)
     });
     rows.append(row2);
 
-    // Row 3: Help
+    // Row 3: Control Panel + Help
     QJsonArray row3;
+    row3.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("🎛 Control Panel") : QStringLiteral("🎛 Пульт")},
+        {QStringLiteral("callback_data"), QStringLiteral("sec_panel")}
+    });
     row3.append(QJsonObject{
         {QStringLiteral("text"), localized(TgStringId::BtnHelp, en)},
         {QStringLiteral("callback_data"), QStringLiteral("action_help")}

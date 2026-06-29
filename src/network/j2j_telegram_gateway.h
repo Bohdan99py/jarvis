@@ -94,6 +94,7 @@ struct TgChatSession {
     QaWizardStep  wizardStep = QaWizardStep::Idle;
     QaBugReport   pendingBug;
     bool          awaitingLlm = false; // true while LLM is generating
+    bool          awaitingCompanionAnswer = false; // waiting for ok/no re: security
 };
 
 // ── Gateway class ────────────────────────────────────────────
@@ -137,6 +138,13 @@ public:
 
     // Outbound message delivery (proactive pings, reminders, curiosity prompts)
     void sendOutboundMessage(qint64 chatId, const QString& text);
+
+    // Send message with inline keyboard buttons
+    void sendOutboundWithButtons(qint64 chatId, const QString& text,
+                                 const QJsonObject& replyMarkup);
+
+    // Mark a chat as waiting for a companion answer (да/нет/ок)
+    void markAwaitingCompanionAnswer(qint64 chatId);
 
     // Outbound media delivery to mobile
     void sendImageToMobile(qint64 chatId, const QString& filePath,

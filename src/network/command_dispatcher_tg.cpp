@@ -6,6 +6,7 @@
 #include "j2j_telegram_gateway.h"
 #include "telegram_access_manager.h"
 #include "camera_agent.h"
+#include "security_camera.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
 #include "voice_synthesis_manager.h"
@@ -45,6 +46,7 @@ CommandDispatcherTg::CommandDispatcherTg(J2JTelegramGateway* gateway,
     , m_gourmet(new GourmetModule(this))
     , m_mediaAnalyzer(new MediaAnalyzerModule(this))
     , m_camera(new CameraAgent(this))
+    , m_security(new SecurityCamera(this))
     , m_startTime(QDateTime::currentDateTime())
 {
     qDebug() << "[CommandDispatcher] Initialized with"
@@ -106,6 +108,32 @@ DispatchResult CommandDispatcherTg::dispatch(qint64 chatId,
 
     if (cmd == QStringLiteral("/surveillance") || cmd == QStringLiteral("/watch"))
         return cmdSurveillance(chatId, args, english);
+
+    if (cmd == QStringLiteral("/security") || cmd == QStringLiteral("/guard"))
+        return cmdSecurity(chatId, args, english);
+
+    if (cmd == QStringLiteral("/enroll_face"))
+        return cmdEnrollFace(chatId, english);
+
+    if (cmd == QStringLiteral("/companion_ok")) {
+        m_security->confirmCompanionOk(30);
+        DispatchResult r;
+        r.handled = true;
+        r.response = english
+            ? QStringLiteral("👍 Got it. Alerts suppressed for 30 minutes.")
+            : QStringLiteral("👍 Понял. Алерты отключены на 30 минут.");
+        return r;
+    }
+
+    if (cmd == QStringLiteral("/companion_no")) {
+        m_security->lockScreen();
+        DispatchResult r;
+        r.handled = true;
+        r.response = english
+            ? QStringLiteral("🔒 Screen locked immediately.")
+            : QStringLiteral("🔒 Экран заблокирован.");
+        return r;
+    }
 
     return {};  // not handled
 }
@@ -693,5 +721,186 @@ DispatchResult CommandDispatcherTg::cmdSurveillance(qint64 chatId,
 
     qDebug() << "[CommandDispatcher] Surveillance started for chat" << chatId
              << "interval:" << interval << "webcam:" << webcam << "desktop:" << desktop;
+    return r;
+}
+
+// ============================================================
+//  /security — start/stop security monitoring
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdSecurity(qint64 chatId,
+                                                 const QString& args,
+                                                 bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    const QString lo = args.toLower().trimmed();
+
+    if (lo.contains(QStringLiteral("stop")) || lo.contains(QStringLiteral("off"))
+        || lo.contains(QStringLiteral("стоп")) || lo.contains(QStringLiteral("выкл"))) {
+        m_security->stopMonitoring();
+        r.response = english
+            ? QStringLiteral("🛡 Security monitoring stopped.")
+            : QStringLiteral("🛡 Охрана отключена.");
+        return r;
+    }
+
+    if (lo.contains(QStringLiteral("status")) || lo.contains(QStringLiteral("статус"))) {
+        r.response = english
+            ? QStringLiteral("🛡 *Security Status*\n"
+                              "Monitoring: %1\n"
+                              "Owner enrolled: %2\n"
+                              "Auto-lock on threat: ON")
+                .arg(m_security->isMonitoring() ? QStringLiteral("ACTIVE") : QStringLiteral("OFF"))
+                .arg(m_security->isOwnerEnrolled() ? QStringLiteral("YES") : QStringLiteral("NO"))
+            : QStringLiteral("🛡 *Статус безопасности*\n"
+                              "Мониторинг: %1\n"
+                              "Владелец распознан: %2\n"
+                              "Авто-блокировка: ВКЛ")
+                .arg(m_security->isMonitoring() ? QStringLiteral("АКТИВЕН") : QStringLiteral("ВЫКЛ"))
+                .arg(m_security->isOwnerEnrolled() ? QStringLiteral("ДА") : QStringLiteral("НЕТ"));
+        return r;
+    }
+
+    // Parse interval
+    int interval = 5;
+    static const QRegularExpression numRx(QStringLiteral("(\\d+)"));
+    auto m = numRx.match(args);
+    if (m.hasMatch()) interval = qBound(3, m.captured(1).toInt(), 60);
+
+    // Connect security alerts to Telegram
+    connect(m_security, &SecurityCamera::unknownFaceDetected, this,
+            [this, chatId](const QImage& frame, int count) {
+        const QString dir = J2JTelegramGateway::workspaceOutputDir();
+        const QString path = dir + QStringLiteral("/alert_unknown_%1.jpg")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+        frame.save(path, "JPEG", 90);
+        m_gateway->sendImageToMobile(chatId, path,
+            QStringLiteral("🚨 UNKNOWN FACE (%1) — screen locked!").arg(count));
+    }, Qt::UniqueConnection);
+
+    // Soft alert: owner present but someone else is looking.
+    // Send photo + inline buttons (no commands to memorize).
+    connect(m_security, &SecurityCamera::companionNotice, this,
+            [this, chatId](const QImage& frame, int totalFaces) {
+        const QString dir = J2JTelegramGateway::workspaceOutputDir();
+        const QString path = dir + QStringLiteral("/companion_%1.jpg")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+        frame.save(path, "JPEG", 85);
+
+        const int others = totalFaces - 1;
+        m_gateway->sendImageToMobile(chatId, path,
+            QStringLiteral("👀 %1 person(s) near your screen").arg(others));
+
+        // Send inline keyboard: OK / Lock
+        QJsonArray row;
+        row.append(QJsonObject{
+            {QStringLiteral("text"), QStringLiteral("✅ Всё ОК")},
+            {QStringLiteral("callback_data"), QStringLiteral("sec_companion_ok")}
+        });
+        row.append(QJsonObject{
+            {QStringLiteral("text"), QStringLiteral("🔒 Заблокировать!")},
+            {QStringLiteral("callback_data"), QStringLiteral("sec_companion_lock")}
+        });
+        QJsonArray rows;
+        rows.append(row);
+        QJsonObject markup;
+        markup[QStringLiteral("inline_keyboard")] = rows;
+
+        m_gateway->sendOutboundWithButtons(chatId,
+            QStringLiteral("Это нормально?"), markup);
+
+        // Set flag so natural language "да"/"ок"/"нет" works as answer
+        m_gateway->markAwaitingCompanionAnswer(chatId);
+    }, Qt::UniqueConnection);
+
+    // Owner absent auto-lock notification
+    connect(m_security, &SecurityCamera::ownerAbsent, this,
+            [this, chatId](const QImage& frame) {
+        const QString dir = J2JTelegramGateway::workspaceOutputDir();
+        const QString path = dir + QStringLiteral("/absent_%1.jpg")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+        frame.save(path, "JPEG", 75);
+        m_gateway->sendImageToMobile(chatId, path,
+            QStringLiteral("🔒 You left — screen auto-locked"));
+    }, Qt::UniqueConnection);
+
+    connect(m_security, &SecurityCamera::motionDetected, this,
+            [this, chatId](const QImage& frame) {
+        const QString dir = J2JTelegramGateway::workspaceOutputDir();
+        const QString path = dir + QStringLiteral("/alert_motion_%1.jpg")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+        frame.save(path, "JPEG", 75);
+        m_gateway->sendImageToMobile(chatId, path,
+            QStringLiteral("🔔 Motion detected"));
+    }, Qt::UniqueConnection);
+
+    connect(m_security, &SecurityCamera::alertMessage, this,
+            [this, chatId](const QString& text) {
+        m_gateway->sendOutboundMessage(chatId, text);
+    }, Qt::UniqueConnection);
+
+    m_security->startMonitoring(interval);
+
+    r.response = english
+        ? QStringLiteral("🛡 *Security armed.* Check every %1s.\n"
+                          "Owner enrolled: %2\n"
+                          "• Unknown face → photo + lock\n"
+                          "• Shoulder surfing → photo + lock\n"
+                          "• Motion → photo alert\n\n"
+                          "Use `/security stop` to disarm.\n"
+                          "Use `/enroll_face` to train owner recognition.")
+            .arg(interval)
+            .arg(m_security->isOwnerEnrolled() ? QStringLiteral("YES") : QStringLiteral("NO — use /enroll_face"))
+        : QStringLiteral("🛡 *Охрана включена.* Проверка каждые %1с.\n"
+                          "Владелец обучен: %2\n"
+                          "• Чужое лицо → фото + блокировка\n"
+                          "• Подглядывание → фото + блокировка\n"
+                          "• Движение → фото-алерт\n\n"
+                          "Отключить: `/security stop`\n"
+                          "Обучить лицо: `/enroll_face`")
+            .arg(interval)
+            .arg(m_security->isOwnerEnrolled() ? QStringLiteral("ДА") : QStringLiteral("НЕТ — используйте /enroll_face"));
+
+    return r;
+}
+
+// ============================================================
+//  /enroll_face — train owner face recognition
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdEnrollFace(qint64 chatId, bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    r.response = english
+        ? QStringLiteral("📸 Starting face enrollment. Look at the webcam...\n"
+                          "Capturing 10 samples (hold still, vary angle slightly).")
+        : QStringLiteral("📸 Начинаю обучение лица. Смотрите в камеру...\n"
+                          "Захватываю 10 образцов (не двигайтесь, слегка меняйте угол).");
+
+    connect(m_security, &SecurityCamera::enrollmentProgress, this,
+            [this, chatId, english](int current, int total) {
+        m_gateway->sendOutboundMessage(chatId,
+            (english ? QStringLiteral("📸 Sample %1/%2") : QStringLiteral("📸 Образец %1/%2"))
+                .arg(current).arg(total));
+    }, Qt::UniqueConnection);
+
+    connect(m_security, &SecurityCamera::enrollmentComplete, this,
+            [this, chatId, english](int samples) {
+        m_gateway->sendOutboundMessage(chatId,
+            english ? QStringLiteral("✅ Face enrolled! %1 samples captured.\n"
+                                      "Security can now distinguish you from strangers.").arg(samples)
+                    : QStringLiteral("✅ Лицо обучено! %1 образцов.\n"
+                                      "Теперь охрана отличает вас от посторонних.").arg(samples));
+    }, Qt::UniqueConnection);
+
+    // Run enrollment async
+    QTimer::singleShot(500, m_security, [this]() {
+        m_security->enrollOwnerFace(10);
+    });
+
     return r;
 }

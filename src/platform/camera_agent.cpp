@@ -116,7 +116,7 @@ void CameraAgent::captureWebcam()
         // Camera still warming up — retry after delay
         QTimer::singleShot(600, this, [this]() {
             if (m_capture && m_capture->isReadyForCapture())
-                m_capture->captureToBuffer();
+                m_capture->capture();
             else
                 emit captureError(QStringLiteral("Camera not ready"));
         });
@@ -124,7 +124,7 @@ void CameraAgent::captureWebcam()
     }
 
     if (m_capture->isReadyForCapture())
-        m_capture->captureToBuffer();
+        m_capture->capture();
     else
         emit captureError(QStringLiteral("Camera not ready for capture"));
 }
@@ -197,6 +197,6 @@ void CameraAgent::onSurveillanceTick()
             disconnect(*conn);
             emit surveillanceFrame(img, QStringLiteral("webcam"));
         });
-        m_capture->captureToBuffer();
+        m_capture->capture();
     }
 }
