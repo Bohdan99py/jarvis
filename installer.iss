@@ -53,7 +53,7 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "desktopicon"; \
   Description: "{cm:CreateDesktopIcon}"; \
   GroupDescription: "{cm:AdditionalIcons}"; \
-  Flags: checked
+  Flags: checkedonce
 
 Name: "autostart"; \
   Description: "Launch J.A.R.V.I.S. on Windows startup"; \
