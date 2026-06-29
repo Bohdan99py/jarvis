@@ -8,6 +8,7 @@
 #include <QProcess>
 #include <QTemporaryFile>
 #include <QDir>
+#include <QFileInfo>
 #include <QUuid>
 #include <QPainter>
 #include <QFont>
@@ -79,23 +80,27 @@ MermaidRenderResult MermaidRenderer::render(const QString& mermaidSource,
                                              const QString& outputName)
 {
     if (mermaidSource.trimmed().isEmpty())
-        return {false, {}, {}, QStringLiteral("Empty Mermaid source")};
+        return {false, {}, {}, {}, mermaidSource, QStringLiteral("Empty Mermaid source")};
 
-    const QString name = outputName.isEmpty()
-        ? QStringLiteral("diagram_%1.png")
+    const QString baseName = outputName.isEmpty()
+        ? QStringLiteral("diagram_%1")
               .arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(8))
-        : outputName;
+        : QFileInfo(outputName).completeBaseName();
 
-    const QString outPath = outputDir() + QStringLiteral("/") + name;
     QDir().mkpath(outputDir());
 
     MermaidRenderResult result;
 
-    if (isMmdcAvailable())
-        result = renderViaMmdc(mermaidSource, outPath);
-    else
-        result = renderFallbackPlaceholder(mermaidSource, outPath);
+    if (isMmdcAvailable()) {
+        // Prefer SVG output for vector quality
+        const QString svgPath = outputDir() + QStringLiteral("/") + baseName + QStringLiteral(".svg");
+        result = renderViaMmdc(mermaidSource, svgPath);
+    } else {
+        const QString pngPath = outputDir() + QStringLiteral("/") + baseName + QStringLiteral(".png");
+        result = renderFallbackPlaceholder(mermaidSource, pngPath);
+    }
 
+    result.mermaidSource = mermaidSource;
     return result;
 }
 
@@ -121,12 +126,11 @@ void MermaidRenderer::renderAsync(const QString& mermaidSource,
 MermaidRenderResult MermaidRenderer::renderViaMmdc(const QString& source,
                                                      const QString& outPath)
 {
-    // Write Mermaid source to a temp .mmd file
     QTemporaryFile tmpFile;
     tmpFile.setAutoRemove(true);
     tmpFile.setFileTemplate(QDir::tempPath() + QStringLiteral("/jarvis_mermaid_XXXXXX.mmd"));
     if (!tmpFile.open()) {
-        return {false, {}, {},
+        return {false, {}, {}, {}, source,
                 QStringLiteral("Failed to create temp file: %1")
                     .arg(tmpFile.errorString())};
     }
@@ -140,37 +144,200 @@ MermaidRenderResult MermaidRenderer::renderViaMmdc(const QString& source,
         QStringLiteral("-o"), outPath,
         QStringLiteral("-b"), QStringLiteral("transparent"),
         QStringLiteral("-t"), QStringLiteral("dark"),
-        QStringLiteral("-w"), QStringLiteral("1024"),
     });
 
     if (!mmdc.waitForStarted(5000)) {
-        return {false, {}, {},
+        return {false, {}, {}, {}, source,
                 QStringLiteral("mmdc failed to start: %1")
                     .arg(mmdc.errorString())};
     }
 
     if (!mmdc.waitForFinished(RENDER_TIMEOUT_MS)) {
         mmdc.kill();
-        return {false, {}, {}, QStringLiteral("mmdc timed out")};
+        return {false, {}, {}, {}, source, QStringLiteral("mmdc timed out")};
     }
 
     if (mmdc.exitCode() != 0) {
         const QString err = QString::fromUtf8(mmdc.readAll());
         qWarning() << "[MermaidRenderer] mmdc error:" << err;
-        return {false, {}, {},
+        return {false, {}, {}, {}, source,
                 QStringLiteral("mmdc exit %1: %2")
                     .arg(mmdc.exitCode()).arg(err.left(200))};
     }
 
-    QImage img(outPath);
-    if (img.isNull()) {
-        return {false, outPath, {},
-                QStringLiteral("mmdc produced unreadable output")};
+    // Read the SVG file
+    QFile svgFile(outPath);
+    if (svgFile.open(QIODevice::ReadOnly)) {
+        QByteArray svgContent = svgFile.readAll();
+        svgFile.close();
+
+        if (!svgContent.isEmpty()) {
+            qDebug() << "[MermaidRenderer] SVG rendered via mmdc:" << outPath
+                     << "size:" << svgContent.size() << "bytes";
+            return {true, outPath, {}, svgContent, source, {}};
+        }
     }
 
-    qDebug() << "[MermaidRenderer] Rendered via mmdc:" << outPath
+    // SVG read failed — try loading as raster image fallback
+    QImage img(outPath);
+    if (!img.isNull()) {
+        qDebug() << "[MermaidRenderer] Raster rendered via mmdc:" << outPath;
+        return {true, outPath, img, {}, source, {}};
+    }
+
+    return {false, outPath, {}, {}, source,
+            QStringLiteral("mmdc produced unreadable output")};
+}
+
+// ============================================================
+//  ASCII diagram detection + extraction
+// ============================================================
+
+bool MermaidRenderer::containsAsciiDiagram(const QString& text)
+{
+    // Look for code blocks that contain box-drawing or arrow characters
+    static const QRegularExpression codeBlockRe(
+        QStringLiteral("```[^`]*```"),
+        QRegularExpression::DotMatchesEverythingOption);
+
+    auto it = codeBlockRe.globalMatch(text);
+    while (it.hasNext()) {
+        const QString block = it.next().captured(0);
+        int indicators = 0;
+        if (block.contains(QStringLiteral("──")))    ++indicators;
+        if (block.contains(QStringLiteral("│")))      ++indicators;
+        if (block.contains(QStringLiteral("┌")))      ++indicators;
+        if (block.contains(QStringLiteral("└")))      ++indicators;
+        if (block.contains(QStringLiteral("─>")))     ++indicators;
+        if (block.contains(QStringLiteral("<─")))     ++indicators;
+        if (block.contains(QStringLiteral("→")))      ++indicators;
+        if (block.contains(QStringLiteral("←")))      ++indicators;
+        if (block.contains(QStringLiteral("|")))      ++indicators;
+        if (block.contains(QStringLiteral("---")))    ++indicators;
+        if (block.contains(QStringLiteral("===")))    ++indicators;
+        if (block.contains(QStringLiteral("+-")))     ++indicators;
+        if (indicators >= 3) return true;
+    }
+    return false;
+}
+
+QPair<QString, QString> MermaidRenderer::extractAsciiDiagram(const QString& text)
+{
+    // Find the longest code block that looks like a diagram
+    static const QRegularExpression codeBlockRe(
+        QStringLiteral("```(?:\\w*\\n)?([^`]+)```"),
+        QRegularExpression::DotMatchesEverythingOption);
+
+    QString bestBlock;
+    int bestScore = 0;
+    QRegularExpressionMatch bestMatch;
+
+    auto it = codeBlockRe.globalMatch(text);
+    while (it.hasNext()) {
+        auto match = it.next();
+        const QString content = match.captured(1);
+        int score = 0;
+        if (content.contains(QStringLiteral("──")))  score += 2;
+        if (content.contains(QStringLiteral("│")))    score += 2;
+        if (content.contains(QStringLiteral("→")))    score += 2;
+        if (content.contains(QStringLiteral("←")))    score += 2;
+        if (content.contains(QStringLiteral("─>")))   score += 2;
+        if (content.contains(QStringLiteral("|")))    ++score;
+        if (content.contains(QStringLiteral("---")))  ++score;
+        score += content.length() / 100;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestBlock = content;
+            bestMatch = match;
+        }
+    }
+
+    if (bestBlock.isEmpty())
+        return {QString(), text};
+
+    // Build the remaining text with the diagram block removed
+    QString remaining = text;
+    remaining.replace(bestMatch.captured(0), QString());
+    remaining = remaining.trimmed();
+
+    return {bestBlock, remaining};
+}
+
+// ============================================================
+//  Render ASCII art as styled PNG
+// ============================================================
+
+MermaidRenderResult MermaidRenderer::renderAsciiArt(const QString& asciiText,
+                                                     const QString& outputName)
+{
+    if (asciiText.trimmed().isEmpty())
+        return {false, {}, {}, {}, {}, QStringLiteral("Empty ASCII art")};
+
+    const QString name = outputName.isEmpty()
+        ? QStringLiteral("ascii_diagram_%1.png")
+              .arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(8))
+        : outputName;
+
+    const QString outPath = outputDir() + QStringLiteral("/") + name;
+    QDir().mkpath(outputDir());
+
+    const QFont monoFont(QStringLiteral("Consolas"), 13);
+    const QFontMetrics fm(monoFont);
+
+    const QStringList lines = asciiText.split(QLatin1Char('\n'));
+    const int lineHeight = fm.lineSpacing();
+
+    int maxWidth = 0;
+    for (const QString& line : lines)
+        maxWidth = qMax(maxWidth, fm.horizontalAdvance(line));
+
+    const int pad = 32;
+    const int headerH = 40;
+    const int imgWidth  = maxWidth + pad * 2;
+    const int imgHeight = headerH + lines.size() * lineHeight + pad * 2;
+
+    QImage img(qMax(imgWidth, 400), qMax(imgHeight, 200),
+               QImage::Format_ARGB32_Premultiplied);
+    img.fill(QColor(8, 10, 18));
+
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::TextAntialiasing);
+
+    // Border
+    p.setPen(QPen(QColor(0, 212, 255, 50), 2));
+    p.drawRoundedRect(4, 4, img.width() - 8, img.height() - 8, 10, 10);
+
+    // Header
+    p.setFont(QFont(QStringLiteral("Segoe UI"), 12, QFont::Bold));
+    p.setPen(QColor(0, 212, 255));
+    p.drawText(pad, pad - 4, QStringLiteral("J.A.R.V.I.S. — Diagram"));
+
+    // Separator
+    p.setPen(QPen(QColor(0, 212, 255, 40), 1));
+    p.drawLine(pad, headerH + 4, img.width() - pad, headerH + 4);
+
+    // Diagram text
+    p.setFont(monoFont);
+    p.setPen(QColor(102, 252, 241)); // cyan for structural characters
+
+    int y = headerH + pad;
+    for (const QString& line : lines) {
+        p.drawText(pad, y + fm.ascent(), line);
+        y += lineHeight;
+    }
+
+    p.end();
+
+    if (!img.save(outPath, "PNG")) {
+        return {false, {}, {}, {}, {},
+                QStringLiteral("Failed to save ASCII diagram PNG")};
+    }
+
+    qDebug() << "[MermaidRenderer] ASCII art rendered:" << outPath
              << img.size();
-    return {true, outPath, img, {}};
+    return {true, outPath, img, {}, {}, {}};
 }
 
 // ============================================================
@@ -236,10 +403,10 @@ MermaidRenderResult MermaidRenderer::renderFallbackPlaceholder(
     p.end();
 
     if (!img.save(outPath, "PNG")) {
-        return {false, {}, {},
+        return {false, {}, {}, {}, source,
                 QStringLiteral("Failed to save fallback PNG")};
     }
 
     qDebug() << "[MermaidRenderer] Fallback placeholder:" << outPath;
-    return {true, outPath, img, {}};
+    return {true, outPath, img, {}, source, {}};
 }

@@ -74,6 +74,7 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets Network Sql Concurrent Multimedia MultimediaWidgets
+    Svg SvgWidgets WebEngineWidgets
 )
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
@@ -178,6 +179,9 @@ target_link_libraries(JarvisCore PUBLIC
     Qt6::Concurrent
     Qt6::Multimedia
     Qt6::MultimediaWidgets
+    Qt6::Svg
+    Qt6::SvgWidgets
+    Qt6::WebEngineWidgets
 )
 
 target_link_libraries(JarvisCore PRIVATE

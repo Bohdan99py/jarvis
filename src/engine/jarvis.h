@@ -11,6 +11,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QImage>
 #include <QMutex>
 #include <windows.h>
 #include <objbase.h>
@@ -68,6 +69,24 @@ public:
 
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
+
+    // Diagram rendering — shared between GUI and Telegram paths.
+    // Checks if an LLM response contains a diagram (<diagram> tags
+    // or ASCII art in code blocks), renders it to a QImage, and
+    // returns the cleaned text separately.
+    struct DiagramResult {
+        bool       hasDiagram = false;
+        QImage     image;             // raster fallback
+        QByteArray svgData;           // preferred: vector SVG content
+        QString    mermaidSource;     // original source for interactive parsing
+        QString    textWithoutDiagram;
+    };
+    static DiagramResult tryRenderDiagram(const QString& llmResponse);
+
+    // Returns true if the user query looks like a request for a
+    // visual diagram/schema. Used to inject Mermaid instructions
+    // into the LLM system prompt.
+    static bool needsVisualExplanation(const QString& input);
 
     KeyEmulator*        keyEmulator()        const { return m_keyEmulator; }
     SessionMemory*      memory()             const { return m_memory; }
@@ -134,6 +153,7 @@ signals:
     void agentSelected(const QString& agentName);
     void ideOpened(const QString& message);   // JARVIS открыл проект в IDE
     void meshEvent(const QString& message);  // J2J mesh network event
+    void diagramRendered(const QImage& image); // diagram extracted and rendered from LLM response
 
 private:
     void registerCommands();

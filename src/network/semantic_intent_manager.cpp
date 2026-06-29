@@ -283,11 +283,24 @@ bool SemanticIntentManager::isConversational(const IntentMatch& match)
 bool SemanticIntentManager::needsVisualExplanation(const QString& text)
 {
     const QString lower = text.toLower();
-    static const QStringList visualKeywords = {
+
+    // Strong standalone triggers — always enough on their own
+    static const QStringList strongTriggers = {
+        QStringLiteral("нарисуй"),     QStringLiteral("draw"),
+        QStringLiteral("visualize"),   QStringLiteral("diagram"),
+        QStringLiteral("диаграмм"),    QStringLiteral("покажи схем"),
+        QStringLiteral("рокажи схем"), // common typo: р instead of п
+        QStringLiteral("покажи граф"), QStringLiteral("нарисуй граф"),
+    };
+    for (const auto& t : strongTriggers) {
+        if (lower.contains(t)) return true;
+    }
+
+    // Structural keywords — need a verb to confirm visual intent
+    static const QStringList structureKeywords = {
         QStringLiteral("architecture"), QStringLiteral("архитектур"),
         QStringLiteral("flow"),         QStringLiteral("поток"),
         QStringLiteral("structure"),    QStringLiteral("структур"),
-        QStringLiteral("diagram"),      QStringLiteral("диаграмм"),
         QStringLiteral("schema"),       QStringLiteral("схем"),
         QStringLiteral("pipeline"),     QStringLiteral("пайплайн"),
         QStringLiteral("sequence"),     QStringLiteral("последовательност"),
@@ -295,34 +308,29 @@ bool SemanticIntentManager::needsVisualExplanation(const QString& text)
         QStringLiteral("hierarchy"),    QStringLiteral("иерарх"),
         QStringLiteral("memory model"), QStringLiteral("модель памяти"),
         QStringLiteral("class diagram"),QStringLiteral("граф"),
-        QStringLiteral("покажи схему"), QStringLiteral("нарисуй"),
-        QStringLiteral("draw"),         QStringLiteral("visualize"),
     };
 
+    // "схем" alone is strong enough — user rarely says "схема" without wanting a visual
+    if (lower.contains(QStringLiteral("схем")))
+        return true;
+
     static const QStringList visualVerbs = {
-        QStringLiteral("explain"),  QStringLiteral("show"),
-        QStringLiteral("describe"), QStringLiteral("объясни"),
-        QStringLiteral("покажи"),   QStringLiteral("расскажи"),
-        QStringLiteral("опиши"),    QStringLiteral("how does"),
-        QStringLiteral("как работает"), QStringLiteral("как устроен"),
+        QStringLiteral("explain"),     QStringLiteral("show"),
+        QStringLiteral("describe"),    QStringLiteral("объясни"),
+        QStringLiteral("покажи"),      QStringLiteral("рокажи"), // typo
+        QStringLiteral("расскажи"),    QStringLiteral("опиши"),
+        QStringLiteral("how does"),    QStringLiteral("как работает"),
+        QStringLiteral("как устроен"),
     };
 
     bool hasKeyword = false;
     bool hasVerb = false;
-
-    for (const auto& kw : visualKeywords) {
+    for (const auto& kw : structureKeywords) {
         if (lower.contains(kw)) { hasKeyword = true; break; }
     }
     for (const auto& v : visualVerbs) {
         if (lower.contains(v)) { hasVerb = true; break; }
     }
-
-    // "нарисуй" / "draw" / "visualize" alone are strong enough
-    if (lower.contains(QStringLiteral("нарисуй"))
-        || lower.contains(QStringLiteral("draw"))
-        || lower.contains(QStringLiteral("visualize"))
-        || lower.contains(QStringLiteral("diagram")))
-        return true;
 
     return hasKeyword && hasVerb;
 }

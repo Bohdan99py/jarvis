@@ -33,5 +33,5 @@ target_include_directories(jarvis_network PRIVATE
 target_link_libraries(jarvis_network
     PUBLIC  jarvis_common Qt6::Core Qt6::Network
     PRIVATE jarvis_db jarvis_media jarvis_modules
-            Qt6::Widgets Qt6::Gui Qt6::Sql Qt6::Concurrent
+            Qt6::Widgets Qt6::Gui Qt6::Sql Qt6::Concurrent Qt6::Svg
 )

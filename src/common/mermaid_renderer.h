@@ -12,13 +12,16 @@
 
 #include <QObject>
 #include <QString>
+#include <QPair>
 #include <QImage>
 
 struct MermaidRenderResult
 {
     bool    success = false;
-    QString pngPath;           // absolute path to rendered PNG
-    QImage  image;             // loaded QImage (empty on failure)
+    QString outputPath;        // absolute path to rendered file
+    QImage  image;             // raster fallback (empty when SVG available)
+    QByteArray svgData;        // raw SVG content (preferred over raster)
+    QString mermaidSource;     // original Mermaid syntax for node parsing
     QString errorMessage;
 };
 
@@ -46,6 +49,17 @@ public:
 
     // Remove <diagram>...</diagram> from text, return remaining text
     static QString stripDiagramBlock(const QString& text);
+
+    // Detect if text contains a code block with ASCII art (box-drawing, arrows).
+    // Used as a fallback when LLM ignores the <diagram> instruction.
+    static bool containsAsciiDiagram(const QString& text);
+
+    // Extract the ASCII art code block content, return the rest as second element.
+    static QPair<QString, QString> extractAsciiDiagram(const QString& text);
+
+    // Render plain text (ASCII art) as a styled PNG image.
+    MermaidRenderResult renderAsciiArt(const QString& asciiText,
+                                       const QString& outputName = QString());
 
     static constexpr int RENDER_TIMEOUT_MS = 15000;
 

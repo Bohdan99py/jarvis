@@ -36,6 +36,8 @@
 #include "self_journal.h"
 #include "user_profile_extended.h"
 #include "self_update_reflector.h"
+#include "mermaid_renderer.h"
+#include "semantic_intent_manager.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -537,6 +539,57 @@ WORD Jarvis::parseVirtualKey(const QString& name)
 
 // ============================================================
 // Детектор кодинг-интента
+// ============================================================
+
+// ============================================================
+//  Diagram Rendering — shared core logic for all UI paths
+// ============================================================
+
+bool Jarvis::needsVisualExplanation(const QString& input)
+{
+    return SemanticIntentManager::needsVisualExplanation(input);
+}
+
+Jarvis::DiagramResult Jarvis::tryRenderDiagram(const QString& llmResponse)
+{
+    DiagramResult dr;
+
+    // Path 1: LLM obeyed the instruction and used <diagram> tags
+    const QString mermaidSource = MermaidRenderer::extractDiagramBlock(llmResponse);
+    if (!mermaidSource.isEmpty()) {
+        dr.textWithoutDiagram = MermaidRenderer::stripDiagramBlock(llmResponse);
+
+        MermaidRenderer renderer;
+        MermaidRenderResult rr = renderer.render(mermaidSource);
+        if (rr.success) {
+            dr.hasDiagram     = true;
+            dr.svgData        = rr.svgData;
+            dr.image          = rr.image;
+            dr.mermaidSource  = rr.mermaidSource;
+        }
+        return dr;
+    }
+
+    // Path 2: LLM produced ASCII art in a code block
+    if (MermaidRenderer::containsAsciiDiagram(llmResponse)) {
+        const auto [asciiArt, textPart] = MermaidRenderer::extractAsciiDiagram(llmResponse);
+        if (!asciiArt.isEmpty()) {
+            dr.textWithoutDiagram = textPart;
+
+            MermaidRenderer renderer;
+            MermaidRenderResult rr = renderer.renderAsciiArt(asciiArt);
+            if (rr.success && !rr.image.isNull()) {
+                dr.hasDiagram = true;
+                dr.image      = rr.image;
+            }
+            return dr;
+        }
+    }
+
+    // Path 3: no diagram detected
+    return dr;
+}
+
 // ============================================================
 
 bool Jarvis::isCodingIntent(const QString& input)
@@ -1650,6 +1703,25 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             prefix += QStringLiteral("[LANG_INSTRUCTION: ")
                     + langInstruction
                     + QStringLiteral("]\n\n");
+        }
+
+        // Visual diagram instruction — applied globally for all UI paths
+        if (needsVisualExplanation(s)) {
+            prefix += QStringLiteral(
+                "[CRITICAL DIAGRAM INSTRUCTION: The user wants a VISUAL diagram. "
+                "You MUST include a Mermaid diagram wrapped in <diagram>...</diagram> tags. "
+                "Do NOT use ASCII art. Do NOT use code blocks with box-drawing characters. "
+                "Use proper Mermaid syntax ONLY. Example:\n"
+                "<diagram>\n"
+                "sequenceDiagram\n"
+                "    Client A->>Gateway: SYN\n"
+                "    Gateway->>Client B: hole punch\n"
+                "    Client B-->>Client A: direct P2P\n"
+                "</diagram>\n"
+                "Supported types: graph TD, graph LR, sequenceDiagram, classDiagram, "
+                "flowchart, stateDiagram-v2. "
+                "Put ALL explanatory text OUTSIDE the <diagram> tags. "
+                "The diagram content will be rendered as a PNG image.]\n\n");
         }
 
         if (!prefix.isEmpty()) {

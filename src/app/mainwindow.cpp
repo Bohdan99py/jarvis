@@ -1973,7 +1973,6 @@ void MainWindow::buildMenuBar()
             connect(gw, &J2JTelegramGateway::diagramGenerated, this,
                     [this](const QImage& img) {
                 m_visualInsights->showDiagram(img);
-                m_visualInsights->setVisible(true);
             }, Qt::UniqueConnection);
 
             auto* dlg = new QDialog(this);
@@ -3355,8 +3354,21 @@ void MainWindow::onSend()
         text, attachmentBlock, m_langDetector.systemInstruction());
 
     if (!response.isEmpty()) {
-        appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
-        if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
+        // Check synchronous response for diagrams too
+        auto syncDr = Jarvis::tryRenderDiagram(response);
+        if (syncDr.hasDiagram && (!syncDr.svgData.isEmpty() || !syncDr.image.isNull())) {
+            appendLog(Str::logJarvis(), syncDr.textWithoutDiagram, Theme::LogColors::jarvis);
+            if (m_visualInsights) {
+                if (!syncDr.mermaidSource.isEmpty())
+                    m_visualInsights->showMermaid(syncDr.mermaidSource);
+                else
+                    m_visualInsights->showDiagram(syncDr.image);
+            }
+            if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(syncDr.textWithoutDiagram);
+        } else {
+            appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
+            if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
+        }
 
         // ── Сохраняем синхронный ответ в датасет (rating=0) ──
         m_lastAiResponse = response;
@@ -3537,13 +3549,26 @@ void MainWindow::onTypingFinished()
 void MainWindow::onAsyncResponse(const QString& response)
 {
     m_audioManager->playSuccess();
-    appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
 
-    // Dual-response TTS: VoiceSynthesisManager handles the speech channel
-    // from handleClaudeCodeResponse. For non-Claude paths (Gemini/Ollama)
-    // that emit asyncResponseReady directly, parse and speak here as fallback.
+    // Check if the LLM response contains a diagram — render it to the
+    // visual dashboard. Uses the same 3-path pipeline as Telegram.
+    auto dr = Jarvis::tryRenderDiagram(response);
+    if (dr.hasDiagram && (!dr.svgData.isEmpty() || !dr.image.isNull())) {
+        appendLog(Str::logJarvis(), dr.textWithoutDiagram, Theme::LogColors::jarvis);
+        if (m_visualInsights) {
+            if (!dr.mermaidSource.isEmpty())
+                m_visualInsights->showMermaid(dr.mermaidSource);
+            else
+                m_visualInsights->showDiagram(dr.image);
+        }
+    } else {
+        appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
+    }
+
+    // Dual-response TTS
     if (m_audioManager->speechAllowed()) {
-        JarvisResponse dual = JarvisResponse::parse(response);
+        const QString& ttsSource = dr.hasDiagram ? dr.textWithoutDiagram : response;
+        JarvisResponse dual = JarvisResponse::parse(ttsSource);
         VoiceSynthesisManager::instance().say(dual.speechText);
     }
 
@@ -3860,9 +3885,17 @@ void MainWindow::buildUI()
     auto* central = new QWidget(this);
     setCentralWidget(central);
 
-    auto* vbox = new QVBoxLayout(central);
+    // Top-level: horizontal layout [main chat | diagram side panel]
+    auto* hroot = new QHBoxLayout(central);
+    hroot->setContentsMargins(0, 0, 0, 0);
+    hroot->setSpacing(0);
+
+    auto* chatContainer = new QWidget(central);
+    auto* vbox = new QVBoxLayout(chatContainer);
     vbox->setContentsMargins(16, 8, 16, 12);
     vbox->setSpacing(8);
+
+    hroot->addWidget(chatContainer, 1);
 
     // === Заголовок ===
     auto* topBar = new QHBoxLayout();
@@ -4103,10 +4136,10 @@ void MainWindow::buildUI()
     m_log->document()->setMaximumBlockCount(300);
     vbox->addWidget(m_log, 1);
 
-    // === Visual Insights — diagram dashboard ===
-    m_visualInsights = new VisualInsightsWidget(this);
+    // === Visual Insights — full-height side panel (right of chat) ===
+    m_visualInsights = new VisualInsightsWidget(central);
     m_visualInsights->setVisible(false);
-    vbox->addWidget(m_visualInsights);
+    hroot->addWidget(m_visualInsights, 0);
 
     // === Панель предложений ===
     m_suggestionBar = new QWidget(this);
