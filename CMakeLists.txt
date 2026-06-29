@@ -20,7 +20,7 @@
 ## ============================================================
 
 cmake_minimum_required(VERSION 3.16)
-project(jarvis VERSION 2.5.0 LANGUAGES CXX)
+project(jarvis VERSION 3.6.3 LANGUAGES CXX)
 
 # --- C++17, no extensions ---
 set(CMAKE_CXX_STANDARD 17)
