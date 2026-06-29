@@ -43,6 +43,7 @@
 #include "j2j_telegram_gateway.h"
 #include "jarvis_response.h"
 #include "security_camera.h"
+#include "dependency_manager_dialog.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include <QFileDialog>
@@ -2399,6 +2400,16 @@ void MainWindow::buildMenuBar()
     }
 
     auto* helpMenu = menuBar->addMenu(Str::menuHelp());
+
+    auto* actComponents = helpMenu->addAction(
+        IS_EN ? QStringLiteral("📦 Component Manager")
+              : QStringLiteral("📦 Менеджер компонентов"));
+    connect(actComponents, &QAction::triggered, this, [this]() {
+        auto* dlg = new DependencyManagerDialog(this);
+        dlg->show();
+    });
+
+    helpMenu->addSeparator();
 
     auto* actAbout = helpMenu->addAction(Str::menuAbout());
     connect(actAbout, &QAction::triggered, this, [this]() {

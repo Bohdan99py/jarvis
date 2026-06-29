@@ -7,6 +7,8 @@ target_sources(jarvis PRIVATE
     mainwindow.cpp
     visual_insights_widget.h
     visual_insights_widget.cpp
+    dependency_manager_dialog.h
+    dependency_manager_dialog.cpp
 )
 
 target_include_directories(jarvis PRIVATE
