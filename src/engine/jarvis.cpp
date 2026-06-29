@@ -38,6 +38,9 @@
 #include "self_update_reflector.h"
 #include "mermaid_renderer.h"
 #include "semantic_intent_manager.h"
+#include "personality_engine.h"
+#include "reflection_engine.h"
+#include "memory_manager.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -133,6 +136,18 @@ Jarvis::Jarvis(QObject* parent)
     m_translator->setLlmApi(m_claudeApi);
     m_translator->setTracker(m_activity);
     m_translator->setUserId(m_currentUserId);
+
+    // Vectorized core memory — always active, not just in Telegram
+    MemoryManager::instance().initialize();
+
+    // Personality evolution — emotional state + genetic mutation
+    m_personality = new PersonalityEngine(this);
+
+    // Autonomous reflection — behavioral analysis + morning nudge
+    m_reflection = new ReflectionEngine(this);
+    m_reflection->setMemoryManager(&MemoryManager::instance());
+    m_reflection->setPersonalityEngine(m_personality);
+    m_reflection->start(30);
 
     // Автообновление
     m_updater = new AutoUpdater(
@@ -1054,6 +1069,15 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     CuriosityEngine::instance().notifyUserActivity();
 
+    // Feed personality engine — emotional state update on every message
+    if (m_personality)
+        m_personality->onUserMessage(s, false);
+
+    // Store meaningful messages in vector memory
+    if (s.length() > 10)
+        MemoryManager::instance().store(QStringLiteral("dialogue"),
+                                         QStringLiteral("User: ") + s.left(500), 0.4);
+
     // 0. Профиль предпочтений: фиксируем контекст + команду для обучения
     //    паттернов "сценарий/время суток → какие команды я обычно пишу".
     //    Сводка кладётся в SessionMemory и попадает в системный промпт Claude.
@@ -1722,6 +1746,21 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 "flowchart, stateDiagram-v2. "
                 "Put ALL explanatory text OUTSIDE the <diagram> tags. "
                 "The diagram content will be rendered as a PNG image.]\n\n");
+        }
+
+        // Emotional tone modulation — inject current mood into system prompt
+        if (m_personality) {
+            EmotionalState emo = m_personality->emotionalState();
+            prefix += QStringLiteral(
+                "[MOOD: joy=%1, frustration=%2, curiosity=%3, boredom=%4. "
+                "Adjust tone: high frustration=terse/impatient, "
+                "high joy=more emojis/conversational, "
+                "high curiosity=ask follow-ups, "
+                "high boredom=be brief/suggest something new.]\n\n")
+                .arg(emo.joy,         0, 'f', 2)
+                .arg(emo.frustration, 0, 'f', 2)
+                .arg(emo.curiosity,   0, 'f', 2)
+                .arg(emo.boredom,     0, 'f', 2);
         }
 
         if (!prefix.isEmpty()) {

@@ -2,19 +2,23 @@
 // ============================================================
 // visual_insights_widget.h — Interactive Diagram Side Panel
 //
-// Full-height right panel powered by QWebEngineView.
-// Renders Mermaid diagrams via embedded Mermaid.js — vector
-// quality, native browser zoom, clickable nodes with tooltips.
-// Falls back to raster QImage display for ASCII art diagrams.
+// Full-height right panel. When Qt WebEngine is available,
+// renders Mermaid via embedded Mermaid.js in Chromium.
+// Otherwise falls back to QSvgWidget for vector SVG display.
 // ============================================================
 
 #include <QWidget>
 #include <QImage>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QPropertyAnimation>
 
+#ifdef JARVIS_HAS_WEBENGINE
 class QWebEngineView;
+#else
+class QSvgWidget;
+#endif
 
 class VisualInsightsWidget : public QWidget
 {
@@ -28,15 +32,9 @@ public:
     void setPanelWidth(int w);
 
 public slots:
-    // Preferred: render Mermaid source interactively via Mermaid.js
     void showMermaid(const QString& mermaidSource);
-
-    // SVG from mmdc or other source
     void showSvg(const QByteArray& svgData, const QString& mermaidSource);
-
-    // Raster fallback for ASCII art
     void showDiagram(const QImage& image);
-
     void slideOpen();
     void slideClose();
     void clear();
@@ -45,10 +43,18 @@ private slots:
     void onSaveClicked();
 
 private:
+#ifdef JARVIS_HAS_WEBENGINE
     QString buildMermaidHtml(const QString& mermaidCode) const;
     QString buildImageHtml(const QImage& image) const;
+    QWebEngineView* m_webView = nullptr;
+#else
+    void updateSvgDisplay();
+    QSvgWidget*  m_svgWidget  = nullptr;
+    QLabel*      m_imageLabel = nullptr;
+    QScrollArea* m_scrollArea = nullptr;
+    QByteArray   m_svgData;
+#endif
 
-    QWebEngineView*     m_webView    = nullptr;
     QLabel*             m_titleLabel = nullptr;
     QPushButton*        m_closeBtn   = nullptr;
     QPushButton*        m_saveBtn    = nullptr;

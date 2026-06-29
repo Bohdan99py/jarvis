@@ -36,6 +36,8 @@ class PcCommandRegistry;
 class TrainingPipelineController;
 class J2JMeshConnector;
 class TranslationEngine;
+class PersonalityEngine;
+class ReflectionEngine;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -103,6 +105,8 @@ public:
     ActivityTracker*    activityTracker()    const { return m_activity; }
     J2JMeshConnector*   meshConnector()      const { return m_mesh; }
     TranslationEngine*  translationEngine()  const { return m_translator; }
+    PersonalityEngine*  personalityEngine()  const { return m_personality; }
+    ReflectionEngine*   reflectionEngine()   const { return m_reflection; }
 
     // Multi-user: switch active user (all data scoped to userId)
     void setCurrentUserId(qint64 id) { m_currentUserId = id; }
@@ -231,6 +235,8 @@ private:
     TrainingPipelineController* m_trainingPipeline = nullptr; // background voice→training data
     J2JMeshConnector*   m_mesh             = nullptr;  // P2P mesh network
     TranslationEngine*  m_translator       = nullptr;  // multilingual translation + audio pipeline
+    PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation
+    ReflectionEngine*   m_reflection       = nullptr;  // behavioral analysis + morning nudge
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 

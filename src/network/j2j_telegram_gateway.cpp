@@ -298,31 +298,28 @@ void J2JTelegramGateway::initSocialPresence(qint64 targetChatId)
         delete m_socialPresence;
     }
 
-    // Initialize the vector memory store
-    MemoryManager::instance().initialize();
-
     m_socialPresence = new SocialPresenceEngine(this);
     m_socialPresence->setTelegramGateway(this);
     m_socialPresence->setTargetChatId(targetChatId);
     m_socialPresence->setMemoryManager(&MemoryManager::instance());
 
-    // Initialize the personality evolution engine
-    auto* personality = new PersonalityEngine(this);
-    m_personalityEng = personality;
-    m_socialPresence->setPersonalityEngine(personality);
+    // Reuse engines from Jarvis core (they run always, not just with Telegram)
+    if (m_jarvis) {
+        m_personalityEng = m_jarvis->personalityEngine();
+        if (m_personalityEng)
+            m_socialPresence->setPersonalityEngine(m_personalityEng);
 
-    // Initialize the autonomous reflection engine
-    auto* reflection = new ReflectionEngine(this);
-    reflection->setMemoryManager(&MemoryManager::instance());
-    reflection->setSocialPresence(m_socialPresence);
-    reflection->setPersonalityEngine(personality);
-    m_socialPresence->setReflectionEngine(reflection);
-    reflection->start(30);
+        auto* reflection = m_jarvis->reflectionEngine();
+        if (reflection) {
+            reflection->setSocialPresence(m_socialPresence);
+            m_socialPresence->setReflectionEngine(reflection);
+        }
+    }
 
     m_socialPresence->start();
 
-    qDebug() << "[TelegramGW] Social Presence + Memory + Reflection + Personality "
-                "initialized for chat" << targetChatId;
+    qDebug() << "[TelegramGW] Social Presence initialized for chat"
+             << targetChatId << "(using core engines)";
 }
 
 void J2JTelegramGateway::start()
@@ -1169,23 +1166,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         ? QStringLiteral("Respond in English. The user is a QA Tester.")
         : QStringLiteral("Отвечай на русском языке.");
 
-    // ── Emotional Tone Modulation — inject mood into system prompt ──
-    if (m_personalityEng) {
-        EmotionalState emo = m_personalityEng->emotionalState();
-        langInstruction += QStringLiteral(
-            "\n[SYSTEM_METADATA: Current Mood={joy: %1, frustration: %2, "
-            "curiosity: %3, boredom: %4}. "
-            "If frustration is high, your tone should be terse and impatient. "
-            "If joy is high, be more conversational and use emojis. "
-            "If curiosity is high, ask follow-up questions. "
-            "If boredom is high, be brief and suggest something new.]")
-            .arg(emo.joy,         0, 'f', 2)
-            .arg(emo.frustration, 0, 'f', 2)
-            .arg(emo.curiosity,   0, 'f', 2)
-            .arg(emo.boredom,     0, 'f', 2);
-    }
-
-    // Diagram instruction is now injected globally in Jarvis::processCommand()
+    // Mood + diagram instructions are now injected globally in Jarvis::processCommand()
 
     QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
 

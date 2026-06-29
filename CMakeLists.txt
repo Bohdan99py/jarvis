@@ -74,8 +74,19 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets Network Sql Concurrent Multimedia MultimediaWidgets
-    Svg SvgWidgets WebEngineWidgets
+    Svg SvgWidgets
 )
+
+# WebEngine is optional — CI environments may not have it installed
+find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)
+if(Qt6WebEngineWidgets_FOUND)
+    set(JARVIS_HAS_WEBENGINE TRUE)
+    message(STATUS "Qt WebEngine: FOUND — interactive diagram panel enabled")
+else()
+    set(JARVIS_HAS_WEBENGINE FALSE)
+    message(STATUS "Qt WebEngine: NOT FOUND — falling back to SVG diagram panel")
+endif()
+
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
 # ============================================================
@@ -181,8 +192,12 @@ target_link_libraries(JarvisCore PUBLIC
     Qt6::MultimediaWidgets
     Qt6::Svg
     Qt6::SvgWidgets
-    Qt6::WebEngineWidgets
 )
+
+if(JARVIS_HAS_WEBENGINE)
+    target_link_libraries(JarvisCore PUBLIC Qt6::WebEngineWidgets)
+    target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_WEBENGINE=1)
+endif()
 
 target_link_libraries(JarvisCore PRIVATE
     ole32

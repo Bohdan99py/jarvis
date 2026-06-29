@@ -10,11 +10,22 @@
 #include <QFileDialog>
 #include <QDateTime>
 #include <QFile>
+#include <QBuffer>
+#include <QDebug>
+
+#ifdef JARVIS_HAS_WEBENGINE
 #include <QWebEngineView>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
-#include <QBuffer>
-#include <QDebug>
+#else
+#include <QSvgWidget>
+#include <QSvgRenderer>
+#include <QPainter>
+#include <QPixmap>
+#include <QProcess>
+#include <QTemporaryFile>
+#include <QDir>
+#endif
 
 static const QString kBtnStyle = QStringLiteral(
     "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
@@ -29,17 +40,17 @@ VisualInsightsWidget::VisualInsightsWidget(QWidget* parent)
     setStyleSheet(QStringLiteral(
         "VisualInsightsWidget { "
         "  background: rgba(8,10,18,250); "
-        "  border-left: 1px solid rgba(0,212,255,0.25); "
-        "}"));
+        "  border-left: 1px solid rgba(0,212,255,0.25); }"));
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(8, 8, 8, 8);
     root->setSpacing(4);
 
+    // ── Header ──
     auto* header = new QHBoxLayout();
     header->setSpacing(6);
 
-    m_closeBtn = new QPushButton(QStringLiteral("✕"), this);
+    m_closeBtn = new QPushButton(QStringLiteral("\342\234\225"), this);
     m_closeBtn->setFixedSize(28, 28);
     m_closeBtn->setStyleSheet(QStringLiteral(
         "QPushButton { background: rgba(255,80,80,0.15); color: #ff5050; "
@@ -65,16 +76,41 @@ VisualInsightsWidget::VisualInsightsWidget(QWidget* parent)
 
     root->addLayout(header);
 
+    // ── Diagram area ──
+#ifdef JARVIS_HAS_WEBENGINE
     m_webView = new QWebEngineView(this);
     m_webView->setStyleSheet(QStringLiteral("background: transparent;"));
     m_webView->page()->setBackgroundColor(QColor(8, 10, 18));
-
     auto* settings = m_webView->page()->settings();
     settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
     settings->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
-
     root->addWidget(m_webView, 1);
+#else
+    m_scrollArea = new QScrollArea(this);
+    m_scrollArea->setWidgetResizable(false);
+    m_scrollArea->setAlignment(Qt::AlignCenter);
+    m_scrollArea->setStyleSheet(QStringLiteral(
+        "QScrollArea { background: transparent; border: none; }"
+        "QScrollBar:vertical   { background: rgba(11,12,16,200); width:  8px; }"
+        "QScrollBar:horizontal { background: rgba(11,12,16,200); height: 8px; }"
+        "QScrollBar::handle:vertical   { background: rgba(0,212,255,0.3); border-radius: 4px; }"
+        "QScrollBar::handle:horizontal { background: rgba(0,212,255,0.3); border-radius: 4px; }"
+        "QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }"));
 
+    m_svgWidget = new QSvgWidget(this);
+    m_svgWidget->setStyleSheet(QStringLiteral("background: transparent;"));
+    m_svgWidget->setVisible(false);
+
+    m_imageLabel = new QLabel(this);
+    m_imageLabel->setAlignment(Qt::AlignCenter);
+    m_imageLabel->setStyleSheet(QStringLiteral("background: transparent;"));
+    m_imageLabel->setVisible(false);
+
+    m_scrollArea->setWidget(m_svgWidget);
+    root->addWidget(m_scrollArea, 1);
+#endif
+
+    // ── Slide animation ──
     m_slideAnim = new QPropertyAnimation(this, "panelWidth", this);
     m_slideAnim->setDuration(250);
     m_slideAnim->setEasingCurve(QEasingCurve::OutCubic);
@@ -84,7 +120,7 @@ int  VisualInsightsWidget::panelWidth() const   { return width(); }
 void VisualInsightsWidget::setPanelWidth(int w) { setFixedWidth(w); }
 
 // ============================================================
-//  Show Mermaid source — rendered via Mermaid.js in Chromium
+//  showMermaid — primary entry point
 // ============================================================
 
 void VisualInsightsWidget::showMermaid(const QString& mermaidSource)
@@ -92,10 +128,43 @@ void VisualInsightsWidget::showMermaid(const QString& mermaidSource)
     m_currentMermaidSource = mermaidSource;
     m_currentRasterImage   = QImage();
     m_diagramCount++;
-    m_titleLabel->setText(
-        QStringLiteral("Diagram #%1").arg(m_diagramCount));
+    m_titleLabel->setText(QStringLiteral("Diagram #%1").arg(m_diagramCount));
 
+#ifdef JARVIS_HAS_WEBENGINE
     m_webView->setHtml(buildMermaidHtml(mermaidSource));
+#else
+    // Fallback: try to render via mmdc CLI to SVG
+    m_svgData.clear();
+    // Show the mermaid source as text placeholder in the SVG widget
+    m_imageLabel->setVisible(false);
+    m_svgWidget->setVisible(true);
+    m_scrollArea->setWidget(m_svgWidget);
+    // Attempt mmdc render (sync — ok because it's user-triggered)
+    QProcess mmdc;
+    QTemporaryFile tmp;
+    tmp.setAutoRemove(true);
+    tmp.setFileTemplate(QDir::tempPath() + QStringLiteral("/jarvis_mmd_XXXXXX.mmd"));
+    if (tmp.open()) {
+        tmp.write(mermaidSource.toUtf8());
+        tmp.flush();
+        const QString outSvg = QDir::tempPath() + QStringLiteral("/jarvis_panel.svg");
+        mmdc.start(QStringLiteral("mmdc"), {
+            QStringLiteral("-i"), tmp.fileName(),
+            QStringLiteral("-o"), outSvg,
+            QStringLiteral("-b"), QStringLiteral("transparent"),
+            QStringLiteral("-t"), QStringLiteral("dark")});
+        if (mmdc.waitForStarted(3000) && mmdc.waitForFinished(15000)
+            && mmdc.exitCode() == 0) {
+            QFile f(outSvg);
+            if (f.open(QIODevice::ReadOnly)) {
+                m_svgData = f.readAll();
+                f.close();
+            }
+            QFile::remove(outSvg);
+        }
+    }
+    updateSvgDisplay();
+#endif
     slideOpen();
 }
 
@@ -106,13 +175,12 @@ void VisualInsightsWidget::showSvg(const QByteArray& svgData,
         showMermaid(mermaidSource);
         return;
     }
-
     m_currentMermaidSource.clear();
     m_currentRasterImage = QImage();
     m_diagramCount++;
-    m_titleLabel->setText(
-        QStringLiteral("Diagram #%1").arg(m_diagramCount));
+    m_titleLabel->setText(QStringLiteral("Diagram #%1").arg(m_diagramCount));
 
+#ifdef JARVIS_HAS_WEBENGINE
     QString html = QStringLiteral(
         "<!DOCTYPE html><html><head>"
         "<style>body{margin:0;background:#080a12;display:flex;"
@@ -120,8 +188,14 @@ void VisualInsightsWidget::showSvg(const QByteArray& svgData,
         "svg{max-width:100%;height:auto;}</style></head><body>");
     html += QString::fromUtf8(svgData);
     html += QStringLiteral("</body></html>");
-
     m_webView->setHtml(html);
+#else
+    m_svgData = svgData;
+    m_imageLabel->setVisible(false);
+    m_svgWidget->setVisible(true);
+    m_scrollArea->setWidget(m_svgWidget);
+    updateSvgDisplay();
+#endif
     slideOpen();
 }
 
@@ -130,16 +204,101 @@ void VisualInsightsWidget::showDiagram(const QImage& image)
     m_currentMermaidSource.clear();
     m_currentRasterImage = image;
     m_diagramCount++;
-    m_titleLabel->setText(
-        QStringLiteral("Diagram #%1").arg(m_diagramCount));
+    m_titleLabel->setText(QStringLiteral("Diagram #%1").arg(m_diagramCount));
 
+#ifdef JARVIS_HAS_WEBENGINE
     m_webView->setHtml(buildImageHtml(image));
+#else
+    m_svgData.clear();
+    m_svgWidget->setVisible(false);
+    m_imageLabel->setVisible(true);
+    m_scrollArea->setWidget(m_imageLabel);
+    const int availW = qMax(200, m_scrollArea->viewport()->width() - 8);
+    QPixmap pm = QPixmap::fromImage(image);
+    if (pm.width() > availW)
+        pm = pm.scaledToWidth(availW, Qt::SmoothTransformation);
+    m_imageLabel->setPixmap(pm);
+    m_imageLabel->resize(pm.size());
+#endif
     slideOpen();
 }
 
 // ============================================================
-//  Build Mermaid.js HTML page
+//  Slide open / close
 // ============================================================
+
+void VisualInsightsWidget::slideOpen()
+{
+    setVisible(true);
+    m_slideAnim->stop();
+    m_slideAnim->setStartValue(width());
+    m_slideAnim->setEndValue(DEFAULT_WIDTH);
+    m_slideAnim->start();
+}
+
+void VisualInsightsWidget::slideClose()
+{
+    m_slideAnim->stop();
+    m_slideAnim->setStartValue(width());
+    m_slideAnim->setEndValue(0);
+    connect(m_slideAnim, &QPropertyAnimation::finished, this, [this]() {
+        if (width() == 0) setVisible(false);
+    }, Qt::UniqueConnection);
+    m_slideAnim->start();
+}
+
+void VisualInsightsWidget::clear()
+{
+    m_currentMermaidSource.clear();
+    m_currentRasterImage = QImage();
+#ifdef JARVIS_HAS_WEBENGINE
+    m_webView->setHtml(
+        QStringLiteral("<html><body style='background:#080a12'></body></html>"));
+#else
+    m_svgData.clear();
+    m_svgWidget->load(QByteArray());
+    m_imageLabel->clear();
+#endif
+    slideClose();
+}
+
+// ============================================================
+//  Save
+// ============================================================
+
+void VisualInsightsWidget::onSaveClicked()
+{
+    const QString ts = QDateTime::currentDateTime().toString(
+        QStringLiteral("yyyyMMdd_HHmmss"));
+    const QString base = JarvisPaths::subPath(QStringLiteral("visuals"))
+        + QStringLiteral("/diagram_") + ts;
+
+    if (!m_currentMermaidSource.isEmpty()) {
+        const QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("Save Diagram"),
+            base + QStringLiteral(".mmd"),
+            QStringLiteral("Mermaid (*.mmd);;All (*)"));
+        if (path.isEmpty()) return;
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            f.write(m_currentMermaidSource.toUtf8());
+            f.close();
+        }
+    } else if (!m_currentRasterImage.isNull()) {
+        const QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("Save Diagram"),
+            base + QStringLiteral(".png"),
+            QStringLiteral("PNG (*.png);;All (*)"));
+        if (!path.isEmpty())
+            m_currentRasterImage.save(path);
+    }
+}
+
+// ============================================================
+//  WebEngine-only: HTML builders
+// ============================================================
+
+#ifdef JARVIS_HAS_WEBENGINE
 
 QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
 {
@@ -148,13 +307,9 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
     escaped.replace(QLatin1Char('`'),  QStringLiteral("\\`"));
     escaped.replace(QLatin1Char('\''), QStringLiteral("\\'"));
 
-    // Build HTML as concatenated QLatin1String segments to avoid
-    // MSVC raw-string-literal issues with deeply nested JS/CSS.
-
     QString h;
     h += QStringLiteral("<!DOCTYPE html><html><head><meta charset='utf-8'>\n");
 
-    // ── CSS ──
     h += QStringLiteral("<style>\n"
         "* { margin:0; padding:0; box-sizing:border-box; }\n"
         "body { background:#080a12; color:#c0c8d8; font-family:'Segoe UI',sans-serif;\n"
@@ -179,7 +334,6 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
         "#zl { color:#66FCF1; font-size:12px; align-self:center; min-width:40px; text-align:center; }\n"
         "</style>\n");
 
-    // ── Mermaid.js import + render ──
     h += QStringLiteral("<script type='module'>\n"
         "import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';\n"
         "mermaid.initialize({\n"
@@ -213,25 +367,19 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
         "  dc.innerHTML='<pre style=\"color:#ff5050;padding:20px\">'+e.message+'</pre>';\n"
         "}\n"
 
-        // ── Parse Mermaid source to build node descriptions ──
         "function parseDiagram(src) {\n"
         "  const info={};\n"
         "  const lines=src.split('\\n');\n"
         "  for(const ln of lines){\n"
         "    let m;\n"
-        // participant A as Peer A (Client)
         "    if(m=ln.match(/participant\\s+(\\S+)\\s+as\\s+(.+)/i))\n"
         "      info[m[1].trim()]={role:'Participant',desc:m[2].trim()};\n"
-        // A->>B: Message text  or  A-->>B: text
         "    else if(m=ln.match(/^\\s*(\\S+?)\\s*-+>>?\\+?\\s*(\\S+?)\\s*:\\s*(.+)/))\n"
         "      info[m[1].trim()+'->'+m[2].trim()]={role:'Message',desc:m[3].trim(),from:m[1].trim(),to:m[2].trim()};\n"
-        // Note over A,B: text
         "    else if(m=ln.match(/Note\\s+(?:over|left of|right of)\\s+([^:]+):\\s*(.+)/i))\n"
         "      info['note:'+m[1].trim()]={role:'Note',desc:m[2].trim(),about:m[1].trim()};\n"
-        // NodeId[Label] or NodeId(Label) or NodeId{Label}
         "    else if(m=ln.match(/^\\s*(\\w+)\\s*[\\[\\(\\{]([^\\]\\)\\}]+)[\\]\\)\\}]/))\n"
         "      info[m[1].trim()]={role:'Node',desc:m[2].trim()};\n"
-        // A-->B or A-->|label|B
         "    else if(m=ln.match(/^\\s*(\\w+)\\s*-->\\|?([^|]*?)\\|?\\s*(\\w+)/))\n"
         "      if(m[2].trim()) info[m[1]+'->'+m[3]]={role:'Edge',desc:m[2].trim()};\n"
         "  }\n"
@@ -241,35 +389,25 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
         "function setup() {\n"
         "  const info=parseDiagram(code);\n"
         "  const tt=document.getElementById('tt');\n"
-
-        // Find all clickable SVG elements
         "  const els=dc.querySelectorAll('.node,.actor,.note,.messageText,.activation,.loopText,.labelText,.edgeLabel');\n"
         "  els.forEach(el=>{\n"
         "    el.style.cursor='pointer';\n"
         "    el.addEventListener('click',e=>{\n"
         "      e.stopPropagation();\n"
-
-        // Collect all visible text inside the clicked element
         "      const texts=[...el.querySelectorAll('text,tspan,.nodeLabel,span,foreignObject')]\n"
         "        .map(t=>t.textContent.trim()).filter(t=>t.length>0);\n"
         "      const label=texts.join(' ')||'Element';\n"
-
-        // Try to find this element in our parsed info
         "      let detail=null;\n"
         "      for(const[k,v] of Object.entries(info)){\n"
         "        if(label.includes(v.desc)||v.desc.includes(label)||label.includes(k)){\n"
         "          detail=v; break;\n"
         "        }\n"
         "      }\n"
-
-        // Also try matching by element ID
         "      if(!detail && el.id){\n"
         "        for(const[k,v] of Object.entries(info)){\n"
         "          if(el.id.includes(k)||k.includes(el.id)){detail=v;break;}\n"
         "        }\n"
         "      }\n"
-
-        // Build tooltip content
         "      const ti=tt.querySelector('.ti');\n"
         "      const tx=tt.querySelector('.tx');\n"
         "      if(detail){\n"
@@ -287,10 +425,7 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
         "      tt.style.top=Math.min(e.clientY-50,innerHeight-100)+'px';\n"
         "    });\n"
         "  });\n"
-
         "  document.addEventListener('click',()=>{tt.style.display='none';});\n"
-
-        // Zoom controls
         "  let sc=1;\n"
         "  const sv=dc.querySelector('svg');\n"
         "  if(sv){\n"
@@ -307,7 +442,7 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
         "<div id='dc'>Loading diagram...</div>\n"
         "<div id='tt'><div class='ti'></div><div class='tx'></div></div>\n"
         "<div id='zc'>\n"
-        "  <button class='zb' id='zo'>−</button>\n"
+        "  <button class='zb' id='zo'>-</button>\n"
         "  <span id='zl'>100%</span>\n"
         "  <button class='zb' id='zf'>Fit</button>\n"
         "  <button class='zb' id='zi'>+</button>\n"
@@ -317,10 +452,6 @@ QString VisualInsightsWidget::buildMermaidHtml(const QString& mermaidCode) const
     return h;
 }
 
-// ============================================================
-//  Build HTML for raster image fallback
-// ============================================================
-
 QString VisualInsightsWidget::buildImageHtml(const QImage& image) const
 {
     QByteArray ba;
@@ -328,84 +459,31 @@ QString VisualInsightsWidget::buildImageHtml(const QImage& image) const
     buf.open(QIODevice::WriteOnly);
     image.save(&buf, "PNG");
     buf.close();
-
-    const QString base64 = QString::fromLatin1(ba.toBase64());
-
+    const QString b64 = QString::fromLatin1(ba.toBase64());
     return QStringLiteral(
         "<!DOCTYPE html><html><head>"
         "<style>body{margin:0;background:#080a12;display:flex;"
         "justify-content:center;align-items:center;min-height:100vh;}"
         "img{max-width:100%;height:auto;}</style></head>"
         "<body><img src='data:image/png;base64,")
-        + base64
-        + QStringLiteral("'/></body></html>");
+        + b64 + QStringLiteral("'/></body></html>");
 }
 
-// ============================================================
-//  Slide open / close
-// ============================================================
+#else // SVG fallback
 
-void VisualInsightsWidget::slideOpen()
+void VisualInsightsWidget::updateSvgDisplay()
 {
-    setVisible(true);
-    m_slideAnim->stop();
-    m_slideAnim->setStartValue(width());
-    m_slideAnim->setEndValue(DEFAULT_WIDTH);
-    m_slideAnim->start();
-}
-
-void VisualInsightsWidget::slideClose()
-{
-    m_slideAnim->stop();
-    m_slideAnim->setStartValue(width());
-    m_slideAnim->setEndValue(0);
-    connect(m_slideAnim, &QPropertyAnimation::finished, this, [this]() {
-        if (width() == 0) setVisible(false);
-    }, Qt::UniqueConnection);
-    m_slideAnim->start();
-}
-
-void VisualInsightsWidget::clear()
-{
-    m_currentMermaidSource.clear();
-    m_currentRasterImage = QImage();
-    m_webView->setHtml(
-        QStringLiteral("<html><body style='background:#080a12'></body></html>"));
-    slideClose();
-}
-
-// ============================================================
-//  Save
-// ============================================================
-
-void VisualInsightsWidget::onSaveClicked()
-{
-    const QString ts = QDateTime::currentDateTime().toString(
-        QStringLiteral("yyyyMMdd_HHmmss"));
-    const QString base = JarvisPaths::subPath(QStringLiteral("visuals"))
-        + QStringLiteral("/diagram_") + ts;
-
-    if (!m_currentMermaidSource.isEmpty()) {
-        const QString path = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Save Diagram"),
-            base + QStringLiteral(".mmd"),
-            QStringLiteral("Mermaid (*.mmd);;HTML (*.html);;All (*)"));
-        if (path.isEmpty()) return;
-
-        QFile f(path);
-        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            if (path.endsWith(QStringLiteral(".html"), Qt::CaseInsensitive))
-                f.write(buildMermaidHtml(m_currentMermaidSource).toUtf8());
-            else
-                f.write(m_currentMermaidSource.toUtf8());
-            f.close();
+    if (!m_svgData.isEmpty()) {
+        m_svgWidget->load(m_svgData);
+        QSvgRenderer renderer(m_svgData);
+        if (renderer.isValid()) {
+            const int availW = qMax(200, m_scrollArea->viewport()->width() - 8);
+            double scale = static_cast<double>(availW) / qMax(1, renderer.defaultSize().width());
+            scale = qBound(0.3, scale, 3.0);
+            m_svgWidget->setFixedSize(renderer.defaultSize() * scale);
         }
-    } else if (!m_currentRasterImage.isNull()) {
-        const QString path = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Save Diagram"),
-            base + QStringLiteral(".png"),
-            QStringLiteral("PNG (*.png);;All (*)"));
-        if (!path.isEmpty())
-            m_currentRasterImage.save(path);
+        m_svgWidget->setVisible(true);
     }
 }
+
+#endif
