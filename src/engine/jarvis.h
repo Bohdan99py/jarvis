@@ -123,6 +123,12 @@ public:
     void setUiLanguage(bool english) { m_uiEnglish = english; }
     bool uiEnglish() const           { return m_uiEnglish; }
 
+    // When true, asyncResponseReady was triggered by a Telegram request,
+    // not local GUI input. MainWindow uses this to avoid showing
+    // duplicate responses (Telegram responses appear via conversationResponse signal).
+    void setTelegramOrigin(bool v) { m_telegramOrigin = v; }
+    bool isTelegramOrigin() const  { return m_telegramOrigin; }
+
     // Синхронизировать данные индексатора с SessionMemory (system prompt)
     void syncProjectInfoToMemory();
 
@@ -241,6 +247,7 @@ private:
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 
     bool              m_multiAgentMode    = false;
+    bool              m_telegramOrigin    = false;
     bool              m_uiEnglish         = true;   // synced from MainWindow
     bool              m_ideOpenedThisSession = false; // CLion открыт авто-режимом в этой сессии
     std::atomic<bool> m_speaking{false};

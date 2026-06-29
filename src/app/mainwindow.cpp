@@ -1975,6 +1975,23 @@ void MainWindow::buildMenuBar()
                 m_visualInsights->showDiagram(img);
             }, Qt::UniqueConnection);
 
+            // Sync Telegram conversation into the desktop log —
+            // so the user sees both channels in one place and all
+            // messages feed into the same learning pipeline.
+            connect(gw, &J2JTelegramGateway::messageReceived, this,
+                    [this](qint64 /*chatId*/, const QString& text) {
+                appendLog(QStringLiteral("📱 TG User"),
+                          text.left(500),
+                          QStringLiteral("#2ea6c7"));
+            }, Qt::UniqueConnection);
+
+            connect(gw, &J2JTelegramGateway::conversationResponse, this,
+                    [this](qint64 /*chatId*/, const QString& response) {
+                appendLog(QStringLiteral("📱 JARVIS→TG"),
+                          response.left(500),
+                          Theme::LogColors::jarvis);
+            }, Qt::UniqueConnection);
+
             auto* dlg = new QDialog(this);
             dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
                                       : QStringLiteral("Telegram QA Шлюз"));
@@ -3548,6 +3565,11 @@ void MainWindow::onTypingFinished()
 
 void MainWindow::onAsyncResponse(const QString& response)
 {
+    // Skip GUI display for Telegram-origin responses — they appear
+    // via the conversationResponse signal with a 📱 prefix instead.
+    if (m_jarvis->isTelegramOrigin())
+        return;
+
     m_audioManager->playSuccess();
 
     // Check if the LLM response contains a diagram — render it to the

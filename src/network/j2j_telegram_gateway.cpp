@@ -1168,9 +1168,11 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
 
     // Mood + diagram instructions are now injected globally in Jarvis::processCommand()
 
+    m_jarvis->setTelegramOrigin(true);
     QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
 
     if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
+        m_jarvis->setTelegramOrigin(false);
         finishLlmRequest(chatId);
 
         JarvisResponse dual = JarvisResponse::parse(syncResponse);
@@ -1186,12 +1188,12 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     auto conn    = std::make_shared<QMetaObject::Connection>();
     auto errConn = std::make_shared<QMetaObject::Connection>();
 
-    // Cleanup lambda — disconnects both signals, releases the lock
     auto cleanup = [this, chatId, conn, errConn, resolved]() {
         if (*resolved) return;
         *resolved = true;
         disconnect(*conn);
         disconnect(*errConn);
+        m_jarvis->setTelegramOrigin(false);
         finishLlmRequest(chatId);
     };
 

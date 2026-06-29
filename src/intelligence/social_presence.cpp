@@ -95,33 +95,21 @@ const QStringList& SocialPresenceEngine::pausedKeywords()
 
 const QStringList& SocialPresenceEngine::trollPatterns()
 {
+    // Only UNAMBIGUOUS trolling phrases — multi-word or clearly hostile.
+    // Single common words (чушь, бред, ерунда, фигня) removed because
+    // they appear in normal speech ("не городил чушь", "это не бред").
     static const QStringList patterns = {
-        // Nonsense / spam
-        QStringLiteral("asdfjkl"), QStringLiteral("qwerty"),
-        QStringLiteral("asdf"), QStringLiteral("hjkl"),
-        QStringLiteral("zxcvbn"), QStringLiteral("lololol"),
-        QStringLiteral("hahaha"), QStringLiteral("kekeke"),
-        QStringLiteral("xaxaxa"), QStringLiteral("ahahah"),
-        QStringLiteral("lmao"), QStringLiteral("rofl"),
-        // Trolling phrases EN
+        // Keyboard spam
+        QStringLiteral("asdfjkl"), QStringLiteral("zxcvbn"),
+        QStringLiteral("lololol"),
+        // Direct insults — multi-word (harder to false-positive)
         QStringLiteral("you're stupid"), QStringLiteral("you are stupid"),
-        QStringLiteral("you suck"), QStringLiteral("shut up"),
-        QStringLiteral("stfu"), QStringLiteral("idiot"),
-        QStringLiteral("dumb bot"), QStringLiteral("trash bot"),
-        QStringLiteral("you're useless"), QStringLiteral("go away"),
-        QStringLiteral("delete yourself"), QStringLiteral("uninstall"),
-        QStringLiteral("are you real"), QStringLiteral("you're fake"),
-        QStringLiteral("who asked"), QStringLiteral("nobody cares"),
-        QStringLiteral("cope"), QStringLiteral("ratio"),
-        QStringLiteral("skill issue"),
-        // Trolling phrases RU
-        QStringLiteral("тупой"), QStringLiteral("бесполезный"),
-        QStringLiteral("заткнись"), QStringLiteral("удались"),
-        QStringLiteral("ты мусор"), QStringLiteral("отстой"),
-        QStringLiteral("кто спрашивал"), QStringLiteral("да ладно"),
+        QStringLiteral("you suck"), QStringLiteral("dumb bot"),
+        QStringLiteral("trash bot"), QStringLiteral("you're useless"),
+        QStringLiteral("delete yourself"),
+        QStringLiteral("stfu"),
         QStringLiteral("ты тупой"), QStringLiteral("ты дурак"),
-        QStringLiteral("фигня"), QStringLiteral("чушь"),
-        QStringLiteral("бред"), QStringLiteral("ерунда"),
+        QStringLiteral("ты мусор"), QStringLiteral("заткнись"),
     };
     return patterns;
 }
@@ -421,14 +409,16 @@ int SocialPresenceEngine::detectAvailability(const QString& lower) const
 
 bool SocialPresenceEngine::detectTrolling(const QString& lower) const
 {
-    // Pattern 1: known troll phrases
-    int trollHits = 0;
+    // Long messages (>80 chars) are almost never pure trolling —
+    // someone writing a paragraph is engaging, not spamming.
+    if (lower.length() > 80)
+        return false;
+
+    // Pattern 1: known troll phrases (multi-word, unambiguous)
     for (const QString& p : trollPatterns()) {
         if (lower.contains(p))
-            ++trollHits;
+            return true;
     }
-    if (trollHits >= 1)
-        return true;
 
     // Pattern 2: repetitive character spam (e.g., "aaaaaaa", "!!!!!!")
     if (lower.length() >= 5) {
@@ -437,13 +427,13 @@ bool SocialPresenceEngine::detectTrolling(const QString& lower) const
         for (int i = 1; i < lower.length() && i < 20; ++i) {
             if (lower[i] != first) { allSame = false; break; }
         }
-        if (allSame && lower.length() >= 5)
+        if (allSame)
             return true;
     }
 
     // Pattern 3: extremely short nonsense (1-2 chars, not a real word)
     if (lower.length() <= 2 && !lower.isEmpty()) {
-        const QStringList validShort = {
+        static const QStringList validShort = {
             QStringLiteral("ok"), QStringLiteral("no"),
             QStringLiteral("da"), QStringLiteral("hi"),
             QStringLiteral("go"), QStringLiteral("да"),
