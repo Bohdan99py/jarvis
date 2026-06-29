@@ -42,6 +42,7 @@
 #include "j2j_mesh_connector.h"
 #include "j2j_telegram_gateway.h"
 #include "jarvis_response.h"
+#include "security_camera.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include <QFileDialog>
@@ -2283,6 +2284,120 @@ void MainWindow::buildMenuBar()
     }
 
     // --- Помощь ---
+    // ── Camera & Security ──────────────────────────────────
+    {
+        auto* camMenu = menuBar->addMenu(
+            IS_EN ? QStringLiteral("📷 Camera") : QStringLiteral("📷 Камера"));
+
+#ifdef JARVIS_HAS_OPENCV
+        auto* actEnroll = camMenu->addAction(
+            IS_EN ? QStringLiteral("👤 Enroll Owner Face")
+                  : QStringLiteral("👤 Обучить лицо владельца"));
+        connect(actEnroll, &QAction::triggered, this, [this]() {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("📸 Starting face enrollment... Look at the webcam.")
+                      : QStringLiteral("📸 Обучение лица... Смотрите в камеру."),
+                Theme::LogColors::system);
+
+            auto* sec = new SecurityCamera(this);
+            connect(sec, &SecurityCamera::enrollmentProgress, this,
+                    [this](int cur, int total) {
+                appendLog(Str::logSystem(),
+                    QStringLiteral("📸 %1/%2").arg(cur).arg(total),
+                    Theme::LogColors::system);
+            });
+            connect(sec, &SecurityCamera::enrollmentComplete, this,
+                    [this, sec](int samples) {
+                appendLog(Str::logJarvis(),
+                    (IS_EN ? QStringLiteral("✅ Face enrolled! %1 samples. "
+                                            "I can now recognize you.")
+                           : QStringLiteral("✅ Лицо обучено! %1 образцов. "
+                                            "Теперь я вас узнаю.")).arg(samples),
+                    Theme::LogColors::jarvis);
+                sec->deleteLater();
+            });
+            connect(sec, &SecurityCamera::alertMessage, this,
+                    [this, sec](const QString& msg) {
+                appendLog(Str::logSystem(), msg, Theme::LogColors::error);
+                sec->deleteLater();
+            });
+            sec->enrollOwnerFace(15);
+        });
+
+        auto* actUpdateFace = camMenu->addAction(
+            IS_EN ? QStringLiteral("🔄 Update Face (new look)")
+                  : QStringLiteral("🔄 Обновить лицо (новый вид)"));
+        connect(actUpdateFace, &QAction::triggered, this, [this]() {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("📸 Re-enrolling face with new appearance...")
+                      : QStringLiteral("📸 Переобучение лица с новым видом..."),
+                Theme::LogColors::system);
+
+            auto* sec = new SecurityCamera(this);
+            connect(sec, &SecurityCamera::enrollmentComplete, this,
+                    [this, sec](int samples) {
+                appendLog(Str::logJarvis(),
+                    (IS_EN ? QStringLiteral("✅ Face updated! %1 new samples.")
+                           : QStringLiteral("✅ Лицо обновлено! %1 новых образцов.")).arg(samples),
+                    Theme::LogColors::jarvis);
+                sec->deleteLater();
+            });
+            connect(sec, &SecurityCamera::alertMessage, this,
+                    [this, sec](const QString& msg) {
+                appendLog(Str::logSystem(), msg, Theme::LogColors::error);
+                sec->deleteLater();
+            });
+            sec->enrollOwnerFace(10);
+        });
+
+        camMenu->addSeparator();
+
+        auto* actGuardOn = camMenu->addAction(
+            IS_EN ? QStringLiteral("🛡 Start Security Guard")
+                  : QStringLiteral("🛡 Включить охрану"));
+        connect(actGuardOn, &QAction::triggered, this, [this]() {
+            auto* sec = new SecurityCamera(this);
+            sec->startMonitoring(5);
+            connect(sec, &SecurityCamera::ownerRecognized, this,
+                    [this](const QImage&) {
+                // Quiet — owner recognized, no action needed
+            });
+            connect(sec, &SecurityCamera::alertMessage, this,
+                    [this](const QString& msg) {
+                appendLog(QStringLiteral("🛡 Security"), msg, Theme::LogColors::error);
+            });
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("🛡 Security guard active. Auto-lock on threat.")
+                      : QStringLiteral("🛡 Охрана включена. Авто-блокировка при угрозе."),
+                Theme::LogColors::jarvis);
+        });
+#else
+        auto* actNoCV = camMenu->addAction(
+            IS_EN ? QStringLiteral("⚠ OpenCV not installed")
+                  : QStringLiteral("⚠ OpenCV не установлен"));
+        actNoCV->setEnabled(false);
+#endif
+
+        camMenu->addSeparator();
+
+        auto* actScreenshot = camMenu->addAction(
+            IS_EN ? QStringLiteral("📸 Take Screenshot")
+                  : QStringLiteral("📸 Сделать скриншот"));
+        connect(actScreenshot, &QAction::triggered, this, [this]() {
+            QScreen* screen = QApplication::primaryScreen();
+            if (!screen) return;
+            QPixmap shot = screen->grabWindow(0);
+            const QString dir = JarvisPaths::subPath(QStringLiteral("screenshots"));
+            QDir().mkpath(dir);
+            const QString path = dir + QStringLiteral("/screenshot_%1.png")
+                .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+            shot.save(path, "PNG");
+            appendLog(Str::logJarvis(),
+                (IS_EN ? QStringLiteral("📸 Screenshot saved: ") : QStringLiteral("📸 Скриншот сохранён: ")) + path,
+                Theme::LogColors::jarvis);
+        });
+    }
+
     auto* helpMenu = menuBar->addMenu(Str::menuHelp());
 
     auto* actAbout = helpMenu->addAction(Str::menuAbout());

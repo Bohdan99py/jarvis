@@ -108,25 +108,75 @@ endif()
 
 # ============================================================
 # OpenCV — optional, for face detection and security camera
+# Auto-downloads pre-built binaries on first configure if missing.
 # ============================================================
 
 set(_opencv_dir "${CMAKE_SOURCE_DIR}/redist/opencv")
+set(_opencv_ver "4.10.0")
+set(_opencv_zip "${CMAKE_SOURCE_DIR}/redist/opencv-${_opencv_ver}-windows.exe")
+set(_opencv_url "https://github.com/opencv/opencv/releases/download/${_opencv_ver}/opencv-${_opencv_ver}-windows.exe")
 
 find_package(OpenCV QUIET COMPONENTS core imgproc objdetect videoio highgui)
 if(OpenCV_FOUND)
     set(JARVIS_HAS_OPENCV TRUE)
-    message(STATUS "OpenCV: FOUND (${OpenCV_VERSION}) — security camera enabled")
+    message(STATUS "OpenCV: FOUND system (${OpenCV_VERSION})")
+elseif(EXISTS "${_opencv_dir}/build/include/opencv2/core.hpp")
+    # Self-extracting exe puts files in opencv/build/
+    set(JARVIS_HAS_OPENCV TRUE)
+    set(OpenCV_INCLUDE_DIRS "${_opencv_dir}/build/include")
+    file(GLOB OpenCV_LIBS "${_opencv_dir}/build/x64/vc16/lib/*.lib")
+    message(STATUS "OpenCV: FOUND in redist/opencv/build/")
 elseif(EXISTS "${_opencv_dir}/include/opencv2/core.hpp")
-    # Use bundled OpenCV from redist/
     set(JARVIS_HAS_OPENCV TRUE)
     set(OpenCV_INCLUDE_DIRS "${_opencv_dir}/include")
-    file(GLOB OpenCV_LIBS "${_opencv_dir}/lib/*.lib")
-    message(STATUS "OpenCV: FOUND in redist/ — security camera enabled")
+    file(GLOB OpenCV_LIBS "${_opencv_dir}/x64/vc16/lib/*.lib"
+                          "${_opencv_dir}/lib/*.lib")
+    message(STATUS "OpenCV: FOUND in redist/opencv/")
 else()
-    set(JARVIS_HAS_OPENCV FALSE)
-    message(STATUS "OpenCV: NOT FOUND — security camera disabled.\n"
-            "  Install: choco install opencv  OR\n"
-            "  Download to: ${_opencv_dir}/")
+    # Auto-download OpenCV pre-built binaries
+    message(STATUS "OpenCV: NOT FOUND — downloading ${_opencv_ver}...")
+    if(NOT EXISTS "${_opencv_zip}")
+        file(DOWNLOAD "${_opencv_url}" "${_opencv_zip}"
+             SHOW_PROGRESS
+             STATUS _dl_status
+             TIMEOUT 300)
+        list(GET _dl_status 0 _dl_code)
+        if(NOT _dl_code EQUAL 0)
+            message(WARNING "OpenCV download failed (code ${_dl_code}). "
+                    "Security camera will be disabled.\n"
+                    "Manual install: choco install opencv")
+            set(JARVIS_HAS_OPENCV FALSE)
+        endif()
+    endif()
+
+    # Extract (the .exe is a self-extracting 7z archive — run silently)
+    if(EXISTS "${_opencv_zip}" AND NOT EXISTS "${_opencv_dir}/build/include/opencv2/core.hpp")
+        message(STATUS "Extracting OpenCV (this may take a minute)...")
+        # Use PowerShell to extract silently (no GUI window)
+        execute_process(
+            COMMAND powershell.exe -NoProfile -Command
+                "Start-Process -FilePath '${_opencv_zip}' -ArgumentList '-o\"${CMAKE_SOURCE_DIR}/redist\" -y' -WindowStyle Hidden -Wait"
+            RESULT_VARIABLE _extract_result
+            OUTPUT_QUIET ERROR_QUIET
+            TIMEOUT 600
+        )
+        if(_extract_result EQUAL 0)
+            message(STATUS "OpenCV extracted successfully")
+        else()
+            message(WARNING "OpenCV extraction failed (code ${_extract_result})")
+        endif()
+    endif()
+
+    # Try again after download/extract — check opencv/build/ path
+    if(EXISTS "${_opencv_dir}/build/include/opencv2/core.hpp")
+        set(JARVIS_HAS_OPENCV TRUE)
+        set(OpenCV_INCLUDE_DIRS "${_opencv_dir}/build/include")
+        file(GLOB OpenCV_LIBS "${_opencv_dir}/build/x64/vc16/lib/*.lib")
+        message(STATUS "OpenCV: AUTO-DOWNLOADED (${_opencv_ver})")
+    else()
+        set(JARVIS_HAS_OPENCV FALSE)
+        message(STATUS "OpenCV: NOT AVAILABLE — security camera disabled")
+    endif()
 endif()
 
 # --- Global compile definitions ---
@@ -323,6 +373,21 @@ if(VOSK_AVAILABLE)
         endif()
     endforeach()
     message(STATUS "Vosk DLLs will be copied to bin/ on build")
+endif()
+
+# ============================================================
+# Post-build: copy OpenCV DLL
+# ============================================================
+
+if(JARVIS_HAS_OPENCV)
+    set(_opencv_dll "${_opencv_dir}/build/x64/vc16/bin/opencv_world4100.dll")
+    if(EXISTS "${_opencv_dll}")
+        add_custom_command(TARGET jarvis POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_opencv_dll}" "$<TARGET_FILE_DIR:jarvis>"
+            COMMENT "Copying OpenCV runtime")
+        message(STATUS "OpenCV DLL will be copied to bin/ on build")
+    endif()
 endif()
 
 # ============================================================

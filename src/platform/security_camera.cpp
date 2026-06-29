@@ -10,6 +10,8 @@
 #include <QDateTime>
 #include <QScreen>
 #include <QApplication>
+#include <QCoreApplication>
+#include <QProcess>
 #include <QDebug>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -80,6 +82,8 @@ QString SecurityCamera::cascadePath()
 {
     static const QStringList paths = {
         JarvisPaths::subPath(QStringLiteral("security/haarcascade_frontalface_default.xml")),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/../redist/opencv/build/etc/haarcascades/haarcascade_frontalface_default.xml"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/../redist/opencv/etc/haarcascades/haarcascade_frontalface_default.xml"),
         QStringLiteral("C:/opencv/etc/haarcascades/haarcascade_frontalface_default.xml"),
         QStringLiteral("C:/tools/opencv/etc/haarcascades/haarcascade_frontalface_default.xml"),
     };
@@ -115,6 +119,29 @@ SecurityCamera::SecurityCamera(QObject* parent)
 
 #ifdef JARVIS_HAS_OPENCV
     m_ownerEnrolled = QFileInfo::exists(ownerModelPath());
+
+    // Auto-download Haar cascade if missing
+    const QString cascade = cascadePath();
+    if (cascade.isEmpty()) {
+        const QString destPath = JarvisPaths::subPath(
+            QStringLiteral("security/haarcascade_frontalface_default.xml"));
+        if (!QFileInfo::exists(destPath)) {
+            qDebug() << "[SecurityCam] Downloading face cascade...";
+            QDir().mkpath(QFileInfo(destPath).absolutePath());
+            QProcess wget;
+            wget.start(QStringLiteral("powershell.exe"), {
+                QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
+                QStringLiteral("Invoke-WebRequest -Uri "
+                    "'https://raw.githubusercontent.com/opencv/opencv/4.x/data/"
+                    "haarcascades/haarcascade_frontalface_default.xml' "
+                    "-OutFile '%1'").arg(destPath)
+            });
+            if (wget.waitForFinished(30000) && wget.exitCode() == 0)
+                qDebug() << "[SecurityCam] Cascade downloaded:" << destPath;
+            else
+                qWarning() << "[SecurityCam] Cascade download failed";
+        }
+    }
 #endif
 
     qDebug() << "[SecurityCam] Init. Owner enrolled:" << m_ownerEnrolled;
