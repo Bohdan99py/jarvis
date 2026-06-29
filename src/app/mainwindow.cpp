@@ -3160,7 +3160,8 @@ void MainWindow::onSend()
     }
 
     // ── 1. Визуальные команды (Screen Agent) ─────────────
-    // "нажми на", "кликни", "что видишь", "опиши экран"
+    // Only unambiguous screen-interaction phrases — NOT "найди" alone
+    // (which could mean "найди работу", "найди файл", etc.)
     {
         const QString lo = text.toLower();
         static const QStringList kVisualTriggers = {
@@ -3173,8 +3174,19 @@ void MainWindow::onSend()
             QStringLiteral("look at screen"),     QStringLiteral("найди на экране"),
         };
         bool isVisual = false;
-        for (const QString& t : kVisualTriggers)
-            if (lo.contains(t)) { isVisual = true; break; }
+        for (const QString& t : kVisualTriggers) {
+            if (!lo.contains(t)) continue;
+            // "найди на экране" must start at position 0 or after whitespace —
+            // don't match "найди" inside "найди работу" or "найди файл"
+            if (t == QStringLiteral("найди на экране")) {
+                const int pos = lo.indexOf(t);
+                if (pos == 0 || (pos > 0 && lo[pos - 1].isSpace()))
+                    isVisual = true;
+            } else {
+                isVisual = true;
+            }
+            if (isVisual) break;
+        }
         if (isVisual) {
             handleVisualCommand(text);
             m_input->setFocus();
@@ -4949,8 +4961,9 @@ void MainWindow::handleVisualCommand(const QString& userText)
 
         const bool found = m_screenAgent->clickText(searchText);
         const QString resp = found
-            ? (IS_EN ? QStringLiteral("✓ Found and clicked: ") : QStringLiteral("✓ Нашёл и кликнул: ")) + searchText
-            : (IS_EN ? QStringLiteral("✗ Not found on screen: ") : QStringLiteral("✗ Не найдено на экране: ")) + searchText;
+            ? (IS_EN ? QStringLiteral("✓ Found and activated: ") : QStringLiteral("✓ Нашёл и активировал: ")) + searchText
+            : (IS_EN ? QStringLiteral("✗ Could not find: ") : QStringLiteral("✗ Не удалось найти: ")) + searchText
+              + (IS_EN ? QStringLiteral(" (checked windows + screen OCR)") : QStringLiteral(" (проверил окна + OCR экрана)"));
         appendLog(Str::logJarvis(), resp, found ? Theme::LogColors::jarvis : Theme::LogColors::error);
         m_jarvis->memory()->addMessage(QStringLiteral("user"), userText);
         m_jarvis->memory()->addMessage(QStringLiteral("assistant"), resp);

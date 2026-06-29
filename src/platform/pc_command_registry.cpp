@@ -22,6 +22,11 @@
 
 #include <QStringList>
 #include <QThread>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QDirIterator>
+#include <QProcess>
 
 // ============================================================
 //  Локальные хелперы парсинга (файл-приватные)
@@ -334,6 +339,81 @@ void PcCommandRegistry::registerSystemCommands(CommandRegistry& r)
         [sys](const QString&) -> QString {
             return sys->openTaskManager() ? QString() : QStringLiteral("Error");
         }, QStringLiteral("Task Manager"));
+
+    // ── Bluetooth ──
+    r.registerCommand({"включи блютуз", "bluetooth on", "enable bluetooth"},
+        [](const QString&) -> QString {
+            QProcess p;
+            p.start(QStringLiteral("powershell.exe"), {
+                QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
+                QStringLiteral("Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
+                    "[Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null; "
+                    "$radios = [Windows.Devices.Radios.Radio]::GetRadiosAsync().GetAwaiter().GetResult(); "
+                    "foreach($r in $radios){if($r.Kind -eq 'Bluetooth'){$r.SetStateAsync('On').GetAwaiter().GetResult()}}")
+            });
+            return p.waitForFinished(10000) && p.exitCode() == 0
+                ? QStringLiteral("Bluetooth ON")
+                : QStringLiteral("Failed — try Windows Settings");
+        }, QStringLiteral("enable Bluetooth"));
+
+    r.registerCommand({"выключи блютуз", "bluetooth off", "disable bluetooth"},
+        [](const QString&) -> QString {
+            QProcess p;
+            p.start(QStringLiteral("powershell.exe"), {
+                QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
+                QStringLiteral("Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
+                    "[Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null; "
+                    "$radios = [Windows.Devices.Radios.Radio]::GetRadiosAsync().GetAwaiter().GetResult(); "
+                    "foreach($r in $radios){if($r.Kind -eq 'Bluetooth'){$r.SetStateAsync('Off').GetAwaiter().GetResult()}}")
+            });
+            return p.waitForFinished(10000) && p.exitCode() == 0
+                ? QStringLiteral("Bluetooth OFF")
+                : QStringLiteral("Failed — try Windows Settings");
+        }, QStringLiteral("disable Bluetooth"));
+
+    // ── Empty recycle bin ──
+    r.registerCommand({"очисти корзину", "empty recycle bin", "clear trash"},
+        [](const QString&) -> QString {
+            QProcess p;
+            p.start(QStringLiteral("powershell.exe"), {
+                QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
+                QStringLiteral("Clear-RecycleBin -Force -ErrorAction SilentlyContinue")
+            });
+            return p.waitForFinished(10000)
+                ? QStringLiteral("Recycle bin emptied")
+                : QStringLiteral("Error");
+        }, QStringLiteral("empty recycle bin"));
+
+    // ── Screenshot (Win+Shift+S) ──
+    r.registerCommand({"скриншот", "сделай скриншот", "screenshot"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->screenshotArea() ? QStringLiteral("Screenshot tool opened") : QStringLiteral("Error");
+        }, QStringLiteral("screenshot area — Win+Shift+S"));
+
+    // ── Open recycle bin ──
+    r.registerCommand({"открой корзину", "open recycle bin"},
+        [sys](const QString&) -> QString {
+            return sys->launchApp(QStringLiteral("explorer.exe"),
+                QStringLiteral("shell:RecycleBinFolder"))
+                ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("open Recycle Bin"));
+
+    // ── Control Panel / Device Manager ──
+    r.registerCommand({"панель управления", "control panel"},
+        [sys](const QString&) -> QString {
+            return sys->launchApp(QStringLiteral("control.exe")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("Control Panel"));
+
+    r.registerCommand({"диспетчер устройств", "device manager"},
+        [sys](const QString&) -> QString {
+            return sys->launchApp(QStringLiteral("devmgmt.msc")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("Device Manager"));
+
+    // ── Show desktop ──
+    r.registerCommand({"покажи рабочий стол", "show desktop", "рабочий стол"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->showDesktopCombo() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("show desktop — Win+D"));
 }
 
 // ============================================================
@@ -442,6 +522,42 @@ void PcCommandRegistry::registerBrowserCommands(CommandRegistry& r)
             sys->launchUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis"));
             return QStringLiteral("Opening repository");
         }, QStringLiteral("open GitHub"));
+
+    r.registerCommand({"включи музыку", "play music", "ютуб мюзик", "youtube music"},
+        [sys](const QString&) -> QString {
+            sys->launchUrl(QStringLiteral("https://music.youtube.com"));
+            return QStringLiteral("Opening YouTube Music");
+        }, QStringLiteral("open YouTube Music"));
+
+    r.registerCommand({"новая вкладка", "new tab"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->newTab() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("new tab — Ctrl+T"));
+
+    r.registerCommand({"закрой вкладку", "close tab"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->closeTab() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("close tab — Ctrl+W"));
+
+    r.registerCommand({"следующая вкладка", "next tab"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->nextTab() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("next tab — Ctrl+Tab"));
+
+    r.registerCommand({"предыдущая вкладка", "previous tab", "prev tab"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->prevTab() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("previous tab — Ctrl+Shift+Tab"));
+
+    r.registerCommand({"полный экран", "fullscreen", "f11"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->pressKey(QStringLiteral("F11")) ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("fullscreen toggle — F11"));
+
+    r.registerCommand({"сохрани страницу", "save page"},
+        [this](const QString&) -> QString {
+            return m_pc->keyboard()->save() ? QString() : QStringLiteral("Error");
+        }, QStringLiteral("save page — Ctrl+S"));
 }
 
 // ============================================================
@@ -463,6 +579,65 @@ void PcCommandRegistry::registerFileCommands(CommandRegistry& r)
                        .arg(found.size()).arg(found.first());
         },
         QStringLiteral("find file <name> — e.g. 'find file report.pdf'"),
+        /*prefixMatch=*/true);
+
+    r.registerCommand({"удали файл", "delete file"},
+        [](const QString& full) -> QString {
+            QString path = remainderAfter(full, QStringLiteral("файл"));
+            if (path.isEmpty()) path = remainderAfter(full, QStringLiteral("file"));
+            if (path.isEmpty()) return QStringLiteral("Specify file path");
+            path = path.trimmed().remove(QLatin1Char('"'));
+            QFileInfo fi(path);
+            if (!fi.exists()) return QStringLiteral("File not found: ") + path;
+            if (fi.isDir()) return QStringLiteral("That's a directory. Use 'удали папку'");
+            return QFile::moveToTrash(path)
+                ? QStringLiteral("Moved to trash: ") + fi.fileName()
+                : QStringLiteral("Failed to delete: ") + path;
+        },
+        QStringLiteral("delete file <path> — moves to recycle bin"),
+        /*prefixMatch=*/true);
+
+    r.registerCommand({"удали папку", "delete folder"},
+        [](const QString& full) -> QString {
+            QString path = remainderAfter(full, QStringLiteral("папку"));
+            if (path.isEmpty()) path = remainderAfter(full, QStringLiteral("folder"));
+            if (path.isEmpty()) return QStringLiteral("Specify folder path");
+            path = path.trimmed().remove(QLatin1Char('"'));
+            QDir dir(path);
+            if (!dir.exists()) return QStringLiteral("Folder not found: ") + path;
+            return QFile::moveToTrash(path)
+                ? QStringLiteral("Moved to trash: ") + dir.dirName()
+                : QStringLiteral("Failed to delete: ") + path;
+        },
+        QStringLiteral("delete folder <path> — moves to recycle bin"),
+        /*prefixMatch=*/true);
+
+    r.registerCommand({"открой папку", "open folder"},
+        [sys](const QString& full) -> QString {
+            QString path = remainderAfter(full, QStringLiteral("папку"));
+            if (path.isEmpty()) path = remainderAfter(full, QStringLiteral("folder"));
+            if (path.isEmpty()) return QStringLiteral("Specify folder path");
+            path = path.trimmed().remove(QLatin1Char('"'));
+            return sys->openPath(path) ? QString() : QStringLiteral("Not found: ") + path;
+        },
+        QStringLiteral("open folder <path>"),
+        /*prefixMatch=*/true);
+
+    r.registerCommand({"размер папки", "folder size"},
+        [](const QString& full) -> QString {
+            QString path = remainderAfter(full, QStringLiteral("папки"));
+            if (path.isEmpty()) path = remainderAfter(full, QStringLiteral("size"));
+            if (path.isEmpty()) return QStringLiteral("Specify path");
+            path = path.trimmed().remove(QLatin1Char('"'));
+            QDir dir(path);
+            if (!dir.exists()) return QStringLiteral("Not found: ") + path;
+            qint64 total = 0;
+            QDirIterator it(path, QDirIterator::Subdirectories);
+            while (it.hasNext()) { it.next(); total += it.fileInfo().size(); }
+            const double mb = total / (1024.0 * 1024.0);
+            return QStringLiteral("%1: %2 MB").arg(dir.dirName()).arg(mb, 0, 'f', 1);
+        },
+        QStringLiteral("folder size <path>"),
         /*prefixMatch=*/true);
 }
 
@@ -504,6 +679,47 @@ void PcCommandRegistry::registerMacroVoiceCommands(CommandRegistry& r)
             sys->setVolume(25);
             return QStringLiteral("Dev mode. CLion and Discord launched.");
         }, QStringLiteral("dev mode — launch work environment"));
+
+    r.registerCommand({"режим игры", "gaming mode", "хочу поиграть"},
+        [sys, wins](const QString&) -> QString {
+            wins->closeWindow(QStringLiteral("CLion"));
+            wins->closeWindow(QStringLiteral("VS Code"));
+            QThread::msleep(500);
+            sys->launchApp(QStringLiteral("steam"));
+            sys->setVolume(70);
+            return QStringLiteral("Gaming mode. IDE closed, Steam launched, volume 70%.");
+        }, QStringLiteral("gaming mode — close IDE, launch Steam"));
+
+    r.registerCommand({"режим музыки", "music mode", "включи фоновую музыку"},
+        [sys](const QString&) -> QString {
+            sys->launchUrl(QStringLiteral("https://music.youtube.com"));
+            QThread::msleep(1000);
+            sys->setVolume(35);
+            return QStringLiteral("Music mode. YouTube Music opened, volume 35%.");
+        }, QStringLiteral("music mode — open YouTube Music, set volume"));
+
+    r.registerCommand({"режим презентации", "presentation mode"},
+        [sys, this](const QString&) -> QString {
+            sys->setVolume(80);
+            QThread::msleep(200);
+            m_pc->keyboard()->pressKey(QStringLiteral("F11"));
+            return QStringLiteral("Presentation mode. Fullscreen, volume 80%.");
+        }, QStringLiteral("presentation — fullscreen + loud"));
+
+    r.registerCommand({"всё закрой", "close all", "закрой всё"},
+        [wins](const QString&) -> QString {
+            const auto windows = wins->allWindows();
+            int closed = 0;
+            for (const auto& w : windows) {
+                if (w.title.contains(QStringLiteral("J.A.R.V.I.S."))) continue;
+                if (w.title.contains(QStringLiteral("Explorer"))) continue;
+                if (w.title.isEmpty()) continue;
+                wins->closeWindow(w.title.left(30));
+                ++closed;
+                QThread::msleep(100);
+            }
+            return QStringLiteral("Closed %1 windows").arg(closed);
+        }, QStringLiteral("close all windows (except JARVIS)"));
 
     r.registerCommand({"запиши макрос", "начни запись макроса", "record macro"},
         [macros](const QString& full) -> QString {

@@ -109,7 +109,12 @@ QString ScreenAgent::runTesseract(const QImage& img) const
 
 QString ScreenAgent::extractScreenText(int monitor) const
 {
-    return runTesseract(captureScreen(monitor));
+    QString result;
+    const QString windowTitle = activeWindowTitle();
+    if (!windowTitle.isEmpty())
+        result += QStringLiteral("[Active window: ") + windowTitle + QStringLiteral("]\n");
+    result += runTesseract(captureScreen(monitor));
+    return result;
 }
 
 // =============================================================================
@@ -120,20 +125,45 @@ ScreenFindResult ScreenAgent::findText(const QString& text, int monitor) const
 {
     ScreenFindResult result;
     const QImage screen = captureScreen(monitor);
+
+    // Pass 1: coarse 3x3 grid to find the tile containing the text
     const int tileW = screen.width()  / 3;
     const int tileH = screen.height() / 3;
+    QRect hitTile;
 
     for (int row = 0; row < 3 && !result.found; ++row) {
         for (int col = 0; col < 3 && !result.found; ++col) {
             const QRect tile(col * tileW, row * tileH, tileW, tileH);
             if (runTesseract(screen.copy(tile)).contains(text, Qt::CaseInsensitive)) {
                 result.found = true;
-                result.x     = tile.center().x();
-                result.y     = tile.center().y();
-                result.text  = text;
+                hitTile = tile;
             }
         }
     }
+
+    if (!result.found) return result;
+
+    // Pass 2: subdivide the hit tile into 4 quadrants for precision
+    const int halfW = hitTile.width()  / 2;
+    const int halfH = hitTile.height() / 2;
+    QRect bestQuad = hitTile;
+
+    for (int qr = 0; qr < 2; ++qr) {
+        for (int qc = 0; qc < 2; ++qc) {
+            const QRect quad(hitTile.x() + qc * halfW,
+                             hitTile.y() + qr * halfH,
+                             halfW, halfH);
+            if (runTesseract(screen.copy(quad)).contains(text, Qt::CaseInsensitive)) {
+                bestQuad = quad;
+                goto found_quad;
+            }
+        }
+    }
+    found_quad:
+
+    result.x    = bestQuad.center().x();
+    result.y    = bestQuad.center().y();
+    result.text = text;
     return result;
 }
 
@@ -202,16 +232,76 @@ void ScreenAgent::scroll(int x, int y, int delta) const
 #endif
 }
 
-// clickText — не const т.к. emit
+// Semantic mapping: abstract concepts → concrete app names/window titles.
+// When the user says "найди браузер", we need to find Firefox/Brave/Chrome,
+// not the literal word "браузер" on screen.
+static QStringList expandSemanticTarget(const QString& text)
+{
+    const QString lo = text.toLower();
+    QStringList candidates;
+
+    struct Mapping { QStringList triggers; QStringList targets; };
+    static const QList<Mapping> mappings = {
+        // Browsers
+        {{QStringLiteral("браузер"), QStringLiteral("browser")},
+         {QStringLiteral("Firefox"), QStringLiteral("Brave"), QStringLiteral("Chrome"),
+          QStringLiteral("Edge"), QStringLiteral("Opera")}},
+        // Messengers
+        {{QStringLiteral("мессенджер"), QStringLiteral("messenger"), QStringLiteral("чат")},
+         {QStringLiteral("Telegram"), QStringLiteral("Discord"), QStringLiteral("Slack")}},
+        // Music
+        {{QStringLiteral("музык"), QStringLiteral("music"), QStringLiteral("плеер"), QStringLiteral("player")},
+         {QStringLiteral("Spotify"), QStringLiteral("YouTube Music"), QStringLiteral("VLC")}},
+        // IDE / editor
+        {{QStringLiteral("редактор"), QStringLiteral("editor"), QStringLiteral("ide")},
+         {QStringLiteral("CLion"), QStringLiteral("VS Code"), QStringLiteral("Code"),
+          QStringLiteral("Rider"), QStringLiteral("Notepad")}},
+        // Terminal
+        {{QStringLiteral("терминал"), QStringLiteral("terminal"), QStringLiteral("консол")},
+         {QStringLiteral("Terminal"), QStringLiteral("PowerShell"), QStringLiteral("cmd")}},
+        // Explorer
+        {{QStringLiteral("проводник"), QStringLiteral("explorer"), QStringLiteral("файлы"), QStringLiteral("files")},
+         {QStringLiteral("Explorer"), QStringLiteral("Проводник")}},
+    };
+
+    for (const auto& m : mappings) {
+        for (const auto& trigger : m.triggers) {
+            if (lo.contains(trigger)) {
+                candidates = m.targets;
+                break;
+            }
+        }
+        if (!candidates.isEmpty()) break;
+    }
+
+    // Always include the original text as fallback
+    candidates.append(text);
+    return candidates;
+}
+
+// clickText — try semantic window focus first, then OCR
 bool ScreenAgent::clickText(const QString& text) const
 {
-    const ScreenFindResult r = findText(text);
-    if (r.found) {
-        click(r.x, r.y);
-        // emit нельзя из const — используем const_cast безопасно (QObject сигналы thread-safe)
-        const_cast<ScreenAgent*>(this)->textFound(text, r.x, r.y);
-        return true;
+    // Step 1: try to find and focus an existing window by semantic name
+    const QStringList candidates = expandSemanticTarget(text);
+    for (const QString& candidate : candidates) {
+        if (focusWindow(candidate)) {
+            const_cast<ScreenAgent*>(this)->actionCompleted(
+                QStringLiteral("Focused window: ") + candidate);
+            return true;
+        }
     }
+
+    // Step 2: OCR-based text search on screen
+    for (const QString& candidate : candidates) {
+        const ScreenFindResult r = findText(candidate);
+        if (r.found) {
+            click(r.x, r.y);
+            const_cast<ScreenAgent*>(this)->textFound(candidate, r.x, r.y);
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -456,9 +546,13 @@ void ScreenAgent::describeScreen(
                     QJsonObject{
                         { "type", "text" },
                         { "text", QStringLiteral(
-                            "Describe what you see on this screenshot: active app, "
-                            "main UI elements, visible text, buttons, input fields. "
-                            "Be concise and structured.") }
+                            "Describe this screenshot concisely. Structure:\n"
+                            "1. Active application and window title\n"
+                            "2. Main content area — what is shown\n"
+                            "3. Key UI elements: buttons, tabs, input fields, menus\n"
+                            "4. Any errors, notifications, or popups visible\n"
+                            "5. Overall state: is the user working, browsing, coding, gaming?\n"
+                            "Respond in the same language as any visible text. Be precise about positions (top-left, center, bottom bar).") }
                     }
                 }}
             }
