@@ -5,6 +5,7 @@
 #include "command_dispatcher_tg.h"
 #include "j2j_telegram_gateway.h"
 #include "telegram_access_manager.h"
+#include "camera_agent.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
 #include "voice_synthesis_manager.h"
@@ -20,6 +21,7 @@
 #include <QPixmap>
 #include <QDir>
 #include <QFile>
+#include <QRegularExpression>
 #include <QSqlQuery>
 #include <QSqlDatabase>
 #include <QDebug>
@@ -42,6 +44,7 @@ CommandDispatcherTg::CommandDispatcherTg(J2JTelegramGateway* gateway,
     , m_accessMgr(accessMgr)
     , m_gourmet(new GourmetModule(this))
     , m_mediaAnalyzer(new MediaAnalyzerModule(this))
+    , m_camera(new CameraAgent(this))
     , m_startTime(QDateTime::currentDateTime())
 {
     qDebug() << "[CommandDispatcher] Initialized with"
@@ -97,6 +100,12 @@ DispatchResult CommandDispatcherTg::dispatch(qint64 chatId,
 
     if (cmd == QStringLiteral("/remind"))
         return cmdRemind(chatId, args, english);
+
+    if (cmd == QStringLiteral("/webcam") || cmd == QStringLiteral("/cam"))
+        return cmdWebcam(chatId, english);
+
+    if (cmd == QStringLiteral("/surveillance") || cmd == QStringLiteral("/watch"))
+        return cmdSurveillance(chatId, args, english);
 
     return {};  // not handled
 }
@@ -561,5 +570,128 @@ DispatchResult CommandDispatcherTg::cmdRemind(qint64 chatId,
             .arg(ProactiveReminderManager::instance().activeCount());
 
     qDebug() << "[CommandDispatcher] /remind set:" << minutes << "min —" << reminderText;
+    return r;
+}
+
+// ============================================================
+//  /webcam — capture a photo from the webcam
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdWebcam(qint64 chatId, bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    if (!m_camera->hasWebcam()) {
+        r.response = english
+            ? QStringLiteral("📷 No webcam detected on this PC.")
+            : QStringLiteral("📷 Веб-камера не обнаружена.");
+        return r;
+    }
+
+    r.response = english
+        ? QStringLiteral("📷 Capturing webcam...")
+        : QStringLiteral("📷 Захватываю с веб-камеры...");
+
+    // Async: capture will arrive via signal → send as photo
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    auto errConn = std::make_shared<QMetaObject::Connection>();
+
+    *conn = connect(m_camera, &CameraAgent::webcamCaptured, this,
+                    [this, chatId, english, conn, errConn](const QImage& img) {
+        disconnect(*conn);
+        disconnect(*errConn);
+
+        // Save to workspace and send
+        const QString dir = J2JTelegramGateway::workspaceOutputDir();
+        const QString ts = QDateTime::currentDateTime()
+            .toString(QStringLiteral("yyyyMMdd_HHmmss"));
+        const QString path = dir + QStringLiteral("/webcam_%1.jpg").arg(ts);
+        img.save(path, "JPEG", 85);
+
+        m_gateway->sendImageToMobile(chatId, path,
+            english ? QStringLiteral("📷 Webcam capture")
+                    : QStringLiteral("📷 Снимок с веб-камеры"));
+
+        qDebug() << "[CommandDispatcher] Webcam sent to chat" << chatId;
+    });
+
+    *errConn = connect(m_camera, &CameraAgent::captureError, this,
+                       [this, chatId, english, conn, errConn](const QString& msg) {
+        disconnect(*conn);
+        disconnect(*errConn);
+        m_gateway->sendOutboundMessage(chatId,
+            (english ? QStringLiteral("⚠ Webcam error: ") : QStringLiteral("⚠ Ошибка камеры: ")) + msg);
+    });
+
+    m_camera->captureWebcam();
+    return r;
+}
+
+// ============================================================
+//  /surveillance — periodic webcam+desktop streaming
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdSurveillance(qint64 chatId,
+                                                     const QString& args,
+                                                     bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    const QString lo = args.toLower().trimmed();
+
+    // /surveillance stop
+    if (lo.contains(QStringLiteral("stop")) || lo.contains(QStringLiteral("стоп"))
+        || lo.contains(QStringLiteral("off")) || lo.contains(QStringLiteral("выкл"))) {
+        m_camera->stopSurveillance();
+        r.response = english
+            ? QStringLiteral("🛑 Surveillance stopped.")
+            : QStringLiteral("🛑 Наблюдение остановлено.");
+        return r;
+    }
+
+    // Parse interval (default 30s)
+    int interval = 30;
+    static const QRegularExpression numRx(QStringLiteral("(\\d+)"));
+    auto m = numRx.match(args);
+    if (m.hasMatch()) interval = qBound(5, m.captured(1).toInt(), 300);
+
+    bool webcam  = !lo.contains(QStringLiteral("desktop only"));
+    bool desktop = !lo.contains(QStringLiteral("cam only"));
+
+    // Connect surveillance frames to Telegram delivery
+    connect(m_camera, &CameraAgent::surveillanceFrame, this,
+            [this, chatId](const QImage& img, const QString& source) {
+        const QString dir = J2JTelegramGateway::workspaceOutputDir();
+        const QString ts = QDateTime::currentDateTime()
+            .toString(QStringLiteral("yyyyMMdd_HHmmss"));
+        const QString path = dir + QStringLiteral("/surv_%1_%2.jpg")
+            .arg(source, ts);
+        img.save(path, "JPEG", 75);
+
+        const QString caption = (source == QStringLiteral("webcam"))
+            ? QStringLiteral("👁 Webcam") : QStringLiteral("🖥 Desktop");
+        m_gateway->sendImageToMobile(chatId, path, caption);
+    }, Qt::UniqueConnection);
+
+    m_camera->startSurveillance(interval, webcam, desktop);
+
+    r.response = english
+        ? QStringLiteral("👁 Surveillance active. Interval: *%1s*\n"
+                          "Webcam: %2 | Desktop: %3\n"
+                          "Use `/surveillance stop` to end.")
+            .arg(interval)
+            .arg(webcam  ? QStringLiteral("ON") : QStringLiteral("OFF"))
+            .arg(desktop ? QStringLiteral("ON") : QStringLiteral("OFF"))
+        : QStringLiteral("👁 Наблюдение запущено. Интервал: *%1с*\n"
+                          "Камера: %2 | Рабочий стол: %3\n"
+                          "Для остановки: `/surveillance stop`")
+            .arg(interval)
+            .arg(webcam  ? QStringLiteral("ВКЛ") : QStringLiteral("ВЫКЛ"))
+            .arg(desktop ? QStringLiteral("ВКЛ") : QStringLiteral("ВЫКЛ"));
+
+    qDebug() << "[CommandDispatcher] Surveillance started for chat" << chatId
+             << "interval:" << interval << "webcam:" << webcam << "desktop:" << desktop;
     return r;
 }

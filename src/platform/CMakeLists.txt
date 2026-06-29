@@ -16,6 +16,8 @@ add_library(jarvis_platform OBJECT
     screen_agent.cpp
     clipboard_watcher.h
     clipboard_watcher.cpp
+    camera_agent.h
+    camera_agent.cpp
 )
 
 target_include_directories(jarvis_platform PUBLIC
@@ -28,5 +30,5 @@ target_include_directories(jarvis_platform PRIVATE
 
 target_link_libraries(jarvis_platform
     PUBLIC  jarvis_common Qt6::Core Qt6::Gui Qt6::Widgets
-    PRIVATE Qt6::Network user32 ole32 oleaut32 shell32
+    PRIVATE Qt6::Network Qt6::Multimedia user32 ole32 oleaut32 shell32
 )

@@ -106,6 +106,29 @@ else()
             "Extract vosk_api.h, libvosk.lib, libvosk.dll to: ${_vosk_dir}/")
 endif()
 
+# ============================================================
+# OpenCV — optional, for face detection and security camera
+# ============================================================
+
+set(_opencv_dir "${CMAKE_SOURCE_DIR}/redist/opencv")
+
+find_package(OpenCV QUIET COMPONENTS core imgproc objdetect videoio highgui)
+if(OpenCV_FOUND)
+    set(JARVIS_HAS_OPENCV TRUE)
+    message(STATUS "OpenCV: FOUND (${OpenCV_VERSION}) — security camera enabled")
+elseif(EXISTS "${_opencv_dir}/include/opencv2/core.hpp")
+    # Use bundled OpenCV from redist/
+    set(JARVIS_HAS_OPENCV TRUE)
+    set(OpenCV_INCLUDE_DIRS "${_opencv_dir}/include")
+    file(GLOB OpenCV_LIBS "${_opencv_dir}/lib/*.lib")
+    message(STATUS "OpenCV: FOUND in redist/ — security camera enabled")
+else()
+    set(JARVIS_HAS_OPENCV FALSE)
+    message(STATUS "OpenCV: NOT FOUND — security camera disabled.\n"
+            "  Install: choco install opencv  OR\n"
+            "  Download to: ${_opencv_dir}/")
+endif()
+
 # --- Global compile definitions ---
 add_compile_definitions(
     JARVIS_VERSION="${PROJECT_VERSION}"
@@ -197,6 +220,12 @@ target_link_libraries(JarvisCore PUBLIC
 if(JARVIS_HAS_WEBENGINE)
     target_link_libraries(JarvisCore PUBLIC Qt6::WebEngineWidgets)
     target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_WEBENGINE=1)
+endif()
+
+if(JARVIS_HAS_OPENCV)
+    target_include_directories(JarvisCore PUBLIC ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(JarvisCore PUBLIC ${OpenCV_LIBS})
+    target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_OPENCV=1)
 endif()
 
 target_link_libraries(JarvisCore PRIVATE

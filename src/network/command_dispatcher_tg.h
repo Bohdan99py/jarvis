@@ -31,6 +31,7 @@ class TelegramAccessManager;
 class J2JTelegramGateway;
 class GourmetModule;
 class MediaAnalyzerModule;
+class CameraAgent;
 
 struct DispatchResult {
     bool    handled  = false;
@@ -69,10 +70,13 @@ private:
     DispatchResult cmdFridge(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdSummarize(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdRemind(qint64 chatId, const QString& args, bool english);
+    DispatchResult cmdWebcam(qint64 chatId, bool english);
+    DispatchResult cmdSurveillance(qint64 chatId, const QString& args, bool english);
 
-    J2JTelegramGateway*    m_gateway      = nullptr;
-    TelegramAccessManager* m_accessMgr    = nullptr;
-    GourmetModule*         m_gourmet      = nullptr;
+    J2JTelegramGateway*    m_gateway       = nullptr;
+    TelegramAccessManager* m_accessMgr     = nullptr;
+    GourmetModule*         m_gourmet       = nullptr;
     MediaAnalyzerModule*   m_mediaAnalyzer = nullptr;
+    CameraAgent*           m_camera        = nullptr;
     QDateTime              m_startTime;
 };

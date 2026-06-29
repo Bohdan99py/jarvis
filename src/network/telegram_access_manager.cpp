@@ -46,6 +46,10 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/telemetry"),       TelegramRole::Developer },
 
         // ── Admin (full access) ─────────────────────────────
+        { QStringLiteral("/webcam"),          TelegramRole::Admin },
+        { QStringLiteral("/cam"),             TelegramRole::Admin },
+        { QStringLiteral("/surveillance"),    TelegramRole::Admin },
+        { QStringLiteral("/watch"),           TelegramRole::Admin },
         { QStringLiteral("/admin_stats"),     TelegramRole::Admin },
         { QStringLiteral("/admin_grant"),     TelegramRole::Admin },
         { QStringLiteral("/admin_revoke"),    TelegramRole::Admin },
