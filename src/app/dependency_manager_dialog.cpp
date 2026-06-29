@@ -285,9 +285,9 @@ void DependencyManagerDialog::downloadFile(const QString& url,
     card->setDownloading(true);
     card->setProgress(0);
 
-    QNetworkRequest req(QUrl(url));
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    const QUrl qurl(url);
+    QNetworkRequest req(qurl);
+    req.setMaximumRedirectsAllowed(5);
     auto* reply = m_network->get(req);
 
     connect(reply, &QNetworkReply::downloadProgress, this,
