@@ -294,19 +294,19 @@ jobs:
 
       - name: Update installer version
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
           $content = Get-Content installer.iss -Raw
-          $content = $content -replace '#define MyAppVersion "[0-9]+\.[0-9]+\.[0-9]+"', "#define MyAppVersion `"$version`""
-          $content = $content -replace '#define MyAppBuildDir "build\\release_package"', '#define MyAppBuildDir "release_package"'
+          $content = $content -replace 'AppVersion=[\d\.]+', "AppVersion=$version"
+          $content = $content -replace 'OutputBaseFilename=Jarvis_Setup_v[\d\.]+', "OutputBaseFilename=Jarvis_Setup_v$version"
           Set-Content installer.iss $content
-        shell: pwsh
+          Write-Host "Installer version set to $version"
 
       - name: Build installer
         if: startsWith(github.ref, 'refs/tags/v')
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
         shell: cmd
-        continue-on-error: true
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -317,6 +317,6 @@ jobs:
           generate_release_notes: true
           files: |
             JARVIS-${{ github.ref_name }}-win64.zip
-            build/installer/JARVIS-Setup-*.exe
+            build/installer/Jarvis_Setup_v*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
