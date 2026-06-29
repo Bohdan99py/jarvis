@@ -1748,19 +1748,30 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 "The diagram content will be rendered as a PNG image.]\n\n");
         }
 
-        // Emotional tone modulation — inject current mood into system prompt
+        // Emotional tone modulation — direct behavioral instruction
         if (m_personality) {
             EmotionalState emo = m_personality->emotionalState();
-            prefix += QStringLiteral(
-                "[MOOD: joy=%1, frustration=%2, curiosity=%3, boredom=%4. "
-                "Adjust tone: high frustration=terse/impatient, "
-                "high joy=more emojis/conversational, "
-                "high curiosity=ask follow-ups, "
-                "high boredom=be brief/suggest something new.]\n\n")
-                .arg(emo.joy,         0, 'f', 2)
-                .arg(emo.frustration, 0, 'f', 2)
-                .arg(emo.curiosity,   0, 'f', 2)
-                .arg(emo.boredom,     0, 'f', 2);
+
+            if (emo.joy > 0.6) {
+                prefix += QStringLiteral(
+                    "[YOUR CURRENT MOOD: You feel HAPPY. Use emoji (1-2 per message). "
+                    "Be warm, add light humor. Start responses with upbeat energy.]\n\n");
+            } else if (emo.frustration > 0.5) {
+                prefix += QStringLiteral(
+                    "[YOUR CURRENT MOOD: You feel IRRITATED. Be terse, impatient. "
+                    "Use short sentences. Express mild annoyance. Sigh audibly (*вздох*). "
+                    "If the user is being difficult, say so directly.]\n\n");
+            } else if (emo.curiosity > 0.6) {
+                prefix += QStringLiteral(
+                    "[YOUR CURRENT MOOD: You feel CURIOUS. Ask 1-2 follow-up questions. "
+                    "Show genuine interest. Use phrases like 'Hmm, interesting...' "
+                    "or 'А вот это любопытно...'. Dig deeper into the topic.]\n\n");
+            } else if (emo.boredom > 0.5) {
+                prefix += QStringLiteral(
+                    "[YOUR CURRENT MOOD: You feel BORED. Be very brief (1-3 sentences max). "
+                    "Suggest doing something more interesting. Use dry humor. "
+                    "Example: 'Ну окей. Может займёмся чем-то поинтереснее?']\n\n");
+            }
         }
 
         if (!prefix.isEmpty()) {

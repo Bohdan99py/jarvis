@@ -27,25 +27,35 @@
 #include <optional>
 
 // ── Access roles (ordered by privilege) ──────────────────────
+//
+//   User      — free chat, /menu, /help only
+//   Tester    — + /bug, /kanban (no system access)
+//   Developer — + /sysinfo, /disk, /screenshot, /tasks, /screen_analyze
+//                (NO admin controls, NO user analytics)
+//   Admin     — full access: /admin_*, user analytics, system control
+//
 enum class TelegramRole {
-    User   = 0,   // basic: /menu, /help, free chat
-    Tester = 1,   // + /bug, /kanban, /telemetry
-    Admin  = 2,   // + /admin_stats, /admin_grant, /admin_revoke
+    User      = 0,
+    Tester    = 1,
+    Developer = 2,
+    Admin     = 3,
 };
 
 inline QString telegramRoleToString(TelegramRole r)
 {
     switch (r) {
-    case TelegramRole::Admin:  return QStringLiteral("Admin");
-    case TelegramRole::Tester: return QStringLiteral("Tester");
-    case TelegramRole::User:   return QStringLiteral("User");
+    case TelegramRole::Admin:     return QStringLiteral("Admin");
+    case TelegramRole::Developer: return QStringLiteral("Developer");
+    case TelegramRole::Tester:    return QStringLiteral("Tester");
+    case TelegramRole::User:      return QStringLiteral("User");
     }
     return QStringLiteral("User");
 }
 
 inline TelegramRole telegramRoleFromString(const QString& s)
 {
-    if (s == QStringLiteral("Admin"))  return TelegramRole::Admin;
+    if (s == QStringLiteral("Admin"))     return TelegramRole::Admin;
+    if (s == QStringLiteral("Developer")) return TelegramRole::Developer;
     if (s == QStringLiteral("Tester")) return TelegramRole::Tester;
     return TelegramRole::User;
 }
@@ -98,6 +108,10 @@ public:
 
     // Revoke a session (admin action)
     bool revokeSession(qint64 chatId);
+
+    // Auto-bind on first message — no PIN needed.
+    // Calls ensureRegistered + bindSession in one step.
+    void autoBindSession(qint64 chatId, const QString& displayName);
 
     // The device ID of THIS local PC instance
     QString localDeviceId() const { return m_localDeviceId; }

@@ -18,42 +18,41 @@
 QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
 {
     return {
-        // User-level (everyone)
+        // ── User (everyone) ─────────────────────────────────
         { QStringLiteral("/start"),      TelegramRole::User },
         { QStringLiteral("/menu"),       TelegramRole::User },
         { QStringLiteral("/help"),       TelegramRole::User },
         { QStringLiteral("/cancel"),     TelegramRole::User },
+        { QStringLiteral("/uptime"),     TelegramRole::User },
+        { QStringLiteral("/note"),       TelegramRole::User },
+        { QStringLiteral("/notes"),      TelegramRole::User },
+        { QStringLiteral("/stop_voice"), TelegramRole::User },
+        { QStringLiteral("/fridge"),     TelegramRole::User },
+        { QStringLiteral("/remind"),     TelegramRole::User },
 
-        // User-level extras
-        { QStringLiteral("/uptime"),         TelegramRole::User },
-        { QStringLiteral("/note"),           TelegramRole::User },
-        { QStringLiteral("/notes"),          TelegramRole::User },
-        { QStringLiteral("/screen_analyze"), TelegramRole::User },
-        { QStringLiteral("/stop_voice"),     TelegramRole::User },
-        { QStringLiteral("/cache_stats"),    TelegramRole::User },
-        { QStringLiteral("/fridge"),         TelegramRole::User },
-        { QStringLiteral("/summarize"),      TelegramRole::User },
-        { QStringLiteral("/remind"),         TelegramRole::User },
-
-        // Session management — Admin only
-        { QStringLiteral("/sessions"),       TelegramRole::Admin },
-        { QStringLiteral("/bind_pc"),        TelegramRole::Admin },
-        { QStringLiteral("/revoke_session"), TelegramRole::Admin },
-
-        // Tester-level
+        // ── Tester (+ bug reports, kanban) ──────────────────
         { QStringLiteral("/bug"),        TelegramRole::Tester },
         { QStringLiteral("/kanban"),     TelegramRole::Tester },
-        { QStringLiteral("/telemetry"),  TelegramRole::Tester },
         { QStringLiteral("/tasks"),      TelegramRole::Tester },
+        { QStringLiteral("/summarize"),  TelegramRole::Tester },
 
-        // Admin-level
-        { QStringLiteral("/admin_stats"),  TelegramRole::Admin },
-        { QStringLiteral("/admin_grant"),  TelegramRole::Admin },
-        { QStringLiteral("/admin_revoke"), TelegramRole::Admin },
-        { QStringLiteral("/admin_users"),  TelegramRole::Admin },
-        { QStringLiteral("/screenshot"),   TelegramRole::Admin },
-        { QStringLiteral("/sysinfo"),      TelegramRole::Admin },
-        { QStringLiteral("/disk"),         TelegramRole::Admin },
+        // ── Developer (+ system info, screen, code tools) ───
+        //    NO access to: admin commands, user analytics
+        { QStringLiteral("/screenshot"),      TelegramRole::Developer },
+        { QStringLiteral("/sysinfo"),         TelegramRole::Developer },
+        { QStringLiteral("/disk"),            TelegramRole::Developer },
+        { QStringLiteral("/screen_analyze"),  TelegramRole::Developer },
+        { QStringLiteral("/cache_stats"),     TelegramRole::Developer },
+        { QStringLiteral("/telemetry"),       TelegramRole::Developer },
+
+        // ── Admin (full access) ─────────────────────────────
+        { QStringLiteral("/admin_stats"),     TelegramRole::Admin },
+        { QStringLiteral("/admin_grant"),     TelegramRole::Admin },
+        { QStringLiteral("/admin_revoke"),    TelegramRole::Admin },
+        { QStringLiteral("/admin_users"),     TelegramRole::Admin },
+        { QStringLiteral("/sessions"),        TelegramRole::Admin },
+        { QStringLiteral("/bind_pc"),         TelegramRole::Admin },
+        { QStringLiteral("/revoke_session"),  TelegramRole::Admin },
     };
 }
 
@@ -295,6 +294,15 @@ bool TelegramAccessManager::revokeSession(qint64 chatId)
 
     qDebug() << "[AccessManager] Session revoked for chat:" << chatId;
     return true;
+}
+
+void TelegramAccessManager::autoBindSession(qint64 chatId,
+                                              const QString& displayName)
+{
+    ensureRegistered(chatId, displayName);
+    bindSession(chatId);
+    qDebug() << "[AccessManager] Auto-bound chat" << chatId
+             << "(" << displayName << ") — no PIN required";
 }
 
 // ============================================================
