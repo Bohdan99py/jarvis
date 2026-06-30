@@ -246,6 +246,7 @@ signals:
     void messageSaved(qint64 messageId);
     void fileIndexed(const QString& filePath);
 
+public:
     QSqlDatabase connection();
 
 private:
