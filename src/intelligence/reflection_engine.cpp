@@ -357,7 +357,7 @@ QList<QPair<QString, QString>> ReflectionEngine::fetchLast24hDialogue() const
     QList<QPair<QString, QString>> dialogue;
     if (!DatabaseManager::instance().isOpen()) return dialogue;
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT role, content FROM chat_history "
         "WHERE user_id = 1 "

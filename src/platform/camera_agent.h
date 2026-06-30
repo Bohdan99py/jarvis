@@ -55,12 +55,14 @@ private slots:
 
 private:
     void initCamera();
+    void releaseCamera();
 
     QCamera*               m_camera   = nullptr;
     QMediaCaptureSession*  m_session  = nullptr;
     QImageCapture*         m_capture  = nullptr;
     QVideoSink*            m_sink     = nullptr;
     QTimer*                m_survTimer = nullptr;
+    QTimer*                m_releaseTimer = nullptr;
 
     bool m_survWebcam  = true;
     bool m_survDesktop = true;

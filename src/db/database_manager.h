@@ -246,6 +246,8 @@ signals:
     void messageSaved(qint64 messageId);
     void fileIndexed(const QString& filePath);
 
+    QSqlDatabase connection();
+
 private:
     explicit DatabaseManager(QObject* parent = nullptr);
     ~DatabaseManager() override;
@@ -254,7 +256,6 @@ private:
     bool runMigrations();
     bool execQuery(const QString& sql);
     void logError(const QString& context, const QSqlError& err);
-    QSqlDatabase connection();
 
     QSqlDatabase   m_db;
     QString        m_dbPath;

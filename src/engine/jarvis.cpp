@@ -2115,6 +2115,10 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
 
     emit asyncResponseReady(fullResponse);
 
+    if (fullResponse.length() > 20)
+        MemoryManager::instance().store(QStringLiteral("dialogue"),
+                                         QStringLiteral("JARVIS: ") + fullResponse.left(500), 0.3);
+
     if (hadAttachments) {
         emit attachmentsConsumed();
     }

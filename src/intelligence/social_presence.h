@@ -121,10 +121,10 @@ private:
     QDateTime           m_lastNudgeTime;
     QDateTime           m_lastResponseTime;
 
-    static constexpr int BASE_NUDGE_INTERVAL_SEC = 1800;  // 30 min default
-    static constexpr int MIN_NUDGE_INTERVAL_SEC  = 600;   // 10 min floor
-    static constexpr int MAX_NUDGE_INTERVAL_SEC  = 7200;  // 2 hour ceiling
-    static constexpr int NUDGE_CHECK_INTERVAL_MS = 30000; // check every 30s
+    static constexpr int BASE_NUDGE_INTERVAL_SEC = 900;   // 15 min default
+    static constexpr int MIN_NUDGE_INTERVAL_SEC  = 300;   // 5 min floor
+    static constexpr int MAX_NUDGE_INTERVAL_SEC  = 3600;  // 1 hour ceiling
+    static constexpr int NUDGE_CHECK_INTERVAL_MS = 15000; // check every 15s
 
     static const QStringList& nudgeQuestionPool();
     static const QStringList& sarcasticResponsePool();

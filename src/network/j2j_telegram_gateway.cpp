@@ -1858,6 +1858,27 @@ void J2JTelegramGateway::markAwaitingCompanionAnswer(qint64 chatId)
 }
 
 // ============================================================
+//  Desktop → Telegram message sync
+// ============================================================
+
+void J2JTelegramGateway::forwardDesktopUserMessage(const QString& text)
+{
+    if (!m_running || !m_accessMgr || text.isEmpty()) return;
+    const qint64 owner = m_accessMgr->primaryOwnerChatId();
+    if (owner == 0) return;
+    sendMessage(owner, QStringLiteral("💻 *You (PC):*\n%1").arg(text));
+}
+
+void J2JTelegramGateway::forwardDesktopAiResponse(const QString& text)
+{
+    if (!m_running || !m_accessMgr || text.isEmpty()) return;
+    const qint64 owner = m_accessMgr->primaryOwnerChatId();
+    if (owner == 0) return;
+    const QString truncated = text.length() > 4000 ? text.left(4000) + QStringLiteral("…") : text;
+    sendMessage(owner, QStringLiteral("💻 *JARVIS (PC):*\n%1").arg(truncated));
+}
+
+// ============================================================
 //  Outbound Image Delivery (Desktop → Telegram)
 // ============================================================
 

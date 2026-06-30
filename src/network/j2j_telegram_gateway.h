@@ -146,6 +146,10 @@ public:
     // Mark a chat as waiting for a companion answer (да/нет/ок)
     void markAwaitingCompanionAnswer(qint64 chatId);
 
+    // Forward PC desktop chat to the owner's Telegram (bidirectional sync)
+    void forwardDesktopUserMessage(const QString& text);
+    void forwardDesktopAiResponse(const QString& text);
+
     // Outbound media delivery to mobile
     void sendImageToMobile(qint64 chatId, const QString& filePath,
                            const QString& caption = QString());

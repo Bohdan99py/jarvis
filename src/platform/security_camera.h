@@ -29,6 +29,7 @@
 #include <QString>
 #include <QMutex>
 #include <QElapsedTimer>
+#include <atomic>
 
 class SecurityCamera : public QObject
 {
@@ -125,14 +126,15 @@ private:
     bool m_monitoring        = false;
     bool m_inputHookInstalled = false;
     bool m_screenLocked      = false;
-    bool m_recording         = false;
+    std::atomic<bool> m_recording{false};
+    std::atomic<bool> m_stopping{false};
 
     QImage m_prevFrame;
     QElapsedTimer  m_companionCooldown;
     bool           m_companionSuppressed = false;
     int            m_ownerAbsentTicks = 0;
 
-    static constexpr int OWNER_ABSENT_LOCK_TICKS = 3; // ~15s at 5s checks
+    static constexpr int OWNER_ABSENT_LOCK_TICKS = 3; // ~15s at 5s sentinel checks
     static constexpr int LOCK_CHECK_INTERVAL_MS  = 3000; // 3s face scan while locked
 
     static QString ownerSamplesDir();

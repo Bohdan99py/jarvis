@@ -22,6 +22,12 @@ CameraAgent::CameraAgent(QObject* parent)
     connect(m_survTimer, &QTimer::timeout,
             this, &CameraAgent::onSurveillanceTick);
 
+    m_releaseTimer = new QTimer(this);
+    m_releaseTimer->setSingleShot(true);
+    m_releaseTimer->setInterval(5000);
+    connect(m_releaseTimer, &QTimer::timeout,
+            this, &CameraAgent::releaseCamera);
+
     qDebug() << "[CameraAgent] Initialized. Webcams available:"
              << availableCameras().size();
 }
@@ -77,6 +83,8 @@ void CameraAgent::initCamera()
         m_cameraReady = true;
         emit webcamCaptured(img);
         qDebug() << "[CameraAgent] Webcam frame captured:" << img.size();
+        if (!m_survTimer->isActive())
+            m_releaseTimer->start();
     });
 
     connect(m_capture, &QImageCapture::errorOccurred, this,
@@ -92,6 +100,25 @@ void CameraAgent::initCamera()
         m_cameraReady = true;
         qDebug() << "[CameraAgent] Camera ready";
     });
+}
+
+// ============================================================
+//  Camera release (turns off LED when not needed)
+// ============================================================
+
+void CameraAgent::releaseCamera()
+{
+    if (!m_camera) return;
+    if (m_survTimer->isActive()) return;
+
+    m_camera->stop();
+    delete m_camera;  m_camera  = nullptr;
+    delete m_session; m_session = nullptr;
+    delete m_capture; m_capture = nullptr;
+    delete m_sink;    m_sink    = nullptr;
+    m_cameraReady = false;
+
+    qDebug() << "[CameraAgent] Camera released (LED off)";
 }
 
 // ============================================================
@@ -169,6 +196,7 @@ void CameraAgent::startSurveillance(int intervalSec, bool webcam, bool desktop)
 void CameraAgent::stopSurveillance()
 {
     m_survTimer->stop();
+    m_releaseTimer->start();
     qDebug() << "[CameraAgent] Surveillance stopped";
 }
 

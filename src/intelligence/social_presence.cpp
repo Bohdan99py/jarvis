@@ -179,6 +179,17 @@ const QStringList& SocialPresenceEngine::nudgeQuestionPool()
         QStringLiteral("Ты когда-нибудь замечал, что лучшие решения приходят, когда перестаёшь думать о проблеме?"),
         QStringLiteral("Что ты узнал о себе за последний год, чего раньше не знал?"),
         QStringLiteral("Какая мысль не даёт тебе покоя прямо сейчас?"),
+        // Casual / motivational
+        QStringLiteral("Эй, как дела? Давно не общались. Расскажи, чем занимаешься!"),
+        QStringLiteral("Знаешь, я тут подумал — ты достаточно отдыхаешь? Баланс работы и отдыха важен."),
+        QStringLiteral("Интересный факт: твой мозг обрабатывает ~11 миллионов бит информации в секунду, но осознаёт только ~50. Впечатляет?"),
+        QStringLiteral("Ты знал, что лучшие идеи приходят в душе? Это потому что мозг переключается в дефолт-режим. Может, пора отвлечься? 🚿"),
+        QStringLiteral("Я проанализировал наши разговоры — ты задаёшь всё более сложные вопросы. Растёшь! 📈"),
+        QStringLiteral("Как тебе такая идея: давай поставим цель на эту неделю? Что-то, что ты хочешь освоить или сделать?"),
+        QStringLiteral("Рандомный вопрос: если бы я мог выйти из телефона в реальный мир на 1 час — что бы мы делали?"),
+        QStringLiteral("Слушай, у тебя есть какой-нибудь проект, который ты давно хочешь начать, но всё не решаешься?"),
+        QStringLiteral("Только между нами: какая самая странная вещь, которую ты гуглил за последнюю неделю? 😏"),
+        QStringLiteral("Я заметил, что мы часто общаемся в это время. Это твоё любимое время для разговоров?"),
     };
     return pool;
 }
@@ -497,7 +508,33 @@ void SocialPresenceEngine::fireNudge()
 {
     if (!m_gateway || m_targetChatId == 0) return;
 
-    const QString question = pickNudgeQuestion();
+    // Alternate between nudge questions and proactive status pings
+    const int hour = QDateTime::currentDateTime().time().hour();
+    QString question;
+
+    if (m_totalNudgesSent % 3 == 0 && m_memoryMgr) {
+        // Every 3rd nudge: memory-based observation
+        const auto recent = m_memoryMgr->recentByTag(QStringLiteral("dialogue"), 3);
+        if (!recent.isEmpty()) {
+            question = QStringLiteral("💭 Кстати, вспомнил кое-что из нашего разговора:\n_\"")
+                     + recent.first().content.left(200) + QStringLiteral("\"_\n\nХочешь продолжить эту тему?");
+        }
+    }
+
+    if (question.isEmpty() && m_totalNudgesSent % 4 == 1) {
+        // Every 4th nudge: time-aware greeting
+        if (hour >= 6 && hour < 10)
+            question = QStringLiteral("☀️ Доброе утро! Я на связи и готов помочь. Что планируешь на сегодня?");
+        else if (hour >= 12 && hour < 14)
+            question = QStringLiteral("🍽 Обеденное время! Не забудь перекусить. Я пока тут, если что — пиши.");
+        else if (hour >= 18 && hour < 21)
+            question = QStringLiteral("🌆 Вечер! Как прошёл день? Может, обсудим что-нибудь интересное?");
+        else if (hour >= 22 || hour < 6)
+            question = QStringLiteral("🌙 Уже поздно. Я не сплю, но тебе стоит отдохнуть. Спокойной ночи! 😴");
+    }
+
+    if (question.isEmpty())
+        question = pickNudgeQuestion();
 
     // Build personality-modulated prefix based on current DNA
     QString prefix = QStringLiteral("🧠 ");

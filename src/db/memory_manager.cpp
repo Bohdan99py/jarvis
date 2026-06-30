@@ -55,7 +55,7 @@ void MemoryManager::ensureTable()
     if (!DatabaseManager::instance().isOpen()) return;
 
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
 
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS memory_vectors ("
@@ -311,7 +311,7 @@ qint64 MemoryManager::store(const QString& tag,
     const QMap<QString, float> vec = embed(content);
     const QByteArray vecData = serializeVector(vec);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT INTO memory_vectors "
         "(tag, content, importance, reinforcements, vector_data, created_at, last_accessed) "
@@ -329,8 +329,8 @@ qint64 MemoryManager::store(const QString& tag,
     const qint64 id = q.lastInsertId().toLongLong();
     ++m_totalDocuments;
 
-    // Rebuild IDF periodically
-    if (m_totalDocuments % IDF_REBUILD_THRESHOLD == 0)
+    // Rebuild IDF: on first few stores and then periodically
+    if (m_totalDocuments <= 5 || m_totalDocuments % IDF_REBUILD_THRESHOLD == 0)
         rebuildIdf();
 
     emit memoryStored(id, tag);
@@ -356,7 +356,7 @@ void MemoryManager::reinforce(qint64 chunkId)
 {
     QMutexLocker lock(&m_mutex);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "UPDATE memory_vectors SET "
         "  reinforcements = reinforcements + 1, "
@@ -389,7 +389,7 @@ QList<MemorySearchResult> MemoryManager::search(const QString& query,
         sql += QStringLiteral("WHERE tag = :tag ");
     sql += QStringLiteral("ORDER BY created_at DESC LIMIT 500");
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(sql);
     if (!tagFilter.isEmpty())
         q.bindValue(QStringLiteral(":tag"), tagFilter);
@@ -431,7 +431,7 @@ QList<MemorySearchResult> MemoryManager::search(const QString& query,
 
     // Update last_accessed for returned results
     for (const auto& r : results) {
-        QSqlQuery update(QSqlDatabase::database());
+        QSqlQuery update(DatabaseManager::instance().connection());
         update.prepare(QStringLiteral(
             "UPDATE memory_vectors SET last_accessed = datetime('now') "
             "WHERE id = :id"));
@@ -450,7 +450,7 @@ QList<MemoryChunk> MemoryManager::recentByTag(const QString& tag, int limit) con
 {
     QMutexLocker lock(&m_mutex);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT id, tag, content, importance, reinforcements, "
         "       created_at, last_accessed "
@@ -506,7 +506,7 @@ int MemoryManager::prune(int maxAge_days, double minImportance)
 {
     QMutexLocker lock(&m_mutex);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "DELETE FROM memory_vectors "
         "WHERE importance < :minImp "
@@ -530,7 +530,7 @@ int MemoryManager::count() const
 {
     QMutexLocker lock(&m_mutex);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral("SELECT COUNT(*) FROM memory_vectors"));
     return q.next() ? q.value(0).toInt() : 0;
 }
@@ -545,7 +545,7 @@ void MemoryManager::rebuildIdf()
     QHash<QString, int> docFreq;
     int docCount = 0;
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral("SELECT content FROM memory_vectors"));
 
     while (q.next()) {

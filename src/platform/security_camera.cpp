@@ -15,6 +15,7 @@
 #include <QDebug>
 #include <QThread>
 #include <QtConcurrent>
+#include <QCoreApplication>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -445,6 +446,7 @@ void SecurityCamera::startMonitoring(int sentinelIntervalSec)
 
 void SecurityCamera::stopMonitoring()
 {
+    m_stopping = true;
     m_monitoring = false;
     m_sentinelTimer->stop();
     m_deescalateTimer->stop();
@@ -454,7 +456,16 @@ void SecurityCamera::stopMonitoring()
         emit requestUnlockOverlay();
     }
     removeInputHook();
+
+    if (m_recording) {
+        QElapsedTimer wait;
+        wait.start();
+        while (m_recording && wait.elapsed() < 25000)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    }
+
     deescalateToOff();
+    m_stopping = false;
 }
 
 bool SecurityCamera::isMonitoring() const { return m_monitoring; }
@@ -739,17 +750,36 @@ void SecurityCamera::onSentinelTick()
 
     if (m_powerState == Off) return; // only input hooks active
 
-    // ── Sentinel mode: low-res motion check ────────────────
+    // ── Sentinel mode: low-res motion check + face presence ─
     if (m_powerState == Sentinel) {
         const QImage lowRes = captureFrameLowRes();
         if (lowRes.isNull()) return;
 
         if (detectMotion(lowRes)) {
-            // Motion detected → escalate to full alert
             escalateToFullAlert();
-
             if (m_alertMotion)
                 emit motionDetected(lowRes);
+            return;
+        }
+
+        if (m_ownerEnrolled && !m_screenLocked) {
+            const int faces = detectFaces(lowRes);
+            if (faces == 0) {
+                ++m_ownerAbsentTicks;
+                if (m_ownerAbsentTicks >= OWNER_ABSENT_LOCK_TICKS) {
+                    escalateToFullAlert();
+                    const QImage hiRes = captureFrameFullRes();
+                    if (!hiRes.isNull() && detectFaces(hiRes) == 0) {
+                        lockScreen();
+                        emit ownerAbsent(hiRes);
+                        emit alertMessage(QStringLiteral(
+                            "🔒 Owner absent — screen locked. Come back to auto-unlock."));
+                    }
+                    m_ownerAbsentTicks = 0;
+                }
+            } else {
+                m_ownerAbsentTicks = 0;
+            }
         }
         return;
     }
@@ -770,8 +800,12 @@ void SecurityCamera::onSentinelTick()
                 "🔒 Owner absent — screen locked. Come back to auto-unlock."));
             m_ownerAbsentTicks = 0;
         }
-        if (!m_deescalateTimer->isActive())
+        if (m_ownerEnrolled && !m_screenLocked
+            && m_ownerAbsentTicks < OWNER_ABSENT_LOCK_TICKS) {
+            m_deescalateTimer->stop();
+        } else if (!m_deescalateTimer->isActive()) {
             m_deescalateTimer->start(FULL_ALERT_TIMEOUT_MS);
+        }
         return;
     }
 
@@ -782,11 +816,7 @@ void SecurityCamera::onSentinelTick()
 
     const bool ownerPresent = m_ownerEnrolled && isOwner(frame);
 
-    // Check if companion cooldown is active
-    if (m_companionSuppressed && m_companionCooldown.elapsed() > 0) {
-        // Cooldown expired — re-enable alerts
-        m_companionSuppressed = false;
-    }
+    // companion cooldown is managed by QTimer::singleShot in confirmCompanionOk()
 
     if (ownerPresent) {
         emit ownerRecognized(frame);
@@ -905,6 +935,7 @@ void SecurityCamera::recordMotionClip()
             qWarning() << "[SecurityCam] BG recorder: camera open failed";
             QMetaObject::invokeMethod(this, [this]() {
                 m_recording = false;
+                if (m_stopping) return;
                 if (m_monitoring) {
                     openCam();
                     m_sentinelTimer->start();
@@ -928,6 +959,7 @@ void SecurityCamera::recordMotionClip()
             recorder.release();
             QMetaObject::invokeMethod(this, [this]() {
                 m_recording = false;
+                if (m_stopping) return;
                 if (m_monitoring) {
                     openCam();
                     m_sentinelTimer->start();
@@ -957,6 +989,7 @@ void SecurityCamera::recordMotionClip()
 
         QMetaObject::invokeMethod(this, [this, path]() {
             m_recording = false;
+            if (m_stopping) return;
             emit motionVideoReady(path);
             if (m_monitoring) {
                 openCam();

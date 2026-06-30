@@ -3607,6 +3607,12 @@ void MainWindow::onSend()
     }
     appendLog(Str::logSender(), userLog, Theme::LogColors::user);
 
+    // ── Sync PC message → Telegram owner chat ─────────────
+    if (auto* mesh = m_jarvis->meshConnector()) {
+        if (auto* gw = mesh->telegramGateway())
+            gw->forwardDesktopUserMessage(text);
+    }
+
     if (m_jarvis->multiAgentMode()) {
         m_agentLabel->setText(Str::agentClaude());
     }
@@ -3769,6 +3775,12 @@ void MainWindow::onSend()
         } else {
             appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
             if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
+        }
+
+        // ── Sync PC response → Telegram owner chat ──
+        if (auto* mesh = m_jarvis->meshConnector()) {
+            if (auto* gw = mesh->telegramGateway())
+                gw->forwardDesktopAiResponse(response);
         }
 
         // ── Сохраняем синхронный ответ в датасет (rating=0) ──
@@ -3955,6 +3967,12 @@ void MainWindow::onAsyncResponse(const QString& response)
         return;
 
     m_audioManager->playSuccess();
+
+    // ── Sync PC async response → Telegram owner chat ──
+    if (auto* mesh = m_jarvis->meshConnector()) {
+        if (auto* gw = mesh->telegramGateway())
+            gw->forwardDesktopAiResponse(response);
+    }
 
     // Check if the LLM response contains a diagram — render it to the
     // visual dashboard. Uses the same 3-path pipeline as Telegram.
