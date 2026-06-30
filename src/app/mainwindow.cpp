@@ -41,6 +41,7 @@
 #include "mobile_pairing_manager.h"
 #include "j2j_mesh_connector.h"
 #include "j2j_telegram_gateway.h"
+#include "telegram_access_manager.h"
 #include "jarvis_response.h"
 #include "security_camera.h"
 #include "dependency_manager_dialog.h"
@@ -70,6 +71,7 @@
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QScreen>
+#include <QDateTime>
 #include <QTime>
 #include <QDate>
 #include <QFont>
@@ -2291,6 +2293,7 @@ void MainWindow::buildMenuBar()
             IS_EN ? QStringLiteral("📷 Camera") : QStringLiteral("📷 Камера"));
 
 #ifdef JARVIS_HAS_OPENCV
+        // ── Face enrollment ────────────────────────────────
         auto* actEnroll = camMenu->addAction(
             IS_EN ? QStringLiteral("👤 Enroll Owner Face")
                   : QStringLiteral("👤 Обучить лицо владельца"));
@@ -2353,24 +2356,267 @@ void MainWindow::buildMenuBar()
 
         camMenu->addSeparator();
 
+        // ── Security guard ON / OFF ────────────────────────
         auto* actGuardOn = camMenu->addAction(
             IS_EN ? QStringLiteral("🛡 Start Security Guard")
                   : QStringLiteral("🛡 Включить охрану"));
-        connect(actGuardOn, &QAction::triggered, this, [this]() {
-            auto* sec = new SecurityCamera(this);
-            sec->startMonitoring(5);
-            connect(sec, &SecurityCamera::ownerRecognized, this,
-                    [this](const QImage&) {
-                // Quiet — owner recognized, no action needed
+        auto* actGuardOff = camMenu->addAction(
+            IS_EN ? QStringLiteral("🔴 Stop Security Guard")
+                  : QStringLiteral("🔴 Выключить охрану"));
+        actGuardOff->setEnabled(false);
+
+        // ── Lock / Unlock manually ─────────────────────────
+        camMenu->addSeparator();
+        auto* actLockNow = camMenu->addAction(
+            IS_EN ? QStringLiteral("🔒 Lock Screen Now")
+                  : QStringLiteral("🔒 Заблокировать экран"));
+        actLockNow->setEnabled(false);
+
+        auto* actUnlockNow = camMenu->addAction(
+            IS_EN ? QStringLiteral("🔓 Unlock Screen")
+                  : QStringLiteral("🔓 Разблокировать экран"));
+        actUnlockNow->setEnabled(false);
+
+        // ── Toggle options ─────────────────────────────────
+        camMenu->addSeparator();
+        auto* actAutoLock = camMenu->addAction(
+            IS_EN ? QStringLiteral("Auto-lock when owner leaves")
+                  : QStringLiteral("Авто-блокировка при уходе"));
+        actAutoLock->setCheckable(true);
+        actAutoLock->setChecked(true);
+
+        auto* actAutoUnlock = camMenu->addAction(
+            IS_EN ? QStringLiteral("Auto-unlock on owner face")
+                  : QStringLiteral("Авто-разблокировка по лицу"));
+        actAutoUnlock->setCheckable(true);
+        actAutoUnlock->setChecked(true);
+
+        auto* actMotionAlert = camMenu->addAction(
+            IS_EN ? QStringLiteral("Motion alerts + video")
+                  : QStringLiteral("Оповещения о движении + видео"));
+        actMotionAlert->setCheckable(true);
+        actMotionAlert->setChecked(true);
+
+        auto* actUnknownAlert = camMenu->addAction(
+            IS_EN ? QStringLiteral("Alert on unknown faces")
+                  : QStringLiteral("Оповещение о чужих лицах"));
+        actUnknownAlert->setCheckable(true);
+        actUnknownAlert->setChecked(true);
+
+        // ── Check now ──────────────────────────────────────
+        camMenu->addSeparator();
+        auto* actCheckNow = camMenu->addAction(
+            IS_EN ? QStringLiteral("👁 Check Now")
+                  : QStringLiteral("👁 Проверить сейчас"));
+        actCheckNow->setEnabled(false);
+
+        // ── Helper: create lock overlay once ───────────────
+        // Blocks Alt+Tab, Alt+F4, Win key, Ctrl+Esc, Task Manager.
+        // Emergency unlock: Escape 5 times within 2 seconds (secret).
+        class LockOverlayWidget : public QWidget {
+        public:
+            using QWidget::QWidget;
+            void activate() {
+                showFullScreen();
+                raise();
+                activateWindow();
+                setFocus();
+                grabKeyboard();
+                grabMouse();
+                // Re-grab periodically — OS can steal focus
+                if (!m_refocusTimer) {
+                    m_refocusTimer = new QTimer(this);
+                    connect(m_refocusTimer, &QTimer::timeout, this, [this]() {
+                        if (!isVisible()) return;
+                        raise();
+                        activateWindow();
+                        setFocus();
+                        grabKeyboard();
+                        grabMouse();
+                    });
+                }
+                m_refocusTimer->start(500);
+            }
+            void deactivate() {
+                if (m_refocusTimer) m_refocusTimer->stop();
+                releaseKeyboard();
+                releaseMouse();
+                hide();
+            }
+        protected:
+            void keyPressEvent(QKeyEvent* e) override {
+                if (e->key() == Qt::Key_Escape) {
+                    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    m_escTimes.append(now);
+                    while (!m_escTimes.isEmpty() && now - m_escTimes.first() > 2000)
+                        m_escTimes.removeFirst();
+                    if (m_escTimes.size() >= 5) {
+                        m_escTimes.clear();
+                        deactivate();
+                        return;
+                    }
+                }
+                // Swallow ALL keys — no Alt+Tab, Alt+F4, Ctrl+Esc
+                e->accept();
+            }
+            void closeEvent(QCloseEvent* e) override {
+                e->ignore(); // prevent Alt+F4
+            }
+            bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
+                Q_UNUSED(eventType)
+                // Block Win key (WM_HOTKEY from RegisterHotKey not needed,
+                // grabKeyboard already captures most keys)
+                auto* msg = static_cast<MSG*>(message);
+                if (msg->message == WM_SYSCOMMAND) {
+                    *result = 0;
+                    return true; // block system commands (Alt+Space, etc.)
+                }
+                return false;
+            }
+        private:
+            QList<qint64> m_escTimes;
+            QTimer* m_refocusTimer = nullptr;
+        };
+
+        auto* overlay = new LockOverlayWidget(nullptr);
+        overlay->setWindowFlags(
+            Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
+            | Qt::X11BypassWindowManagerHint);
+        overlay->setStyleSheet(QStringLiteral("background: black;"));
+        auto* lockLayout = new QVBoxLayout(overlay);
+        lockLayout->setAlignment(Qt::AlignCenter);
+        auto* lockIcon = new QLabel(QStringLiteral("🔒"), overlay);
+        lockIcon->setAlignment(Qt::AlignCenter);
+        lockIcon->setStyleSheet(QStringLiteral("font-size: 72px; background: transparent;"));
+        auto* lockTitle = new QLabel(QStringLiteral("J.A.R.V.I.S. LOCKED"), overlay);
+        lockTitle->setAlignment(Qt::AlignCenter);
+        lockTitle->setStyleSheet(QStringLiteral(
+            "color: #00ffcc; font-size: 36px; font-weight: bold; background: transparent;"));
+        lockLayout->addWidget(lockIcon);
+        lockLayout->addWidget(lockTitle);
+        overlay->hide();
+        m_lockOverlay = overlay;
+
+        // ── Start guard ────────────────────────────────────
+        connect(actGuardOn, &QAction::triggered, this,
+                [this, actGuardOn, actGuardOff, actLockNow, actUnlockNow, actCheckNow]() {
+            if (m_securityCam) return;
+            m_securityCam = new SecurityCamera(this);
+
+            connect(m_securityCam, &SecurityCamera::requestLockOverlay, this, [this]() {
+                static_cast<LockOverlayWidget*>(m_lockOverlay)->activate();
             });
-            connect(sec, &SecurityCamera::alertMessage, this,
+
+            connect(m_securityCam, &SecurityCamera::requestUnlockOverlay, this, [this]() {
+                static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
+            });
+
+            connect(m_securityCam, &SecurityCamera::alertMessage, this,
                     [this](const QString& msg) {
                 appendLog(QStringLiteral("🛡 Security"), msg, Theme::LogColors::error);
             });
+
+            connect(m_securityCam, &SecurityCamera::ownerRecognized, this,
+                    [this](const QImage&) {
+                appendLog(QStringLiteral("🛡 Security"),
+                    IS_EN ? QStringLiteral("👤 Owner recognized")
+                          : QStringLiteral("👤 Владелец распознан"),
+                    Theme::LogColors::jarvis);
+            });
+
+            connect(m_securityCam, &SecurityCamera::motionVideoReady, this,
+                    [this](const QString& videoPath) {
+                appendLog(QStringLiteral("🛡 Security"),
+                    QStringLiteral("📹 Motion clip: %1").arg(videoPath),
+                    Theme::LogColors::system);
+                auto* mesh = m_jarvis->meshConnector();
+                if (!mesh) return;
+                auto* gw = mesh->telegramGateway();
+                if (!gw) return;
+                auto* accessMgr = gw->accessManager();
+                if (!accessMgr) return;
+                const qint64 ownerChat = accessMgr->primaryOwnerChatId();
+                if (ownerChat == 0) return;
+                gw->sendVideoToMobile(ownerChat, videoPath,
+                    QStringLiteral("🚨 Motion detected! 20s security clip"));
+                appendLog(QStringLiteral("🛡 Security"),
+                    QStringLiteral("📤 Video sent to Telegram"),
+                    Theme::LogColors::jarvis);
+            });
+
+            m_securityCam->startMonitoring(60);
+
+            actGuardOn->setEnabled(false);
+            actGuardOff->setEnabled(true);
+            actLockNow->setEnabled(true);
+            actUnlockNow->setEnabled(true);
+            actCheckNow->setEnabled(true);
+
             appendLog(Str::logJarvis(),
-                IS_EN ? QStringLiteral("🛡 Security guard active. Auto-lock on threat.")
-                      : QStringLiteral("🛡 Охрана включена. Авто-блокировка при угрозе."),
+                IS_EN ? QStringLiteral("🛡 Security guard active (1 min interval). "
+                                       "Auto-lock/unlock by face. Video alerts → Telegram.")
+                      : QStringLiteral("🛡 Охрана включена (интервал 1 мин). "
+                                       "Авто-блокировка/разблокировка по лицу. Видео → Telegram."),
                 Theme::LogColors::jarvis);
+        });
+
+        // ── Stop guard ─────────────────────────────────────
+        connect(actGuardOff, &QAction::triggered, this,
+                [this, actGuardOn, actGuardOff, actLockNow, actUnlockNow, actCheckNow]() {
+            if (!m_securityCam) return;
+            m_securityCam->stopMonitoring();
+            m_securityCam->deleteLater();
+            m_securityCam = nullptr;
+            static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
+
+            actGuardOn->setEnabled(true);
+            actGuardOff->setEnabled(false);
+            actLockNow->setEnabled(false);
+            actUnlockNow->setEnabled(false);
+            actCheckNow->setEnabled(false);
+
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("🔴 Security guard stopped.")
+                      : QStringLiteral("🔴 Охрана выключена."),
+                Theme::LogColors::jarvis);
+        });
+
+        // ── Manual lock / unlock ───────────────────────────
+        connect(actLockNow, &QAction::triggered, this, [this]() {
+            if (m_securityCam) m_securityCam->lockScreen();
+        });
+        connect(actUnlockNow, &QAction::triggered, this, [this]() {
+            if (!m_securityCam) return;
+            static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
+            appendLog(QStringLiteral("🛡 Security"),
+                IS_EN ? QStringLiteral("🔓 Screen unlocked manually")
+                      : QStringLiteral("🔓 Экран разблокирован вручную"),
+                Theme::LogColors::jarvis);
+        });
+
+        // ── Toggle settings ────────────────────────────────
+        connect(actAutoLock, &QAction::toggled, this, [this](bool v) {
+            if (m_securityCam) m_securityCam->setAutoLockOnThreat(v);
+        });
+        connect(actAutoUnlock, &QAction::toggled, this, [this](bool v) {
+            if (m_securityCam) m_securityCam->setAutoUnlock(v);
+        });
+        connect(actMotionAlert, &QAction::toggled, this, [this](bool v) {
+            if (m_securityCam) m_securityCam->setAlertOnMotion(v);
+        });
+        connect(actUnknownAlert, &QAction::toggled, this, [this](bool v) {
+            if (m_securityCam) m_securityCam->setAlertOnUnknownFace(v);
+        });
+
+        // ── Check now ──────────────────────────────────────
+        connect(actCheckNow, &QAction::triggered, this, [this]() {
+            if (m_securityCam) {
+                m_securityCam->checkNow();
+                appendLog(QStringLiteral("🛡 Security"),
+                    IS_EN ? QStringLiteral("👁 Manual check triggered")
+                          : QStringLiteral("👁 Ручная проверка запущена"),
+                    Theme::LogColors::system);
+            }
         });
 #else
         auto* actNoCV = camMenu->addAction(
@@ -4334,8 +4580,18 @@ void MainWindow::buildUI()
 
     connect(m_suggestionBtn, &QPushButton::clicked, this, [this]() {
         if (!m_pendingSuggestionAction.isEmpty()) {
-            m_input->setPlainText(m_pendingSuggestionAction);
-            onSend();
+            // Try to launch as an app directly, not as chat text
+            auto result = m_appLauncher.launch(m_pendingSuggestionAction);
+            if (result.success) {
+                appendLog(Str::logJarvis(),
+                    (IS_EN ? QStringLiteral("Launching: ") : QStringLiteral("Запускаю: "))
+                        + m_pendingSuggestionAction,
+                    Theme::LogColors::jarvis);
+            } else {
+                // Fallback: send as chat input
+                m_input->setPlainText(m_pendingSuggestionAction);
+                onSend();
+            }
         }
         m_suggestionBar->setVisible(false);
     });

@@ -32,5 +32,13 @@ target_include_directories(jarvis_platform PRIVATE
 
 target_link_libraries(jarvis_platform
     PUBLIC  jarvis_common Qt6::Core Qt6::Gui Qt6::Widgets
-    PRIVATE Qt6::Network Qt6::Multimedia user32 ole32 oleaut32 shell32
+    PRIVATE Qt6::Network Qt6::Multimedia Qt6::Concurrent user32 ole32 oleaut32 shell32
 )
+# JARVIS_HAS_OPENCV is set in the root CMakeLists.txt for BOTH system
+# OpenCV (find_package) AND the redist/opencv/build/ fallback.
+# Do NOT check OpenCV_FOUND here — it's only set by find_package
+# and is FALSE when using the bundled redist copy.
+if(JARVIS_HAS_OPENCV)
+    target_include_directories(jarvis_platform PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_compile_definitions(jarvis_platform PRIVATE JARVIS_HAS_OPENCV)
+endif()

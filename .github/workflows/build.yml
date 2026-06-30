@@ -272,6 +272,36 @@ jobs:
             Write-Host "All Vosk DLLs copied successfully"
           }
 
+          # === OpenCV: DLL + Haar cascade — required for the security camera ===
+          # CMake auto-downloads OpenCV to redist/opencv/build/ during configure
+          # (see CMakeLists.txt). On a clean CI runner this always triggers,
+          # so JARVIS_HAS_OPENCV=1 is baked into jarvis.exe for every release.
+          # The DLL itself, however, is NOT picked up by windeployqt (it only
+          # knows Qt) — it must be copied explicitly, same as Vosk above.
+          # OpenCV ships via delay-load: exe starts without the DLL, camera
+          # activates when user installs via Component Manager or DLL is present.
+          # CI bundles DLLs so release builds have camera out of the box.
+          $opencvBin = "redist\opencv\build\x64\vc16\bin"
+          $opencvDlls = @(
+            "opencv_world4100.dll",
+            "opencv_videoio_msmf4100_64.dll"
+          )
+          foreach ($dll in $opencvDlls) {
+            $src = "$opencvBin\$dll"
+            if (Test-Path $src) {
+              Copy-Item -Force $src release_package\
+              Write-Host "Copied OpenCV: $dll"
+            } else {
+              Write-Warning "MISSING: $src"
+            }
+          }
+
+          $cascadeSrc = "redist\opencv\build\etc\haarcascades\haarcascade_frontalface_default.xml"
+          if (Test-Path $cascadeSrc) {
+            Copy-Item -Force $cascadeSrc release_package\
+            Write-Host "Copied Haar cascade"
+          }
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

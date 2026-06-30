@@ -13,6 +13,8 @@
 #include <QCoreApplication>
 #include <QProcess>
 #include <QDebug>
+#include <QThread>
+#include <QtConcurrent>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -24,7 +26,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/videoio.hpp>
-#include <opencv2/face.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 static cv::Mat qimageToMat(const QImage& img)
 {
@@ -67,21 +69,153 @@ static cv::VideoCapture& cam()
 
 static void openCam()  { auto& c = cam(); if (!c.isOpened()) c.open(0); }
 static void closeCam() { auto& c = cam(); if (c.isOpened()) c.release(); }
+
+// ── LBP (Local Binary Patterns) for face recognition ──────
+// Each pixel becomes an 8-bit code describing the texture pattern
+// around it. Grid of regional LBP histograms captures both
+// texture and spatial structure — same idea as LBPHFaceRecognizer.
+
+static constexpr int LBP_GRID = 4; // 4x4 = 16 regions
+static constexpr int FACE_SZ  = 200;
+
+static cv::Mat computeLBP(const cv::Mat& gray)
+{
+    cv::Mat lbp = cv::Mat::zeros(gray.rows - 2, gray.cols - 2, CV_8UC1);
+    for (int i = 1; i < gray.rows - 1; ++i) {
+        for (int j = 1; j < gray.cols - 1; ++j) {
+            const uchar c = gray.at<uchar>(i, j);
+            uchar code = 0;
+            code |= (gray.at<uchar>(i-1, j-1) >= c) << 7;
+            code |= (gray.at<uchar>(i-1, j  ) >= c) << 6;
+            code |= (gray.at<uchar>(i-1, j+1) >= c) << 5;
+            code |= (gray.at<uchar>(i  , j+1) >= c) << 4;
+            code |= (gray.at<uchar>(i+1, j+1) >= c) << 3;
+            code |= (gray.at<uchar>(i+1, j  ) >= c) << 2;
+            code |= (gray.at<uchar>(i+1, j-1) >= c) << 1;
+            code |= (gray.at<uchar>(i  , j-1) >= c) << 0;
+            lbp.at<uchar>(i-1, j-1) = code;
+        }
+    }
+    return lbp;
+}
+
+// Build concatenated histogram from LBP_GRID x LBP_GRID regions
+static cv::Mat lbpGridHistogram(const cv::Mat& grayFace)
+{
+    cv::Mat lbp = computeLBP(grayFace);
+    const int cellH = lbp.rows / LBP_GRID;
+    const int cellW = lbp.cols / LBP_GRID;
+    const int histSize = 256;
+    float range[] = {0, 256};
+    const float* histRange = {range};
+
+    cv::Mat fullHist;
+    for (int gy = 0; gy < LBP_GRID; ++gy) {
+        for (int gx = 0; gx < LBP_GRID; ++gx) {
+            cv::Rect roi(gx * cellW, gy * cellH, cellW, cellH);
+            cv::Mat cell = lbp(roi);
+            cv::Mat hist;
+            cv::calcHist(&cell, 1, nullptr, cv::Mat(), hist, 1,
+                         &histSize, &histRange);
+            cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX);
+            fullHist.push_back(hist);
+        }
+    }
+    return fullHist.reshape(1, 1); // 1 x (16*256) row vector
+}
+
+static double compareLBPHistograms(const cv::Mat& a, const cv::Mat& b)
+{
+    if (a.cols != b.cols) return 0;
+    const int regionSize = 256;
+    const int regions = a.cols / regionSize;
+    double totalCorr = 0;
+    for (int r = 0; r < regions; ++r) {
+        cv::Mat ra = a.colRange(r * regionSize, (r + 1) * regionSize);
+        cv::Mat rb = b.colRange(r * regionSize, (r + 1) * regionSize);
+        totalCorr += cv::compareHist(ra.t(), rb.t(), cv::HISTCMP_CORREL);
+    }
+    return totalCorr / regions;
+}
+
+static cv::Mat prepareFace(const cv::Mat& gray, const cv::Rect& face)
+{
+    cv::Mat roi = gray(face);
+    cv::Mat resized;
+    cv::resize(roi, resized, cv::Size(FACE_SZ, FACE_SZ));
+    cv::equalizeHist(resized, resized);
+    return resized;
+}
+
 #endif
+
+// ============================================================
+//  Runtime OpenCV availability check (delay-load safe)
+// ============================================================
+
+QString SecurityCamera::opencvDllPath()
+{
+    static const QStringList candidates = {
+        QCoreApplication::applicationDirPath() + QStringLiteral("/opencv_world4100.dll"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/../redist/opencv/build/x64/vc16/bin/opencv_world4100.dll"),
+    };
+    for (const auto& p : candidates)
+        if (QFileInfo::exists(p)) return p;
+    return {};
+}
+
+bool SecurityCamera::isOpenCvAvailable()
+{
+    const QString dll = opencvDllPath();
+
+#ifdef JARVIS_HAS_OPENCV
+    const bool compiled = true;
+#else
+    const bool compiled = false;
+#endif
+
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        qDebug() << "[SecurityCam] ── OpenCV diagnostic ──";
+        qDebug() << "[SecurityCam]   compiled with JARVIS_HAS_OPENCV:" << compiled;
+        qDebug() << "[SecurityCam]   applicationDirPath:" << QCoreApplication::applicationDirPath();
+        qDebug() << "[SecurityCam]   DLL search result:" << (dll.isEmpty() ? "NOT FOUND" : dll);
+
+        const QStringList check = {
+            QCoreApplication::applicationDirPath() + QStringLiteral("/opencv_world4100.dll"),
+            QCoreApplication::applicationDirPath() + QStringLiteral("/../redist/opencv/build/x64/vc16/bin/opencv_world4100.dll"),
+        };
+        for (const auto& p : check)
+            qDebug() << "[SecurityCam]   " << p << "exists:" << QFileInfo::exists(p);
+    }
+
+    if (!compiled) {
+        qWarning() << "[SecurityCam] Binary was NOT compiled with JARVIS_HAS_OPENCV!"
+                    << "Reset CMake cache (Tools → CMake → Reset Cache) and rebuild.";
+        return false;
+    }
+    return !dll.isEmpty();
+}
 
 // ============================================================
 //  Paths
 // ============================================================
 
-QString SecurityCamera::ownerModelPath()
+QString SecurityCamera::ownerSamplesDir()
 {
-    return JarvisPaths::subPath(QStringLiteral("security/owner_face.yml"));
+    return JarvisPaths::subPath(QStringLiteral("security/owner_samples"));
 }
 
 QString SecurityCamera::cascadePath()
 {
     static const QStringList paths = {
+        // Installed client copy — CI ships the cascade next to jarvis.exe
+        // (see .github/workflows/build.yml "Prepare release package")
+        QCoreApplication::applicationDirPath() + QStringLiteral("/haarcascade_frontalface_default.xml"),
+        // First-run auto-download destination (fallback if not bundled)
         JarvisPaths::subPath(QStringLiteral("security/haarcascade_frontalface_default.xml")),
+        // Developer build — found inside the source tree's redist/
         QCoreApplication::applicationDirPath() + QStringLiteral("/../redist/opencv/build/etc/haarcascades/haarcascade_frontalface_default.xml"),
         QCoreApplication::applicationDirPath() + QStringLiteral("/../redist/opencv/etc/haarcascades/haarcascade_frontalface_default.xml"),
         QStringLiteral("C:/opencv/etc/haarcascades/haarcascade_frontalface_default.xml"),
@@ -115,43 +249,54 @@ SecurityCamera::SecurityCamera(QObject* parent)
             deescalateToSentinel();
     });
 
+    m_lockCheckTimer = new QTimer(this);
+    connect(m_lockCheckTimer, &QTimer::timeout,
+            this, &SecurityCamera::onLockCheckTick);
+
     m_lastActivityTime.start();
 
-#ifdef JARVIS_HAS_OPENCV
-    m_ownerEnrolled = QFileInfo::exists(ownerModelPath());
+    if (isOpenCvAvailable()) {
+        m_ownerEnrolled = QDir(ownerSamplesDir()).entryList(
+            QStringList{QStringLiteral("*.png")}, QDir::Files).size() >= 3;
 
-    // Auto-download Haar cascade if missing
-    const QString cascade = cascadePath();
-    if (cascade.isEmpty()) {
-        const QString destPath = JarvisPaths::subPath(
-            QStringLiteral("security/haarcascade_frontalface_default.xml"));
-        if (!QFileInfo::exists(destPath)) {
-            qDebug() << "[SecurityCam] Downloading face cascade...";
-            QDir().mkpath(QFileInfo(destPath).absolutePath());
-            QProcess wget;
-            wget.start(QStringLiteral("powershell.exe"), {
-                QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
-                QStringLiteral("Invoke-WebRequest -Uri "
-                    "'https://raw.githubusercontent.com/opencv/opencv/4.x/data/"
-                    "haarcascades/haarcascade_frontalface_default.xml' "
-                    "-OutFile '%1'").arg(destPath)
-            });
-            if (wget.waitForFinished(30000) && wget.exitCode() == 0)
-                qDebug() << "[SecurityCam] Cascade downloaded:" << destPath;
-            else
-                qWarning() << "[SecurityCam] Cascade download failed";
+        const QString cascade = cascadePath();
+        if (cascade.isEmpty()) {
+            const QString destPath = JarvisPaths::subPath(
+                QStringLiteral("security/haarcascade_frontalface_default.xml"));
+            if (!QFileInfo::exists(destPath)) {
+                qDebug() << "[SecurityCam] Downloading face cascade...";
+                QDir().mkpath(QFileInfo(destPath).absolutePath());
+                QProcess wget;
+                wget.start(QStringLiteral("powershell.exe"), {
+                    QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
+                    QStringLiteral("Invoke-WebRequest -Uri "
+                        "'https://raw.githubusercontent.com/opencv/opencv/4.x/data/"
+                        "haarcascades/haarcascade_frontalface_default.xml' "
+                        "-OutFile '%1'").arg(destPath)
+                });
+                if (wget.waitForFinished(30000) && wget.exitCode() == 0)
+                    qDebug() << "[SecurityCam] Cascade downloaded:" << destPath;
+                else
+                    qWarning() << "[SecurityCam] Cascade download failed";
+            }
         }
     }
-#endif
 
-    qDebug() << "[SecurityCam] Init. Owner enrolled:" << m_ownerEnrolled;
+    // Force diagnostic output on first creation
+    isOpenCvAvailable();
+
+    const QString cascade = cascadePath();
+    qDebug() << "[SecurityCam] Init complete."
+             << "OpenCV available:" << isOpenCvAvailable()
+             << "Cascade:" << (cascade.isEmpty() ? "NOT FOUND" : cascade)
+             << "Owner enrolled:" << m_ownerEnrolled;
 }
 
 SecurityCamera::~SecurityCamera()
 {
     stopMonitoring();
 #ifdef JARVIS_HAS_OPENCV
-    closeCam();
+    if (isOpenCvAvailable()) closeCam();
 #endif
 }
 
@@ -211,7 +356,7 @@ void SecurityCamera::escalateToFullAlert()
 
     m_powerState = FullAlert;
 #ifdef JARVIS_HAS_OPENCV
-    openCam();
+    if (isOpenCvAvailable()) openCam();
 #endif
 
     // Auto-deescalate after 10s of no activity
@@ -226,12 +371,13 @@ void SecurityCamera::deescalateToSentinel()
     if (m_powerState == Sentinel) return;
 
     m_powerState = Sentinel;
-    // Keep camera at low res
 #ifdef JARVIS_HAS_OPENCV
-    auto& c = cam();
-    if (c.isOpened()) {
-        c.set(cv::CAP_PROP_FRAME_WIDTH,  SENTINEL_RES_W);
-        c.set(cv::CAP_PROP_FRAME_HEIGHT, SENTINEL_RES_H);
+    if (isOpenCvAvailable()) {
+        auto& c = cam();
+        if (c.isOpened()) {
+            c.set(cv::CAP_PROP_FRAME_WIDTH,  SENTINEL_RES_W);
+            c.set(cv::CAP_PROP_FRAME_HEIGHT, SENTINEL_RES_H);
+        }
     }
 #endif
 
@@ -245,7 +391,7 @@ void SecurityCamera::deescalateToOff()
 
     m_powerState = Off;
 #ifdef JARVIS_HAS_OPENCV
-    closeCam();
+    if (isOpenCvAvailable()) closeCam();
 #endif
 
     emit powerStateChanged(Off);
@@ -258,11 +404,24 @@ void SecurityCamera::deescalateToOff()
 
 void SecurityCamera::startMonitoring(int sentinelIntervalSec)
 {
-    m_monitoring = true;
+    if (!isOpenCvAvailable()) {
+        const QString reason =
+#ifdef JARVIS_HAS_OPENCV
+            QStringLiteral("DLL not found next to jarvis.exe (%1). "
+                           "Open Help → Component Manager → Install OpenCV.")
+                .arg(QCoreApplication::applicationDirPath());
+#else
+            QStringLiteral("Binary was compiled WITHOUT OpenCV. "
+                           "Reset CMake cache (Tools → CMake → Reset Cache) and rebuild.");
+#endif
+        qWarning() << "[SecurityCam] startMonitoring blocked:" << reason;
+        emit alertMessage(reason);
+        return;
+    }
 
+    m_monitoring = true;
     installInputHook();
 
-    // Start in Sentinel mode (low power)
     m_powerState = Sentinel;
 #ifdef JARVIS_HAS_OPENCV
     openCam();
@@ -289,6 +448,11 @@ void SecurityCamera::stopMonitoring()
     m_monitoring = false;
     m_sentinelTimer->stop();
     m_deescalateTimer->stop();
+    m_lockCheckTimer->stop();
+    if (m_screenLocked) {
+        m_screenLocked = false;
+        emit requestUnlockOverlay();
+    }
     removeInputHook();
     deescalateToOff();
 }
@@ -304,12 +468,12 @@ void SecurityCamera::checkNow() { onSentinelTick(); }
 QImage SecurityCamera::captureFrameLowRes()
 {
 #ifdef JARVIS_HAS_OPENCV
+    if (!isOpenCvAvailable()) return {};
     auto& c = cam();
     if (!c.isOpened()) return {};
     cv::Mat frame;
     c.read(frame);
     if (frame.empty()) return {};
-    // Ensure low res
     if (frame.cols > SENTINEL_RES_W) {
         cv::Mat small;
         cv::resize(frame, small, cv::Size(SENTINEL_RES_W, SENTINEL_RES_H));
@@ -324,20 +488,20 @@ QImage SecurityCamera::captureFrameLowRes()
 QImage SecurityCamera::captureFrameFullRes()
 {
 #ifdef JARVIS_HAS_OPENCV
-    auto& c = cam();
-    if (!c.isOpened()) { openCam(); }
-    // Restore full resolution
-    c.set(cv::CAP_PROP_FRAME_WIDTH,  1280);
-    c.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
-    cv::Mat frame;
-    c.read(frame);
-    if (frame.empty()) return {};
-    return matToQImage(frame);
-#else
+    if (isOpenCvAvailable()) {
+        auto& c = cam();
+        if (!c.isOpened()) openCam();
+        c.set(cv::CAP_PROP_FRAME_WIDTH,  1280);
+        c.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+        cv::Mat frame;
+        c.read(frame);
+        if (frame.empty()) return {};
+        return matToQImage(frame);
+    }
+#endif
     QScreen* screen = QApplication::primaryScreen();
     if (!screen) return {};
     return screen->grabWindow(0).toImage();
-#endif
 }
 
 // ============================================================
@@ -347,6 +511,7 @@ QImage SecurityCamera::captureFrameFullRes()
 int SecurityCamera::detectFaces(const QImage& frame)
 {
 #ifdef JARVIS_HAS_OPENCV
+    if (!isOpenCvAvailable()) return 0;
     auto& cascade = faceCascade();
     if (cascade.empty()) return 0;
     cv::Mat mat = qimageToMat(frame);
@@ -365,23 +530,55 @@ int SecurityCamera::detectFaces(const QImage& frame)
 bool SecurityCamera::isOwner(const QImage& frame)
 {
 #ifdef JARVIS_HAS_OPENCV
-    if (!m_ownerEnrolled) return false;
-    auto recognizer = cv::face::LBPHFaceRecognizer::create();
-    recognizer->read(ownerModelPath().toStdString());
+    if (!isOpenCvAvailable() || !m_ownerEnrolled) return false;
+
+    const QString samplesPath = ownerSamplesDir();
+    const QStringList files = QDir(samplesPath).entryList(
+        QStringList{QStringLiteral("*.png")}, QDir::Files);
+    if (files.isEmpty()) return false;
+
     cv::Mat mat = qimageToMat(frame);
     cv::Mat gray;
     cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
     auto& cascade = faceCascade();
     if (cascade.empty()) return false;
+
     std::vector<cv::Rect> faces;
     cascade.detectMultiScale(gray, faces, 1.1, 4,
                               cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+
+    // Preload sample LBP histograms (cached per call — samples rarely change)
+    std::vector<cv::Mat> sampleHists;
+    sampleHists.reserve(files.size());
+    for (const auto& fn : files) {
+        cv::Mat sample = cv::imread(
+            (samplesPath + QStringLiteral("/") + fn).toStdString(),
+            cv::IMREAD_GRAYSCALE);
+        if (sample.empty()) continue;
+        sampleHists.push_back(lbpGridHistogram(sample));
+    }
+    if (sampleHists.empty()) return false;
+
     for (const auto& face : faces) {
-        cv::Mat roi = gray(face);
-        cv::resize(roi, roi, cv::Size(100, 100));
-        int label = -1; double conf = 0;
-        recognizer->predict(roi, label, conf);
-        if (label == 0 && conf < 80.0) return true;
+        cv::Mat prepared = prepareFace(gray, face);
+        cv::Mat probeHist = lbpGridHistogram(prepared);
+
+        // Compare against every sample, take average of top-3 matches
+        std::vector<double> scores;
+        scores.reserve(sampleHists.size());
+        for (const auto& sh : sampleHists)
+            scores.push_back(compareLBPHistograms(probeHist, sh));
+
+        std::sort(scores.rbegin(), scores.rend());
+        const int topN = std::min(3, static_cast<int>(scores.size()));
+        double avg = 0;
+        for (int i = 0; i < topN; ++i) avg += scores[i];
+        avg /= topN;
+
+        qDebug() << "[SecurityCam] LBP match score:" << avg
+                 << "(best:" << scores[0] << ", threshold: 0.45)";
+
+        if (avg > 0.45) return true;
     }
     return false;
 #else
@@ -394,29 +591,38 @@ bool SecurityCamera::detectMotion(const QImage& frame)
     if (m_prevFrame.isNull()) { m_prevFrame = frame; return false; }
 
 #ifdef JARVIS_HAS_OPENCV
-    cv::Mat curr = qimageToMat(frame);
-    cv::Mat prev = qimageToMat(m_prevFrame);
-    m_prevFrame = frame;
+    if (isOpenCvAvailable()) {
+        cv::Mat curr = qimageToMat(frame);
+        cv::Mat prev = qimageToMat(m_prevFrame);
+        m_prevFrame = frame;
 
-    cv::Mat gC, gP, diff;
-    cv::cvtColor(curr, gC, cv::COLOR_BGR2GRAY);
-    cv::cvtColor(prev, gP, cv::COLOR_BGR2GRAY);
-    cv::GaussianBlur(gC, gC, cv::Size(21, 21), 0);
-    cv::GaussianBlur(gP, gP, cv::Size(21, 21), 0);
-    cv::absdiff(gP, gC, diff);
-    cv::threshold(diff, diff, 30, 255, cv::THRESH_BINARY);
+        cv::Mat gC, gP, diff;
+        cv::cvtColor(curr, gC, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(prev, gP, cv::COLOR_BGR2GRAY);
+        cv::GaussianBlur(gC, gC, cv::Size(21, 21), 0);
+        cv::GaussianBlur(gP, gP, cv::Size(21, 21), 0);
+        cv::absdiff(gP, gC, diff);
+        cv::threshold(diff, diff, 30, 255, cv::THRESH_BINARY);
 
-    double pct = cv::countNonZero(diff) * 100.0 / (diff.rows * diff.cols);
-    return pct > MOTION_THRESHOLD;
-#else
+        double pct = cv::countNonZero(diff) * 100.0 / (diff.rows * diff.cols);
+        return pct > MOTION_THRESHOLD;
+    }
+#endif
     m_prevFrame = frame;
     return false;
-#endif
 }
 
 void SecurityCamera::lockScreen()
 {
-    LockWorkStation();
+    if (m_screenLocked) return;
+    m_screenLocked = true;
+    emit requestLockOverlay();
+
+    // While locked, scan for owner face every 3s to auto-unlock
+    if (!m_lockCheckTimer->isActive())
+        m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+
+    qDebug() << "[SecurityCam] Screen locked via overlay";
 }
 
 // ============================================================
@@ -425,6 +631,21 @@ void SecurityCamera::lockScreen()
 
 void SecurityCamera::enrollOwnerFace(int sampleCount)
 {
+    if (!isOpenCvAvailable()) {
+        const QString reason =
+#ifdef JARVIS_HAS_OPENCV
+            QStringLiteral("DLL not found next to jarvis.exe (%1). "
+                           "Open Help → Component Manager → Install OpenCV.")
+                .arg(QCoreApplication::applicationDirPath());
+#else
+            QStringLiteral("Binary was compiled WITHOUT OpenCV. "
+                           "Reset CMake cache (Tools → CMake → Reset Cache) and rebuild.");
+#endif
+        qWarning() << "[SecurityCam] enrollOwnerFace blocked:" << reason;
+        emit alertMessage(reason);
+        return;
+    }
+
 #ifdef JARVIS_HAS_OPENCV
     auto& cascade = faceCascade();
     if (cascade.empty()) {
@@ -453,13 +674,12 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
         cascade.detectMultiScale(gray, faces, 1.1, 4,
                                   cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
         if (faces.size() == 1) {
-            cv::Mat roi = gray(faces[0]);
-            cv::resize(roi, roi, cv::Size(100, 100));
-            samples.push_back(roi);
+            cv::Mat prepared = prepareFace(gray, faces[0]);
+            samples.push_back(prepared);
             labels.push_back(0);
             emit enrollmentProgress(static_cast<int>(samples.size()), sampleCount);
         }
-        cv::waitKey(200);
+        QThread::msleep(200);
     }
 
     if (static_cast<int>(samples.size()) < 3) {
@@ -468,10 +688,16 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
         return;
     }
 
-    QDir().mkpath(QFileInfo(ownerModelPath()).absolutePath());
-    auto rec = cv::face::LBPHFaceRecognizer::create();
-    rec->train(samples, labels);
-    rec->save(ownerModelPath().toStdString());
+    const QString dir = ownerSamplesDir();
+    QDir().mkpath(dir);
+    // Clear old samples
+    for (const auto& f : QDir(dir).entryList(QStringList{QStringLiteral("*.png")}, QDir::Files))
+        QFile::remove(dir + QStringLiteral("/") + f);
+
+    for (int i = 0; i < static_cast<int>(samples.size()); ++i) {
+        const QString path = QStringLiteral("%1/owner_%2.png").arg(dir).arg(i, 3, 10, QLatin1Char('0'));
+        cv::imwrite(path.toStdString(), samples[i]);
+    }
     m_ownerEnrolled = true;
 
     emit enrollmentComplete(static_cast<int>(samples.size()));
@@ -479,7 +705,6 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
                           .arg(samples.size()));
 #else
     Q_UNUSED(sampleCount)
-    emit alertMessage(QStringLiteral("OpenCV not available"));
 #endif
 }
 
@@ -537,15 +762,13 @@ void SecurityCamera::onSentinelTick()
 
     if (faceCount == 0) {
         ++m_ownerAbsentTicks;
-        if (m_ownerEnrolled && m_ownerAbsentTicks >= OWNER_ABSENT_LOCK_TICKS) {
-            // Owner hasn't been seen for ~30s → auto-lock
+        if (m_ownerEnrolled && !m_screenLocked
+            && m_ownerAbsentTicks >= OWNER_ABSENT_LOCK_TICKS) {
             lockScreen();
             emit ownerAbsent(frame);
             emit alertMessage(QStringLiteral(
-                "🔒 Owner absent for %1s — screen auto-locked")
-                .arg(m_ownerAbsentTicks * m_sentinelTimer->interval() / 1000));
+                "🔒 Owner absent — screen locked. Come back to auto-unlock."));
             m_ownerAbsentTicks = 0;
-            deescalateToSentinel();
         }
         if (!m_deescalateTimer->isActive())
             m_deescalateTimer->start(FULL_ALERT_TIMEOUT_MS);
@@ -568,15 +791,20 @@ void SecurityCamera::onSentinelTick()
     if (ownerPresent) {
         emit ownerRecognized(frame);
 
+        if (m_screenLocked && m_autoUnlock) {
+            m_screenLocked = false;
+            m_lockCheckTimer->stop();
+            emit requestUnlockOverlay();
+            emit alertMessage(QStringLiteral("🔓 Owner recognized — screen unlocked"));
+            qDebug() << "[SecurityCam] Owner recognized → auto-unlock";
+        }
+
         if (faceCount > 1 && !m_companionSuppressed) {
-            // Owner is here but someone else is looking too.
-            // Don't lock — just send a soft notification with a question.
             emit companionNotice(frame, faceCount);
             qDebug() << "[SecurityCam] Owner + " << (faceCount - 1)
                      << " companion(s) — soft alert sent";
         }
 
-        // Owner is here → deescalate to sentinel
         deescalateToSentinel();
         return;
     }
@@ -584,20 +812,158 @@ void SecurityCamera::onSentinelTick()
     // ── No owner among the faces — real threat ──────────────
 
     if (faceCount > 1 && m_alertShoulder) {
-        // Multiple strangers at the screen — hard alert + lock
         emit unknownFaceDetected(frame, faceCount);
         if (m_autoLock) {
             lockScreen();
             emit alertMessage(QStringLiteral(
-                "⚠ %1 UNKNOWN faces — LOCKED + photo sent").arg(faceCount));
+                "⚠ %1 UNKNOWN faces — LOCKED").arg(faceCount));
         }
+        if (!m_recording) recordMotionClip();
     } else if (faceCount == 1 && m_alertUnknown) {
-        // Single stranger — hard alert + lock
         emit unknownFaceDetected(frame, 1);
         if (m_autoLock) {
             lockScreen();
             emit alertMessage(QStringLiteral(
-                "🚨 UNKNOWN FACE — LOCKED + photo sent"));
+                "🚨 UNKNOWN FACE — LOCKED"));
+        }
+        if (!m_recording) recordMotionClip();
+    }
+}
+
+// ============================================================
+//  Lock-check tick — runs every 3s while screen is locked
+//  Keeps camera alive and checks for owner face to auto-unlock
+// ============================================================
+
+void SecurityCamera::onLockCheckTick()
+{
+    if (!m_screenLocked) {
+        m_lockCheckTimer->stop();
+        return;
+    }
+
+#ifdef JARVIS_HAS_OPENCV
+    if (!isOpenCvAvailable()) return;
+
+    auto& c = cam();
+    if (!c.isOpened()) openCam();
+
+    const QImage frame = captureFrameFullRes();
+    if (frame.isNull()) return;
+
+    // Check for motion while locked → record + alert
+    if (detectMotion(frame) && !m_recording) {
+        emit motionDetected(frame);
+        recordMotionClip();
+    }
+
+    // Check if owner returned
+    if (m_ownerEnrolled) {
+        const int faces = detectFaces(frame);
+        if (faces > 0 && isOwner(frame) && m_autoUnlock) {
+            m_screenLocked = false;
+            m_lockCheckTimer->stop();
+            emit requestUnlockOverlay();
+            emit ownerRecognized(frame);
+            emit alertMessage(QStringLiteral("🔓 Owner recognized — screen unlocked"));
+            qDebug() << "[SecurityCam] Lock-check: owner detected → unlock";
         }
     }
+#endif
+}
+
+// ============================================================
+//  Record 20-second motion clip (AVI, MJPG codec)
+// ============================================================
+
+void SecurityCamera::recordMotionClip()
+{
+#ifdef JARVIS_HAS_OPENCV
+    if (!isOpenCvAvailable() || m_recording) return;
+    m_recording = true;
+
+    const QString dir = JarvisPaths::subPath(QStringLiteral("security/clips"));
+    QDir().mkpath(dir);
+    const QString path = QStringLiteral("%1/motion_%2.avi")
+        .arg(dir, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+
+    qDebug() << "[SecurityCam] Recording" << MOTION_CLIP_DURATION_SEC
+             << "s clip to" << path;
+    emit alertMessage(QStringLiteral("📹 Recording %1s security clip...")
+                          .arg(MOTION_CLIP_DURATION_SEC));
+
+    // Pause timers and release shared camera so the bg thread can use it
+    m_sentinelTimer->stop();
+    m_lockCheckTimer->stop();
+    closeCam();
+
+    const int duration = MOTION_CLIP_DURATION_SEC;
+
+    QtConcurrent::run([this, path, duration]() {
+        cv::VideoCapture recorder(0);
+        if (!recorder.isOpened()) {
+            qWarning() << "[SecurityCam] BG recorder: camera open failed";
+            QMetaObject::invokeMethod(this, [this]() {
+                m_recording = false;
+                if (m_monitoring) {
+                    openCam();
+                    m_sentinelTimer->start();
+                    if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                }
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        recorder.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+        recorder.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+
+        const double fps = 10.0;
+        cv::VideoWriter writer(
+            path.toStdString(),
+            cv::VideoWriter::fourcc('M','J','P','G'),
+            fps, cv::Size(640, 480));
+
+        if (!writer.isOpened()) {
+            qWarning() << "[SecurityCam] BG recorder: VideoWriter open failed";
+            recorder.release();
+            QMetaObject::invokeMethod(this, [this]() {
+                m_recording = false;
+                if (m_monitoring) {
+                    openCam();
+                    m_sentinelTimer->start();
+                    if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                }
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        const int totalFrames = static_cast<int>(fps * duration);
+        const int delayMs = static_cast<int>(1000.0 / fps);
+
+        for (int i = 0; i < totalFrames; ++i) {
+            cv::Mat frame;
+            recorder.read(frame);
+            if (frame.empty()) continue;
+            if (frame.cols != 640 || frame.rows != 480)
+                cv::resize(frame, frame, cv::Size(640, 480));
+            writer.write(frame);
+            QThread::msleep(delayMs);
+        }
+
+        writer.release();
+        recorder.release();
+
+        qDebug() << "[SecurityCam] Clip saved:" << path;
+
+        QMetaObject::invokeMethod(this, [this, path]() {
+            m_recording = false;
+            emit motionVideoReady(path);
+            if (m_monitoring) {
+                openCam();
+                m_sentinelTimer->start();
+                if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+            }
+        }, Qt::QueuedConnection);
+    });
+#endif
 }

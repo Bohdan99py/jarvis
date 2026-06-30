@@ -161,6 +161,8 @@ private:
     LanguageDetector        m_langDetector;
     LearnedCommands*        m_learnedCmds  = nullptr;  // самообучение
     ScreenAgent*            m_screenAgent  = nullptr;  // зрение + клики
+    class SecurityCamera*   m_securityCam  = nullptr;  // security camera instance
+    QWidget*                m_lockOverlay  = nullptr;  // fullscreen lock overlay
     ScreenshotLearner*      m_appLearner   = nullptr;  // паттерны использования ПК
     QString                 m_lastUserInput;               // для самообучения
 

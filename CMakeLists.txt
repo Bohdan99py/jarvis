@@ -276,6 +276,18 @@ if(JARVIS_HAS_OPENCV)
     target_include_directories(JarvisCore PUBLIC ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(JarvisCore PUBLIC ${OpenCV_LIBS})
     target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_OPENCV=1)
+
+    # Delay-load: the exe starts even when opencv_world4100.dll is absent.
+    # The DLL is loaded on first actual OpenCV call. Our runtime guard
+    # (SecurityCamera::isOpenCvAvailable) checks the file before any call,
+    # so we never hit the missing-DLL exception path.
+    if(MSVC)
+        target_link_libraries(JarvisCore PUBLIC delayimp)
+        target_link_options(JarvisCore PUBLIC
+            "/DELAYLOAD:opencv_world4100.dll"
+            "/DELAYLOAD:opencv_videoio_msmf4100_64.dll"
+        )
+    endif()
 endif()
 
 target_link_libraries(JarvisCore PRIVATE
@@ -380,14 +392,28 @@ endif()
 # ============================================================
 
 if(JARVIS_HAS_OPENCV)
-    set(_opencv_dll "${_opencv_dir}/build/x64/vc16/bin/opencv_world4100.dll")
-    if(EXISTS "${_opencv_dll}")
+    foreach(_cv_dll
+        "${_opencv_dir}/build/x64/vc16/bin/opencv_world4100.dll"
+        "${_opencv_dir}/build/x64/vc16/bin/opencv_videoio_msmf4100_64.dll"
+    )
+        if(EXISTS "${_cv_dll}")
+            add_custom_command(TARGET jarvis POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_cv_dll}" "$<TARGET_FILE_DIR:jarvis>"
+                COMMENT "Copying OpenCV runtime: ${_cv_dll}")
+        endif()
+    endforeach()
+
+    # Also copy Haar cascade next to exe for local development
+    set(_cv_cascade "${_opencv_dir}/build/etc/haarcascades/haarcascade_frontalface_default.xml")
+    if(EXISTS "${_cv_cascade}")
         add_custom_command(TARGET jarvis POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_opencv_dll}" "$<TARGET_FILE_DIR:jarvis>"
-            COMMENT "Copying OpenCV runtime")
-        message(STATUS "OpenCV DLL will be copied to bin/ on build")
+                    "${_cv_cascade}" "$<TARGET_FILE_DIR:jarvis>"
+            COMMENT "Copying Haar cascade")
     endif()
+
+    message(STATUS "OpenCV runtime will be copied to bin/ on build")
 endif()
 
 # ============================================================

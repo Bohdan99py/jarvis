@@ -23,6 +23,7 @@ Name: "autostart"; Description: "Launch JARVIS on Windows startup"; GroupDescrip
 [Files]
 Source: "release_package\jarvis.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release_package\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "release_package\haarcascade_frontalface_default.xml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "release_package\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "release_package\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "release_package\imageformats\*"; DestDir: "{app}\imageformats"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist

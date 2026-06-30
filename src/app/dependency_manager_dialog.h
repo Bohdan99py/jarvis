@@ -1,15 +1,6 @@
 #pragma once
 // ============================================================
 // dependency_manager_dialog.h — Component Manager UI
-//
-// Shows all optional JARVIS dependencies with install/status:
-//   • Vosk (speech recognition models)
-//   • OpenCV (security camera, face detection)
-//   • Tesseract (OCR)
-//   • Mermaid CLI (diagram rendering)
-//
-// Each component shows: status, size, install/remove button,
-// progress bar during download.
 // ============================================================
 
 #include <QDialog>
@@ -18,16 +9,23 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QNetworkAccessManager>
+#include <functional>
+
+enum class ComponentType {
+    Runtime,    // works without rebuild (Vosk models, Cascade, Mermaid)
+    BuildTime,  // requires recompile after install (OpenCV)
+};
 
 struct ComponentInfo {
-    QString id;
-    QString name;
-    QString description;
-    QString downloadUrl;
-    QString installPath;     // where to check / install
-    QString checkFile;       // file that proves it's installed
-    QString sizeHuman;       // "174 MB", "45 MB"
-    bool    installed = false;
+    QString       id;
+    QString       name;
+    QString       description;
+    QString       downloadUrl;
+    QString       installPath;   // absolute path where files land
+    QString       checkFile;     // relative to installPath — proves installed
+    QString       sizeHuman;
+    ComponentType type = ComponentType::Runtime;
+    bool          installed = false;
 };
 
 class ComponentCard : public QFrame
@@ -38,20 +36,24 @@ public:
 
     void refresh();
     void setProgress(int percent);
-    void setDownloading(bool active);
+    void setStatus(const QString& text, const QString& color = QStringLiteral("#ff5050"));
+    void setDownloading(bool active, const QString& label = QString());
     void setInstalled(bool ok);
+    void setInstallDisabled(const QString& reasonLabel);
     const ComponentInfo& info() const { return m_info; }
 
 signals:
     void installRequested(const QString& componentId);
     void openFolderRequested(const QString& path);
+    void howToRequested(const QString& componentId);
 
 private:
     ComponentInfo m_info;
     QLabel*       m_statusLabel = nullptr;
-    QLabel*       m_sizeLabel   = nullptr;
+    QLabel*       m_pathLabel   = nullptr;
     QPushButton*  m_actionBtn   = nullptr;
     QPushButton*  m_folderBtn   = nullptr;
+    QPushButton*  m_howToBtn    = nullptr;
     QProgressBar* m_progress    = nullptr;
 };
 
@@ -63,9 +65,13 @@ public:
 
 private slots:
     void onInstallComponent(const QString& id);
+    void onHowTo(const QString& id);
 
 private:
     QList<ComponentInfo> buildComponentList() const;
+
+    static QString tempDownloadDir();
+
     void installOpenCV(ComponentCard* card);
     void installVosk(ComponentCard* card);
     void installMermaidCli(ComponentCard* card);
@@ -73,7 +79,7 @@ private:
                       ComponentCard* card,
                       std::function<void(bool)> onComplete);
 
-    QVBoxLayout*          m_layout  = nullptr;
+    QVBoxLayout*           m_layout  = nullptr;
     QNetworkAccessManager* m_network = nullptr;
     QMap<QString, ComponentCard*> m_cards;
 };
