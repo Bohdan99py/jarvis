@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="J.A.R.V.I.S. - Windows AI ассистент с голосовым управлением, экранным зрением, локальными командами и поддержкой Claude, Gemini и Ollama.">
+  <title>J.A.R.V.I.S. - Personal AI Assistant</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#home" aria-label="J.A.R.V.I.S. home">
+      <img src="../assets/jarvis.png" alt="" width="38" height="38">
+      <span>J.A.R.V.I.S.</span>
+    </a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="#features">Возможности</a>
+      <a href="#personal">Персонализация</a>
+      <a href="#purchase">Приобрести</a>
+      <a href="#account">Кошелек</a>
+      <a href="#setup">Запуск</a>
+      <a href="#privacy">Приватность</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" id="home">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Windows desktop AI assistant</p>
+          <h1>J.A.R.V.I.S.</h1>
+          <p class="subtitle">Just A Rather Very Intelligent System для голосовых команд, управления ПК, анализа экрана, работы с кодом и локального обучения привычкам пользователя.</p>
+          <div class="actions" aria-label="Основные действия">
+            <a class="button primary" href="../README.md">Открыть README</a>
+            <a class="button secondary" href="https://github.com/Bohdan99py/jarvis">GitHub</a>
+          </div>
+        </div>
+
+        <div class="console" aria-label="Пример диалога с JARVIS">
+          <div class="console-top">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="console-body">
+            <img class="console-logo" src="../assets/jarvis.png" alt="Логотип JARVIS">
+            <p><span class="prompt">you</span> Jarvis, open Telegram</p>
+            <p><span class="prompt jarvis">jarvis</span> Launching Telegram...</p>
+            <p><span class="prompt">you</span> что ты видишь на экране?</p>
+            <p><span class="prompt jarvis">jarvis</span> Анализирую скриншот и выделяю действия.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="quick-strip" aria-label="Ключевые свойства">
+      <div>
+        <strong>Offline first</strong>
+        <span>Базовые команды работают без API-ключей.</span>
+      </div>
+      <div>
+        <strong>Voice ready</strong>
+        <span>Vosk-модели для EN, RU, DE, FR и ZH.</span>
+      </div>
+      <div>
+        <strong>Model flexible</strong>
+        <span>Claude, Gemini или локальный Ollama.</span>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="section-heading">
+        <p class="eyebrow">Core system</p>
+        <h2>Ассистент, который управляет рабочим столом</h2>
+        <p>JARVIS объединяет локальные команды Windows, голосовой ввод, экранное зрение, индексацию проектов и подключаемые LLM-бэкенды.</p>
+      </div>
+
+      <div class="feature-grid flip-grid">
+        <article class="feature-card flip-card" tabindex="0">
+          <div class="flip-inner">
+            <div class="flip-face flip-front">
+              <span class="feature-mark">01</span>
+              <h3>Команды ПК</h3>
+              <p>Открывает приложения, регулирует систему и выполняет быстрые действия без интернета.</p>
+              <span class="flip-hint">Наведи, чтобы раскрыть</span>
+            </div>
+            <div class="flip-face flip-back">
+              <h3>Что внутри</h3>
+              <p>Локальный реестр команд, запуск программ, управление окнами, громкостью, яркостью, питанием и поиском файлов.</p>
+            </div>
+          </div>
+        </article>
+        <article class="feature-card flip-card" tabindex="0">
+          <div class="flip-inner">
+            <div class="flip-face flip-front">
+              <span class="feature-mark">02</span>
+              <h3>Голос и wake word</h3>
+              <p>Слушает локально, реагирует на "Jarvis" и поддерживает несколько языков распознавания.</p>
+              <span class="flip-hint">Наведи, чтобы раскрыть</span>
+            </div>
+            <div class="flip-face flip-back">
+              <h3>Как работает</h3>
+              <p>Vosk-модели, VAD-порог тишины, быстрый wake word и выбор EN, RU, DE, FR, ZH моделей под стиль работы.</p>
+            </div>
+          </div>
+        </article>
+        <article class="feature-card flip-card" tabindex="0">
+          <div class="flip-inner">
+            <div class="flip-face flip-front">
+              <span class="feature-mark">03</span>
+              <h3>Экранное зрение</h3>
+              <p>Понимает, что видно на экране, и помогает нажимать нужные элементы по тексту.</p>
+              <span class="flip-hint">Наведи, чтобы раскрыть</span>
+            </div>
+            <div class="flip-face flip-back">
+              <h3>Сценарии</h3>
+              <p>Описание интерфейса, OCR-навигация, подсказки по действиям и vision-команды через подключенный AI-провайдер.</p>
+            </div>
+          </div>
+        </article>
+        <article class="feature-card flip-card" tabindex="0">
+          <div class="flip-inner">
+            <div class="flip-face flip-front">
+              <span class="feature-mark">04</span>
+              <h3>Помощь с кодом</h3>
+              <p>Индексирует проект и помогает исправлять, объяснять и менять исходники.</p>
+              <span class="flip-hint">Наведи, чтобы раскрыть</span>
+            </div>
+            <div class="flip-face flip-back">
+              <h3>Для разработки</h3>
+              <p>Поиск файлов, контекст проекта, генерация патчей, рефакторинг и объяснение архитектуры прямо из ассистента.</p>
+            </div>
+          </div>
+        </article>
+        <article class="feature-card flip-card" tabindex="0">
+          <div class="flip-inner">
+            <div class="flip-face flip-front">
+              <span class="feature-mark">05</span>
+              <h3>Самообучение</h3>
+              <p>Запоминает полезные шаги и повторяет знакомые команды быстрее.</p>
+              <span class="flip-hint">Наведи, чтобы раскрыть</span>
+            </div>
+            <div class="flip-face flip-back">
+              <h3>Память действий</h3>
+              <p>После AI-ответа JARVIS может сохранить исполняемую последовательность и запускать ее локально в следующий раз.</p>
+            </div>
+          </div>
+        </article>
+        <article class="feature-card flip-card" tabindex="0">
+          <div class="flip-inner">
+            <div class="flip-face flip-front">
+              <span class="feature-mark">06</span>
+              <h3>Расширяемость</h3>
+              <p>Модульная архитектура позволяет подключать новые роли и интеграции.</p>
+              <span class="flip-hint">Наведи, чтобы раскрыть</span>
+            </div>
+            <div class="flip-face flip-back">
+              <h3>Модули</h3>
+              <p>Голос, платформа, интеллект, сеть, медиа, плагины и доменные навыки собираются вокруг общего ядра.</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="personal-ai" id="personal">
+      <div class="section-heading">
+        <p class="eyebrow">Personal AI idea</p>
+        <h2>Не чат-бот, а персональный ИИ рядом с вашим компьютером</h2>
+        <p>Идея JARVIS - постепенно стать личным слоем интеллекта поверх Windows: помнить контекст, понимать стиль пользователя, предлагать действия заранее и подстраивать характер помощи под конкретную жизнь.</p>
+      </div>
+      <div class="personal-grid">
+        <div class="personal-card pulse-card">
+          <strong>Профиль пользователя</strong>
+          <span>Любимые приложения, рабочие привычки, язык общения, частые команды и проекты.</span>
+        </div>
+        <div class="personal-card pulse-card">
+          <strong>Настроение и тон</strong>
+          <span>Можно сделать ассистента более строгим, дружелюбным, спокойным, техническим или вдохновляющим.</span>
+        </div>
+        <div class="personal-card pulse-card">
+          <strong>Локальная память</strong>
+          <span>Важные повторяющиеся действия остаются на машине и не требуют постоянного обращения к облаку.</span>
+        </div>
+        <div class="personal-card pulse-card">
+          <strong>Проактивность</strong>
+          <span>JARVIS может напоминать, предлагать следующий шаг и замечать контекст, который обычно теряется.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="purchase section" id="purchase">
+      <div class="section-heading">
+        <p class="eyebrow">Marketplace</p>
+        <h2>Приобрести JARVIS и собрать своего ассистента</h2>
+        <p>Базовая версия включает локальное управление ПК, голос, настройки и основу персонализации. Дополнительные роли подключаются модулями по 5 евро за модуль.</p>
+      </div>
+      <div class="purchase-grid">
+        <article class="base-plan">
+          <span class="plan-label">Base</span>
+          <h3>JARVIS Basic</h3>
+          <p class="price">€15</p>
+          <p>Стартовый пакет для Windows: локальные команды, голосовой ввод, настройки AI-провайдера и базовая память действий.</p>
+          <button class="button primary" type="button" data-buy-base>Выбрать базовую версию</button>
+        </article>
+        <div class="modules-panel">
+          <div class="modules-top">
+            <h3>Модули</h3>
+            <span>€5 каждый</span>
+          </div>
+          <div class="module-grid" aria-label="Выбор модулей">
+            <label class="module-tile"><input type="checkbox" value="Умный дом" data-module><span>Умный дом</span><small>Сцены, свет, климат, устройства</small></label>
+            <label class="module-tile"><input type="checkbox" value="Telegram бот" data-module><span>Telegram бот</span><small>Команды и уведомления с телефона</small></label>
+            <label class="module-tile"><input type="checkbox" value="Философ" data-module><span>Философ</span><small>Размышления, идеи, смыслы</small></label>
+            <label class="module-tile"><input type="checkbox" value="Психолог" data-module><span>Психолог</span><small>Рефлексия, дневник, поддержка</small></label>
+            <label class="module-tile"><input type="checkbox" value="Инженер" data-module><span>Инженер</span><small>Системы, расчеты, диагностика</small></label>
+            <label class="module-tile"><input type="checkbox" value="Разработчик" data-module><span>Разработчик</span><small>Код, ревью, рефакторинг</small></label>
+            <label class="module-tile"><input type="checkbox" value="Гурман" data-module><span>Гурман</span><small>Рецепты, меню, покупки</small></label>
+            <label class="module-tile"><input type="checkbox" value="Кибербезопасность" data-module><span>Кибербезопасность</span><small>Аудит, советы, осторожность</small></label>
+          </div>
+          <div class="cart-summary" aria-live="polite">
+            <span>Выбрано модулей: <strong data-module-count>0</strong></span>
+            <span>Итого: <strong data-total>€15</strong></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="account-panel" id="account">
+      <div class="account-copy">
+        <p class="eyebrow">Account and wallet</p>
+        <h2>Логин и кошелек для API-токенов</h2>
+        <p>Кабинет нужен, чтобы хранить купленные модули, пополнять баланс и тратить средства на внешние AI API, когда локального режима недостаточно.</p>
+      </div>
+      <div class="account-ui">
+        <form class="login-box" data-login-form>
+          <label>
+            Email
+            <input type="email" name="email" placeholder="you@example.com" required>
+          </label>
+          <label>
+            Пароль
+            <input type="password" name="password" placeholder="••••••••" required>
+          </label>
+          <button class="button primary" type="submit">Войти</button>
+          <p data-login-status>Демо-кабинет: данные остаются в браузере.</p>
+        </form>
+        <div class="wallet-box">
+          <span class="wallet-label">Баланс кошелька</span>
+          <strong data-wallet-balance>€0</strong>
+          <div class="wallet-actions">
+            <button type="button" data-topup="5">+€5</button>
+            <button type="button" data-topup="10">+€10</button>
+            <button type="button" data-topup="25">+€25</button>
+          </div>
+          <div class="token-meter">
+            <span style="width: 18%" data-token-meter></span>
+          </div>
+          <p data-token-note>Пополните кошелек, чтобы оплачивать API-токены Claude, Gemini или других провайдеров.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow" id="setup">
+      <div class="section-heading compact">
+        <p class="eyebrow">First launch</p>
+        <h2>Запуск за несколько шагов</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <span>1</span>
+          <div>
+            <h3>Соберите или установите приложение</h3>
+            <p>Проект использует CMake, Qt 6 и модульную сборку вокруг исполняемого `jarvis.exe`.</p>
+          </div>
+        </li>
+        <li>
+          <span>2</span>
+          <div>
+            <h3>Выберите голосовые модели</h3>
+            <p>На первом запуске диалог Voice Input Setup предложит быстрые или полные модели распознавания.</p>
+          </div>
+        </li>
+        <li>
+          <span>3</span>
+          <div>
+            <h3>Добавьте AI-бэкенд при необходимости</h3>
+            <p>Для сложных вопросов и vision-команд можно подключить Claude, Gemini или локальный Ollama.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="privacy-band" id="privacy">
+      <div>
+        <p class="eyebrow">Privacy model</p>
+        <h2>Локальность по умолчанию</h2>
+      </div>
+      <p>Базовое распознавание и команды выполняются на компьютере пользователя. Аудио не сохраняется на диск, API-ключи хранятся зашифрованно, а внешние запросы используются только для включенных AI-провайдеров.</p>
+    </section>
+
+    <section class="section requirements" id="requirements">
+      <div class="section-heading">
+        <p class="eyebrow">System requirements</p>
+        <h2>Что нужно для работы</h2>
+      </div>
+      <div class="requirements-list">
+        <div><strong>OS</strong><span>Windows 10/11 x64</span></div>
+        <div><strong>RAM</strong><span>4 GB минимум, 8 GB для больших моделей</span></div>
+        <div><strong>Disk</strong><span>200 MB для приложения плюс место для Vosk-моделей</span></div>
+        <div><strong>Voice</strong><span>Любой Windows-совместимый микрофон</span></div>
+        <div><strong>Internet</strong><span>Только для загрузки моделей и внешних AI API</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>J.A.R.V.I.S. project site</span>
+    <a href="../LICENSE">MIT License</a>
+  </footer>
+</body>
+</html>

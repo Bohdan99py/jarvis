@@ -54,7 +54,7 @@ private:
     SessionMemory* m_memory = nullptr;
 
     QString m_apiKey;
-    QString m_model = QStringLiteral("claude-sonnet-4-6");
+    QString m_model = QStringLiteral("claude-sonnet-5");
     bool m_requesting = false;
     bool m_usingEmbeddedKey = false;
     QString m_lastStopReason; // "end_turn" | "max_tokens" | "stop_sequence" | ...
