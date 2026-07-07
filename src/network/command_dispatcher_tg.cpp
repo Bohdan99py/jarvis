@@ -53,6 +53,14 @@ CommandDispatcherTg::CommandDispatcherTg(J2JTelegramGateway* gateway,
              << 13 << "registered commands";
 }
 
+void CommandDispatcherTg::setJarvisCore(Jarvis* jarvis)
+{
+    // Раньше GourmetModule::m_jarvis никогда не выставлялся —
+    // processIngredients() всегда падал в ветку "no Jarvis core attached"
+    // и отвечал "Гурмэ-модуль не подключён к ядру" на любой /fridge.
+    if (m_gourmet) m_gourmet->setJarvisCore(jarvis);
+}
+
 // ============================================================
 //  Dispatch entry point
 // ============================================================
@@ -105,6 +113,9 @@ DispatchResult CommandDispatcherTg::dispatch(qint64 chatId,
 
     if (cmd == QStringLiteral("/webcam") || cmd == QStringLiteral("/cam"))
         return cmdWebcam(chatId, english);
+
+    if (cmd == QStringLiteral("/video"))
+        return cmdVideo(chatId, args, english);
 
     if (cmd == QStringLiteral("/surveillance") || cmd == QStringLiteral("/watch"))
         return cmdSurveillance(chatId, args, english);
@@ -653,6 +664,71 @@ DispatchResult CommandDispatcherTg::cmdWebcam(qint64 chatId, bool english)
     });
 
     m_camera->captureWebcam();
+    return r;
+}
+
+// ============================================================
+//  /video — record a webcam clip WITH microphone audio and send it
+//  (unlike /surveillance and the silent security motion clips, this
+//  captures a real audio track via Qt Multimedia/QMediaRecorder).
+// ============================================================
+
+DispatchResult CommandDispatcherTg::cmdVideo(qint64 chatId, const QString& args,
+                                              bool english)
+{
+    DispatchResult r;
+    r.handled = true;
+
+    if (!m_camera->hasWebcam()) {
+        r.response = english
+            ? QStringLiteral("📷 No webcam detected on this PC.")
+            : QStringLiteral("📷 Веб-камера не обнаружена.");
+        return r;
+    }
+
+    if (m_camera->isRecordingClip()) {
+        r.response = english
+            ? QStringLiteral("🎥 Already recording a clip — wait for it to finish.")
+            : QStringLiteral("🎥 Уже идёт запись — дождитесь окончания.");
+        return r;
+    }
+
+    int durationSec = 10;
+    static const QRegularExpression numRx(QStringLiteral("(\\d+)"));
+    auto m = numRx.match(args);
+    if (m.hasMatch()) durationSec = qBound(3, m.captured(1).toInt(), 30);
+
+    const QString dir = J2JTelegramGateway::workspaceOutputDir();
+    const QString ts  = QDateTime::currentDateTime()
+        .toString(QStringLiteral("yyyyMMdd_HHmmss"));
+    const QString path = dir + QStringLiteral("/video_%1.mp4").arg(ts);
+
+    auto conn    = std::make_shared<QMetaObject::Connection>();
+    auto errConn = std::make_shared<QMetaObject::Connection>();
+
+    *conn = connect(m_camera, &CameraAgent::clipReady, this,
+                    [this, chatId, english, conn, errConn](const QString& clipPath) {
+        disconnect(*conn);
+        disconnect(*errConn);
+        m_gateway->sendVideoToMobile(chatId, clipPath,
+            english ? QStringLiteral("🎥 Video clip (with audio)")
+                    : QStringLiteral("🎥 Видеозапись (со звуком)"));
+        qDebug() << "[CommandDispatcher] Audio+video clip sent to chat" << chatId;
+    });
+    *errConn = connect(m_camera, &CameraAgent::clipError, this,
+                       [this, chatId, english, conn, errConn](const QString& msg) {
+        disconnect(*conn);
+        disconnect(*errConn);
+        m_gateway->sendOutboundMessage(chatId,
+            (english ? QStringLiteral("⚠ Recording error: ")
+                     : QStringLiteral("⚠ Ошибка записи: ")) + msg);
+    });
+
+    m_camera->recordClip(path, durationSec);
+
+    r.response = english
+        ? QStringLiteral("🎥 Recording %1s of video with audio...").arg(durationSec)
+        : QStringLiteral("🎥 Записываю %1с видео со звуком...").arg(durationSec);
     return r;
 }
 

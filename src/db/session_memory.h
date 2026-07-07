@@ -119,6 +119,12 @@ public:
     // Task board context (deadlines, active tasks)
     void setTaskContext(const QString& ctx) { m_taskBoardContext = ctx; }
 
+    // Per-turn directives (mood, language, diagram requirements) — set by
+    // Jarvis right before each LLM call. They belong to the SYSTEM prompt:
+    // injecting persona/behaviour instructions into the user turn makes
+    // Claude treat them as a prompt-injection attempt and refuse the persona.
+    void setTurnDirectives(const QString& ctx) { m_turnDirectives = ctx; }
+
     // Сознание: что JARVIS знает о накопленном опыте (для system prompt)
     void setLearningStats(int totalInteractions, int likedResponses,
                           int cachedResponses, int sessionsRecorded);
@@ -159,6 +165,7 @@ private:
     QString m_adaptiveFocusContext;
     QString m_capabilitiesContext;
     QString m_taskBoardContext;
+    QString m_turnDirectives;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;

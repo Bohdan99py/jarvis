@@ -28,6 +28,83 @@
 #include <QDebug>
 #include <cmath>
 
+#ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN   // без rpcndr.h: там #define small char
+#endif
+#include <windows.h>
+#endif
+
+// ============================================================
+//  Vosk runtime: полный набор файлов и предзагрузка
+// ============================================================
+//
+// libvosk.dll — MinGW-сборка и тянет за собой сопутствующие DLL.
+// Раньше проверялась и ставилась только libvosk.dll — на чужих ПК
+// библиотека "есть, но не видна": без libgcc/libstdc++/libwinpthread
+// LoadLibrary молча проваливается. Теперь ставим и проверяем весь набор.
+//
+// Порядок в списке = порядок загрузки (зависимости раньше libvosk).
+static const QStringList& voskRuntimeFiles()
+{
+    static const QStringList files = {
+        QStringLiteral("libwinpthread-1.dll"),
+        QStringLiteral("libgcc_s_seh-1.dll"),
+        QStringLiteral("libstdc++-6.dll"),
+        QStringLiteral("libvosk.dll"),
+    };
+    return files;
+}
+
+// Загрузить Vosk runtime по абсолютным путям ДО первого вызова vosk_*
+// (libvosk.dll подключена через /DELAYLOAD). Ищем в папке exe и в
+// AppData/vosk — куда скачивает встроенный установщик. Как только
+// модуль загружен в процесс, delay-load резолвится в него же.
+static bool preloadVoskRuntime()
+{
+#ifdef Q_OS_WIN
+    if (GetModuleHandleW(L"libvosk.dll"))
+        return true;
+
+    const QStringList dirs = {
+        QCoreApplication::applicationDirPath(),
+        VoiceInput::voskInstallDir(),
+    };
+
+    for (const QString& dir : dirs) {
+        if (!QFile::exists(dir + QStringLiteral("/libvosk.dll")))
+            continue;
+
+        for (const QString& name : voskRuntimeFiles()) {
+            const QString path = QDir::toNativeSeparators(
+                dir + QStringLiteral("/") + name);
+            if (!QFile::exists(path)) {
+                // Сопутствующая DLL может быть уже в системе/статически —
+                // не считаем это фатальным, просто логируем.
+                qDebug() << "[Vosk] Runtime file missing (optional):" << path;
+                continue;
+            }
+            HMODULE h = LoadLibraryExW(
+                reinterpret_cast<const wchar_t*>(path.utf16()),
+                nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            if (!h) {
+                qWarning() << "[Vosk] LoadLibrary failed:" << path
+                           << "error:" << GetLastError();
+            }
+        }
+
+        if (GetModuleHandleW(L"libvosk.dll")) {
+            qDebug() << "[Vosk] Runtime loaded from:" << dir;
+            return true;
+        }
+    }
+    qWarning() << "[Vosk] libvosk.dll could not be loaded from any location";
+    return false;
+#else
+    return true;
+#endif
+}
+
 // ============================================================
 //  VoskModelInfo
 // ============================================================
@@ -237,29 +314,72 @@ bool VoskDownloader::deleteModel(const QString& installDir, const QString& model
     return QDir(path).removeRecursively();
 }
 
+// Есть ли в каталоге ПОЛНЫЙ набор Vosk runtime (libvosk + зависимости)
+static bool hasFullVoskRuntime(const QString& dir)
+{
+    for (const QString& name : voskRuntimeFiles()) {
+        if (!QFile::exists(dir + QStringLiteral("/") + name))
+            return false;
+    }
+    return true;
+}
+
 void VoskDownloader::ensureDll()
 {
-    // DLL может быть: 1) рядом с exe (из installer), 2) в modelDir (legacy)
-    QString exeDir = QCoreApplication::applicationDirPath();
-    if (QFile::exists(exeDir + QStringLiteral("/libvosk.dll"))) {
-        emit logMessage(QStringLiteral("✅ libvosk.dll found (installed)"));
+    // Runtime может быть: 1) рядом с exe (из installer), 2) в modelDir.
+    // Проверяем ПОЛНЫЙ набор файлов: одной libvosk.dll недостаточно —
+    // без MinGW-зависимостей она не загружается ("библиотека есть,
+    // но Vosk её не видит").
+    const QString exeDir = QCoreApplication::applicationDirPath();
+
+    if (hasFullVoskRuntime(exeDir)) {
+        emit logMessage(QStringLiteral("✅ Vosk runtime found (next to exe)"));
+        emit componentReady(QStringLiteral("dll"));
+        return;
+    }
+    if (hasFullVoskRuntime(m_installDir)) {
+        emit logMessage(QStringLiteral("✅ Vosk runtime found: %1").arg(m_installDir));
         emit componentReady(QStringLiteral("dll"));
         return;
     }
 
-    auto status = checkStatus(m_installDir);
-    if (status.dllReady) {
-        emit componentReady(QStringLiteral("dll"));
-        return;
+    if (QFile::exists(exeDir + QStringLiteral("/libvosk.dll"))
+        || QFile::exists(m_installDir + QStringLiteral("/libvosk.dll"))) {
+        emit logMessage(QStringLiteral(
+            "⚠ libvosk.dll найдена, но не хватает сопутствующих библиотек "
+            "(libgcc/libstdc++/libwinpthread) — докачиваем полный runtime..."));
+    } else {
+        emit logMessage(QStringLiteral("📥 Скачиваем Vosk runtime (libvosk.dll + зависимости)..."));
     }
 
-    emit logMessage(QStringLiteral("📥 Скачиваем Vosk runtime (libvosk.dll)..."));
     downloadAndExtract(
         QStringLiteral("dll"),
         VOSK_DLL_URL,
         m_installDir,
         VOSK_DLL_PREFIX
     );
+
+    // Отчёт по каждому файлу набора + best-effort копия рядом с exe
+    // (если папка доступна на запись — стандартный поиск DLL заработает
+    // без всяких обходных путей).
+    int present = 0;
+    for (const QString& name : voskRuntimeFiles()) {
+        const QString src = m_installDir + QStringLiteral("/") + name;
+        if (QFile::exists(src)) {
+            ++present;
+            emit logMessage(QStringLiteral("  ✅ %1").arg(name));
+            const QString dst = exeDir + QStringLiteral("/") + name;
+            if (!QFile::exists(dst) && QFile::copy(src, dst)) {
+                emit logMessage(QStringLiteral("  ↳ скопирована рядом с exe"));
+            }
+        } else {
+            emit logMessage(QStringLiteral("  ⚠ %1 — нет в архиве (возможно, "
+                                           "встроена статически)").arg(name));
+        }
+    }
+    if (present > 0) {
+        emit logMessage(QStringLiteral("📦 Установлено файлов Vosk runtime: %1").arg(present));
+    }
 }
 
 void VoskDownloader::downloadAndExtract(const QString& name,
@@ -805,9 +925,10 @@ void VoskWorker::unloadHeavyModels()
 
     for (auto& mp : m_models) {
         // Лёгкой считаем модель, путь которой содержит "small".
+        // (имя переменной не "small" — это макрос из windows.h/rpcndr.h)
         const QString path = paths.value(mp.lang);
-        const bool small = !path.isEmpty() && isSmallModel(path);
-        if (small) {
+        const bool lightweight = !path.isEmpty() && isSmallModel(path);
+        if (lightweight) {
             kept.push_back(mp);
             continue;
         }
@@ -1212,6 +1333,16 @@ void VoiceInput::onModelDownloadFinished(bool success, const QString& error)
 
 void VoiceInput::loadModelsFromDisk()
 {
+    // libvosk.dll подключена через /DELAYLOAD — грузим её (и зависимости)
+    // по абсолютному пути ДО первого vosk_* вызова. Иначе runtime из
+    // AppData/vosk не находится стандартным поиском DLL.
+    if (!preloadVoskRuntime()) {
+        emit initError(QStringLiteral(
+            "Vosk runtime (libvosk.dll) не загружается. "
+            "Откройте Settings → Голос и переустановите голосовой движок."));
+        return;
+    }
+
     QString installDir = voskInstallDir();
     auto status = checkSetupStatus();
 

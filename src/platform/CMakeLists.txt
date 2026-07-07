@@ -20,6 +20,8 @@ add_library(jarvis_platform OBJECT
     camera_agent.cpp
     security_camera.h
     security_camera.cpp
+    face_registry.h
+    face_registry.cpp
 )
 
 target_include_directories(jarvis_platform PUBLIC
@@ -32,7 +34,7 @@ target_include_directories(jarvis_platform PRIVATE
 
 target_link_libraries(jarvis_platform
     PUBLIC  jarvis_common Qt6::Core Qt6::Gui Qt6::Widgets
-    PRIVATE Qt6::Network Qt6::Multimedia Qt6::Concurrent user32 ole32 oleaut32 shell32
+    PRIVATE Qt6::Network Qt6::Multimedia Qt6::Concurrent Qt6::Sql user32 ole32 oleaut32 shell32
 )
 # JARVIS_HAS_OPENCV is set in the root CMakeLists.txt for BOTH system
 # OpenCV (find_package) AND the redist/opencv/build/ fallback.

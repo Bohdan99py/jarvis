@@ -10,6 +10,10 @@
 #include <QMediaDevices>
 #include <QVideoSink>
 #include <QVideoFrame>
+#include <QAudioInput>
+#include <QMediaRecorder>
+#include <QMediaFormat>
+#include <QUrl>
 #include <QScreen>
 #include <QApplication>
 #include <QDateTime>
@@ -35,6 +39,8 @@ CameraAgent::CameraAgent(QObject* parent)
 CameraAgent::~CameraAgent()
 {
     stopSurveillance();
+    if (m_recorder && m_recorder->recorderState() == QMediaRecorder::RecordingState)
+        m_recorder->stop();
     if (m_camera) m_camera->stop();
 }
 
@@ -110,15 +116,105 @@ void CameraAgent::releaseCamera()
 {
     if (!m_camera) return;
     if (m_survTimer->isActive()) return;
+    if (isRecordingClip()) return; // don't yank the camera mid-recording
 
     m_camera->stop();
-    delete m_camera;  m_camera  = nullptr;
-    delete m_session; m_session = nullptr;
-    delete m_capture; m_capture = nullptr;
-    delete m_sink;    m_sink    = nullptr;
+    delete m_camera;     m_camera     = nullptr;
+    delete m_session;    m_session    = nullptr;
+    delete m_capture;    m_capture    = nullptr;
+    delete m_sink;       m_sink       = nullptr;
+    delete m_recorder;   m_recorder   = nullptr;
+    delete m_audioInput; m_audioInput = nullptr;
     m_cameraReady = false;
 
     qDebug() << "[CameraAgent] Camera released (LED off)";
+}
+
+// ============================================================
+//  Video+audio clip recording
+// ============================================================
+
+void CameraAgent::ensureRecorder()
+{
+    if (m_recorder) return;
+
+    initCamera();
+    if (!m_session) return;
+
+    m_audioInput = new QAudioInput(this);
+    m_recorder   = new QMediaRecorder(this);
+
+    QMediaFormat fmt;
+    fmt.setFileFormat(QMediaFormat::FileFormat::MPEG4);
+    fmt.setVideoCodec(QMediaFormat::VideoCodec::H264);
+    fmt.setAudioCodec(QMediaFormat::AudioCodec::AAC);
+    m_recorder->setMediaFormat(fmt);
+
+    m_session->setAudioInput(m_audioInput);
+    m_session->setRecorder(m_recorder);
+
+    connect(m_recorder, &QMediaRecorder::recorderStateChanged, this,
+            [this](QMediaRecorder::RecorderState state) {
+        if (state != QMediaRecorder::StoppedState) return;
+        const QString path = m_recorder->actualLocation().toLocalFile();
+        if (path.isEmpty()) return;
+        qDebug() << "[CameraAgent] Clip recorded (video+audio):" << path;
+        emit clipReady(path);
+        // Now safe to release the camera if surveillance isn't active
+        m_releaseTimer->start();
+    });
+    connect(m_recorder, &QMediaRecorder::errorOccurred, this,
+            [this](QMediaRecorder::Error /*error*/, const QString& errorString) {
+        qWarning() << "[CameraAgent] Recorder error:" << errorString;
+        emit clipError(errorString);
+    });
+}
+
+void CameraAgent::recordClip(const QString& outputPath, int durationSec)
+{
+    if (!hasWebcam()) {
+        emit clipError(QStringLiteral("No webcam available"));
+        return;
+    }
+
+    ensureRecorder();
+    if (!m_recorder) {
+        emit clipError(QStringLiteral("Recorder initialization failed"));
+        return;
+    }
+    if (m_recorder->recorderState() == QMediaRecorder::RecordingState) {
+        emit clipError(QStringLiteral("Already recording a clip"));
+        return;
+    }
+
+    if (!m_recordStopTimer) {
+        m_recordStopTimer = new QTimer(this);
+        m_recordStopTimer->setSingleShot(true);
+        connect(m_recordStopTimer, &QTimer::timeout, this, [this]() {
+            if (m_recorder) m_recorder->stop();
+        });
+    }
+
+    auto startRecording = [this, outputPath, durationSec]() {
+        if (!m_recorder) return;
+        m_recorder->setOutputLocation(QUrl::fromLocalFile(outputPath));
+        m_recorder->record();
+        m_recordStopTimer->start(durationSec * 1000);
+        qDebug() << "[CameraAgent] Recording clip (video+audio) to" << outputPath
+                 << "for" << durationSec << "s";
+    };
+
+    // Camera still warming up (just opened by ensureRecorder→initCamera) —
+    // starting record() immediately can produce a corrupt/empty first clip.
+    if (!m_cameraReady)
+        QTimer::singleShot(600, this, startRecording);
+    else
+        startRecording();
+}
+
+bool CameraAgent::isRecordingClip() const
+{
+    return m_recorder && m_recorder->recorderState() == QMediaRecorder::RecordingState;
 }
 
 // ============================================================

@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "j2j_telegram_gateway.h"
+#include "j2j_mesh_connector.h"
 #include "mobile_pairing_manager.h"
 #include "telegram_access_manager.h"
 #include "pc_wake_agent.h"
@@ -44,6 +45,7 @@
 #include <QHttpMultiPart>
 #include <QHttpPart>
 #include <QUuid>
+#include <QSysInfo>
 #include <QtConcurrent>
 #include <QDebug>
 
@@ -160,6 +162,8 @@ QString J2JTelegramGateway::localized(TgStringId id, bool en)
             "• Natural TTS via Piper voice synthesis queue\n\n"
             "=== COMMANDS ===\n"
             "• `/menu` — main control menu\n"
+            "• `/pc` — choose which PC this chat controls\n"
+            "• `/video [seconds]` — record webcam clip WITH audio (default 10s)\n"
             "• `/screen_analyze` — capture screen for AI analysis\n"
             "• `/stop_voice` — silence voice playback\n"
             "• `/cache_stats` — show LLM cache statistics\n"
@@ -175,6 +179,8 @@ QString J2JTelegramGateway::localized(TgStringId id, bool en)
             "• Естественный TTS через Piper и очередь речи\n\n"
             "=== КРАТКАЯ ИНСТРУКЦИЯ ПОЛЬЗОВАТЕЛЯ ===\n"
             "• `/menu` (`/ьуну`) — главное меню\n"
+            "• `/pc` — выбрать, каким ПК управляет этот чат\n"
+            "• `/video [секунды]` — видео с веб-камеры СО ЗВУКОМ (по умолч. 10с)\n"
             "• `/screen_analyze` (`/ысккуут_фтфдныу`) — захват экрана + ИИ анализ\n"
             "• `/stop_voice` (`/ытщз_мщшсу`) — остановить голос\n"
             "• `/cache_stats` — статистика кэша LLM\n"
@@ -283,6 +289,15 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
 J2JTelegramGateway::~J2JTelegramGateway()
 {
     stop();
+}
+
+void J2JTelegramGateway::setJarvisCore(Jarvis* jarvis)
+{
+    m_jarvis = jarvis;
+    // Диспетчер (и его GourmetModule) создаётся в конструкторе этого
+    // гейтвея — раньше, чем ядро становится известно снаружи. Без этой
+    // проброски /fridge всегда отвечал "модуль не подключён к ядру".
+    if (m_dispatcher) m_dispatcher->setJarvisCore(jarvis);
 }
 
 void J2JTelegramGateway::setBotToken(const QString& token)
@@ -505,19 +520,59 @@ void J2JTelegramGateway::processUpdate(const QJsonObject& update)
 // ============================================================
 
 void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
-                                        const QString& firstName)
+                                        const QString& firstName, bool fromRelay)
 {
     emit messageReceived(chatId, text);
 
     // Register user in RBAC system (first user → Admin)
     m_accessMgr->ensureRegistered(chatId, firstName);
 
-    // ── 0. Auto-bind: if this chat has no session, bind to THIS PC ──
-    //    No PIN required — first message auto-pairs the user.
-    {
+    // ── 0. Multi-PC routing ─────────────────────────────────
+    // Один бот — несколько ПК. Каждый чат привязан к своему устройству:
+    //  - чат привязан к ЭТОМУ ПК   → выполняем локально;
+    //  - чат привязан к ДРУГОМУ ПК → пересылаем апдейт владельцу по мешу
+    //    (поллер у Telegram один "случайный" из PC, поэтому пересылка
+    //    обязательна — иначе команды гостя выполняются на чужом ПК);
+    //  - привязки нет и в сети есть другие узлы → спрашиваем пользователя,
+    //    какой ПК его, инлайн-клавиатурой;
+    //  - привязки нет и узел один → авто-привязка к этому ПК (как раньше).
+    if (!fromRelay) {
         auto pcSession = m_accessMgr->resolveSession(chatId);
-        if (!pcSession.has_value()) {
-            m_accessMgr->autoBindSession(chatId, firstName);
+        const bool hasActive = pcSession.has_value()
+            && pcSession->status == QStringLiteral("active");
+
+        if (hasActive
+            && pcSession->deviceId != m_accessMgr->localDeviceId()) {
+            // Чужой чат — пересылаем владельцу
+            TgChatSession& rs = getOrCreateSession(chatId);
+            QJsonObject payload;
+            payload[QStringLiteral("kind")]      = QStringLiteral("message");
+            payload[QStringLiteral("chatId")]    = static_cast<double>(chatId);
+            payload[QStringLiteral("text")]      = text;
+            payload[QStringLiteral("firstName")] = firstName;
+
+            const bool relayed = m_mesh
+                && m_mesh->sendTgRelay(pcSession->deviceId, payload);
+            if (!relayed) {
+                sendMessage(chatId, rs.isEnglish
+                    ? QStringLiteral("🖥 Your PC *%1* is offline right now. "
+                                     "Use /pc to re-bind to another PC.")
+                        .arg(pcSession->pcName)
+                    : QStringLiteral("🖥 Ваш ПК *%1* сейчас не в сети. "
+                                     "Используйте /pc чтобы выбрать другой ПК.")
+                        .arg(pcSession->pcName));
+            }
+            return;
+        }
+
+        if (!hasActive) {
+            if (m_mesh && m_mesh->peerCount() > 0) {
+                // Несколько ПК в сети — пусть человек выберет свой
+                TgChatSession& ns = getOrCreateSession(chatId);
+                sendPcSelectionKeyboard(chatId, ns.isEnglish);
+                return;
+            }
+            bindChatToLocalPc(chatId, /*announce=*/false);
             qDebug() << "[TelegramGW] Auto-bound chat" << chatId
                      << "to this PC";
         }
@@ -589,6 +644,12 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             }
         }
 
+        if (cmd == QStringLiteral("/pc")) {
+            // Выбор/смена своего ПК (multi-PC на одном боте)
+            TgChatSession& session = getOrCreateSession(chatId);
+            sendPcSelectionKeyboard(chatId, session.isEnglish);
+            return;
+        }
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
             TgChatSession& session = getOrCreateSession(chatId);
             session.wizardStep = QaWizardStep::Idle;
@@ -818,6 +879,111 @@ bool J2JTelegramGateway::handlePairing(qint64 chatId, const QString& text,
     return true;  // consumed: don't pass to LLM regardless of outcome
 }
 
+// ============================================================
+//  Multi-PC: chat ↔ PC binding & mesh relay
+// ============================================================
+
+void J2JTelegramGateway::sendPcSelectionKeyboard(qint64 chatId, bool english)
+{
+    QJsonArray rows;
+
+    // Этот ПК. В callback_data — явный nodeId, а не "local": callback
+    // может опросить ДРУГОЙ ПК (поллер у бота один случайный), и "local"
+    // там означал бы не тот компьютер.
+    const QString localName = QSysInfo::machineHostName();
+    const QString localKey  = m_mesh ? m_mesh->localNodeId()
+                                     : QStringLiteral("local");
+    rows.append(QJsonArray{QJsonObject{
+        {QStringLiteral("text"), QStringLiteral("🖥 %1").arg(localName)},
+        {QStringLiteral("callback_data"), QStringLiteral("bindpc:") + localKey}
+    }});
+
+    // Остальные узлы меша
+    if (m_mesh) {
+        const auto peers = m_mesh->activePeers();
+        for (const auto& p : peers) {
+            rows.append(QJsonArray{QJsonObject{
+                {QStringLiteral("text"), QStringLiteral("🖥 ") + p.nodeName},
+                {QStringLiteral("callback_data"),
+                 QStringLiteral("bindpc:") + p.nodeId}
+            }});
+        }
+    }
+
+    sendMessage(chatId, english
+        ? QStringLiteral("Which PC is yours? Commands from this chat will "
+                         "control ONLY the selected PC.")
+        : QStringLiteral("Какой ПК ваш? Команды из этого чата будут "
+                         "управлять ТОЛЬКО выбранным ПК."),
+        buildInlineKeyboard(rows));
+}
+
+void J2JTelegramGateway::bindChatToLocalPc(qint64 chatId, bool announce)
+{
+    const QString pcName = QSysInfo::machineHostName();
+    m_accessMgr->bindSession(chatId, pcName);
+
+    // Оповещаем остальные узлы, чтобы они пересылали апдейты этого чата сюда
+    if (m_mesh)
+        m_mesh->broadcastTgBinding(chatId, m_accessMgr->localDeviceId(), pcName);
+
+    if (announce) {
+        TgChatSession& session = getOrCreateSession(chatId);
+        sendMessage(chatId, session.isEnglish
+            ? QStringLiteral("✅ This chat now controls *%1*. "
+                             "Change anytime with /pc.").arg(pcName)
+            : QStringLiteral("✅ Этот чат теперь управляет *%1*. "
+                             "Сменить можно командой /pc.").arg(pcName));
+        sendMainMenu(chatId, session.isEnglish);
+    }
+}
+
+void J2JTelegramGateway::onMeshRelay(const QJsonObject& data)
+{
+    const QString kind  = data[QStringLiteral("kind")].toString();
+    const qint64 chatId = static_cast<qint64>(
+        data[QStringLiteral("chatId")].toDouble());
+    if (chatId == 0) return;
+
+    if (kind == QStringLiteral("bind")) {
+        // Пользователь выбрал ЭТОТ ПК на клавиатуре другого узла
+        const QString firstName = data[QStringLiteral("firstName")].toString();
+        m_accessMgr->ensureRegistered(chatId, firstName);
+        bindChatToLocalPc(chatId);
+        return;
+    }
+
+    if (kind == QStringLiteral("message")) {
+        const QString text      = data[QStringLiteral("text")].toString();
+        const QString firstName = data[QStringLiteral("firstName")].toString();
+        if (text.isEmpty()) return;
+
+        // Убеждаемся, что чат числится за нами (пересылатель так решил)
+        if (!m_accessMgr->isSessionBoundHere(chatId))
+            m_accessMgr->bindSession(chatId, QSysInfo::machineHostName());
+
+        qDebug() << "[TelegramGW] Relayed message for chat" << chatId
+                 << "from node" << data[QStringLiteral("fromNode")].toString();
+        handleMessage(chatId, text, firstName, /*fromRelay=*/true);
+    }
+}
+
+void J2JTelegramGateway::onMeshBinding(const QJsonObject& data)
+{
+    const qint64 chatId = static_cast<qint64>(
+        data[QStringLiteral("chatId")].toDouble());
+    const QString deviceId = data[QStringLiteral("deviceId")].toString();
+    const QString pcName   = data[QStringLiteral("pcName")].toString();
+    if (chatId == 0 || deviceId.isEmpty()) return;
+
+    // Свои привязки не перезаписываем чужими оповещениями об этом же девайсе
+    if (deviceId == m_accessMgr->localDeviceId()) return;
+
+    m_accessMgr->bindSessionToDevice(chatId, deviceId, pcName);
+    qDebug() << "[TelegramGW] Binding synced: chat" << chatId
+             << "→" << pcName << "(" << deviceId << ")";
+}
+
 void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
                                                qint64 chatId,
                                                const QString& data)
@@ -826,6 +992,28 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
     bool en = session.isEnglish;
 
     answerCallbackQuery(callbackId);
+
+    // ── Multi-PC: выбор своего ПК ("bindpc:<nodeId>" | "bindpc:local") ──
+    if (data.startsWith(QStringLiteral("bindpc:"))) {
+        const QString target = data.mid(7);
+        const bool isLocal = target == QStringLiteral("local")
+            || (m_mesh && target == m_mesh->localNodeId());
+        if (isLocal) {
+            bindChatToLocalPc(chatId);
+        } else if (m_mesh) {
+            // Просим выбранный узел привязать чат к себе
+            QJsonObject payload;
+            payload[QStringLiteral("kind")]      = QStringLiteral("bind");
+            payload[QStringLiteral("chatId")]    = static_cast<double>(chatId);
+            payload[QStringLiteral("firstName")] = QString();
+            if (!m_mesh->sendTgRelay(target, payload)) {
+                sendMessage(chatId, en
+                    ? QStringLiteral("❌ That PC is offline. Try /pc again later.")
+                    : QStringLiteral("❌ Этот ПК не в сети. Попробуйте /pc позже."));
+            }
+        }
+        return;
+    }
 
     // Main menu actions
     if (data == QStringLiteral("action_telemetry")) {
@@ -1271,9 +1459,47 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     session.awaitingLlm = true;
     startTypingIndicator(chatId);
 
-    QString langInstruction = english
-        ? QStringLiteral("Respond in English. The user is a QA Tester.")
-        : QStringLiteral("Отвечай на русском языке.");
+    // Сообщаем LLM реальный статус доступа ЭТОГО пользователя на ЭТОМ ПК —
+    // раньше здесь был зашит константный "The user is a QA Tester.",
+    // из-за чего Джарвис не знал, что пишет владелец/админ, и мог
+    // безосновательно осторожничать с системными запросами. Каждый ПК
+    // хранит роли в своей локальной БД (см. TelegramAccessManager) —
+    // владелец ноутбука девушки видит "админ" только у себя, не у меня.
+    QString roleContext;
+    {
+        const bool owner = m_accessMgr->isPrimaryOwner(chatId);
+        const TelegramRole role = m_accessMgr->getRole(chatId);
+        const auto pcSession = m_accessMgr->resolveSession(chatId);
+        const QString pcName = (pcSession.has_value() && !pcSession->pcName.isEmpty())
+            ? pcSession->pcName : QSysInfo::machineHostName();
+
+        if (owner) {
+            roleContext = english
+                ? QStringLiteral(" This user is the ADMIN/owner of THIS PC (%1) — grant full "
+                                 "access to system info, control commands and personal context "
+                                 "for this machine; do not treat them as an untrusted stranger.")
+                      .arg(pcName)
+                : QStringLiteral(" Этот пользователь — АДМИН/владелец ЭТОГО ПК (%1) — "
+                                 "предоставляй полный доступ к системной информации, командам "
+                                 "управления и личному контексту этого компьютера; не "
+                                 "относись к нему как к постороннему.")
+                      .arg(pcName);
+        } else {
+            roleContext = english
+                ? QStringLiteral(" This user's access role on this PC is '%1' (not the "
+                                 "owner) — keep the owner's private data and system control "
+                                 "commands restricted from them.")
+                      .arg(telegramRoleToString(role))
+                : QStringLiteral(" Роль доступа этого пользователя на данном ПК — '%1' "
+                                 "(не владелец) — не раскрывай ему личные данные владельца "
+                                 "и не выполняй системные команды управления от его имени.")
+                      .arg(telegramRoleToString(role));
+        }
+    }
+
+    QString langInstruction = (english
+        ? QStringLiteral("Respond in English.")
+        : QStringLiteral("Отвечай на русском языке.")) + roleContext;
 
     // Mood + diagram instructions are now injected globally in Jarvis::processCommand()
 

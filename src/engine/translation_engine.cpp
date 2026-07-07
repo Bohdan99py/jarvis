@@ -6,6 +6,7 @@
 #include "claude_api.h"
 #include "activity_tracker.h"
 #include "database_manager.h"
+#include "voice_input.h"
 
 #ifdef JARVIS_VOSK_AVAILABLE
 #include "vosk_api.h"
@@ -17,6 +18,74 @@
 #include <QJsonObject>
 #include <QThread>
 #include <QDebug>
+#include <QAudioDecoder>
+#include <QAudioBuffer>
+#include <QAudioFormat>
+#include <QEventLoop>
+#include <QUrl>
+#include <QTimer>
+
+// ============================================================
+//  Универсальное декодирование аудио в 16kHz mono PCM16
+//
+// Раньше здесь просто читались сырые байты файла и (в лучшем случае)
+// отрезался 44-байтовый WAV-заголовок — для MP3/M4A/OGG (сжатые
+// форматы, как голосовые Telegram-сообщения) это подавало на вход
+// Vosk мусор вместо PCM и распознавание либо падало, либо не находило
+// текст. QAudioDecoder (бэкенд FFmpeg, уже используется Qt Multimedia)
+// декодирует ЛЮБОЙ поддерживаемый контейнер/кодек в нужный PCM-формат.
+// ============================================================
+
+static QByteArray decodeAudioToPcm16Mono16k(const QString& filePath, QString* errorOut)
+{
+    QAudioFormat targetFormat;
+    targetFormat.setSampleRate(16000);
+    targetFormat.setChannelCount(1);
+    targetFormat.setSampleFormat(QAudioFormat::Int16);
+
+    QAudioDecoder decoder;
+    decoder.setAudioFormat(targetFormat);
+    decoder.setSource(QUrl::fromLocalFile(filePath));
+
+    QByteArray pcm;
+    QEventLoop loop;
+    bool failed = false;
+
+    QObject::connect(&decoder, &QAudioDecoder::bufferReady, &decoder, [&]() {
+        const QAudioBuffer buffer = decoder.read();
+        if (buffer.isValid() && buffer.constData<char>()) {
+            pcm.append(reinterpret_cast<const char*>(buffer.constData<char>()),
+                       static_cast<int>(buffer.byteCount()));
+        }
+    });
+    QObject::connect(&decoder, &QAudioDecoder::finished, &loop, &QEventLoop::quit);
+    // QAudioDecoder::error is both a signal AND an accessor method with the
+    // same name — needs QOverload to disambiguate at the pointer-to-member
+    // step (plain &QAudioDecoder::error is ambiguous).
+    QObject::connect(&decoder,
+                     QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error),
+                     &loop, [&](QAudioDecoder::Error) {
+        failed = true;
+        if (errorOut) *errorOut = decoder.errorString();
+        loop.quit();
+    });
+
+    // Защита от зависания декодера на повреждённом/неподдерживаемом файле
+    QTimer safetyTimer;
+    safetyTimer.setSingleShot(true);
+    QObject::connect(&safetyTimer, &QTimer::timeout, &loop, [&]() {
+        failed = true;
+        if (errorOut) *errorOut = QStringLiteral("Decoder timeout");
+        loop.quit();
+    });
+    safetyTimer.start(60000);
+
+    decoder.start();
+    loop.exec();
+
+    if (failed) return {};
+    return pcm;
+}
 
 TranslationEngine::TranslationEngine(QObject* parent)
     : QObject(parent)
@@ -104,46 +173,39 @@ void TranslationEngine::processAudioFile(const QString& filePath,
 void TranslationEngine::transcribeAudioAsync(const QString& filePath)
 {
 #ifdef JARVIS_VOSK_AVAILABLE
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        emit audioProcessingError(QStringLiteral("Cannot open: ") + filePath);
-        return;
-    }
-
-    QByteArray audioData = file.readAll();
-    file.close();
-
-    // Skip WAV header (44 bytes) if present
-    if (audioData.size() > 44 && audioData.startsWith("RIFF")) {
-        audioData = audioData.mid(44);
-    }
-
+    // Универсальное декодирование: WAV/MP3/M4A/OGG/... → 16kHz mono PCM16.
+    // Раньше здесь читались сырые байты файла с отрезанием 44-байтового
+    // WAV-заголовка — для сжатых форматов (mp3/m4a — именно то, что
+    // присылает Telegram и что просил поддержать пользователь) это
+    // кормило Vosk мусором вместо PCM, транскрипция либо падала, либо
+    // возвращала пустой текст.
+    QString decodeError;
+    QByteArray audioData = decodeAudioToPcm16Mono16k(filePath, &decodeError);
     if (audioData.isEmpty()) {
-        emit audioProcessingError(QStringLiteral("Empty audio file"));
+        emit audioProcessingError(decodeError.isEmpty()
+            ? QStringLiteral("Could not decode audio file (unsupported or corrupt format)")
+            : QStringLiteral("Audio decode error: ") + decodeError);
         return;
     }
 
-    // Try loading models from standard paths
-    auto tryModel = [](const QString& path) -> VoskModel* {
-        QFileInfo fi(path);
-        if (!fi.exists()) return nullptr;
-        return vosk_model_new(path.toUtf8().constData());
-    };
+    // Модели ищем там, где их реально ставит VoiceInput/VoskSetupDialog
+    // (AppData/vosk) — не в вымышленном "redist/vosk/model-fr" (такой
+    // модели не существует ни в каталоге, ни в установщике; French
+    // вообще не поддерживается VoskModels::catalog()).
+    const QString installDir = VoiceInput::voskInstallDir();
 
-    VoskModel* model = tryModel(QStringLiteral("redist/vosk/model-fr"));
-    QString detectedLang = QStringLiteral("fr");
-
-    if (!model) {
-        model = tryModel(QStringLiteral("redist/vosk/model-en"));
-        detectedLang = QStringLiteral("en");
-    }
-    if (!model) {
-        model = tryModel(QStringLiteral("redist/vosk/model-ru"));
-        detectedLang = QStringLiteral("ru");
+    VoskModel* model = nullptr;
+    QString detectedLang;
+    for (const QString& id : {QStringLiteral("ru-small"), QStringLiteral("en-small")}) {
+        const auto info = VoskModels::findById(id);
+        if (info.id.isEmpty() || !info.isInstalled(installDir)) continue;
+        VoskModel* m = vosk_model_new(info.fullPath(installDir).toUtf8().constData());
+        if (m) { model = m; detectedLang = info.language; break; }
     }
 
     if (!model) {
-        emit audioProcessingError(QStringLiteral("No Vosk model available for transcription"));
+        emit audioProcessingError(QStringLiteral(
+            "No Vosk model installed — install one via Settings → Voice."));
         return;
     }
 

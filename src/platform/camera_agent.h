@@ -17,11 +17,14 @@
 #include <QObject>
 #include <QImage>
 #include <QTimer>
+#include <QString>
 
 class QCamera;
 class QMediaCaptureSession;
 class QImageCapture;
 class QVideoSink;
+class QAudioInput;
+class QMediaRecorder;
 
 class CameraAgent : public QObject
 {
@@ -44,11 +47,21 @@ public:
     bool hasWebcam() const;
     QStringList availableCameras() const;
 
+    // Video+audio clip recording (webcam + microphone) — produces an MP4
+    // (H.264/AAC) that plays with sound, e.g. for Telegram alerts.
+    // Unlike the silent OpenCV motion clips, this captures real audio.
+    void recordClip(const QString& outputPath, int durationSec);
+    bool isRecordingClip() const;
+
 signals:
     void webcamCaptured(const QImage& image);
     void desktopCaptured(const QImage& image);
     void surveillanceFrame(const QImage& image, const QString& source);
     void captureError(const QString& message);
+
+    // Video+audio clip recording result
+    void clipReady(const QString& path);
+    void clipError(const QString& message);
 
 private slots:
     void onSurveillanceTick();
@@ -56,13 +69,17 @@ private slots:
 private:
     void initCamera();
     void releaseCamera();
+    void ensureRecorder();
 
     QCamera*               m_camera   = nullptr;
     QMediaCaptureSession*  m_session  = nullptr;
     QImageCapture*         m_capture  = nullptr;
     QVideoSink*            m_sink     = nullptr;
+    QAudioInput*           m_audioInput = nullptr;
+    QMediaRecorder*        m_recorder   = nullptr;
     QTimer*                m_survTimer = nullptr;
     QTimer*                m_releaseTimer = nullptr;
+    QTimer*                m_recordStopTimer = nullptr;
 
     bool m_survWebcam  = true;
     bool m_survDesktop = true;

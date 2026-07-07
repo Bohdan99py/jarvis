@@ -33,6 +33,7 @@ class GourmetModule;
 class MediaAnalyzerModule;
 class CameraAgent;
 class SecurityCamera;
+class Jarvis;
 
 struct DispatchResult {
     bool    handled  = false;
@@ -56,6 +57,12 @@ public:
     // Register new commands into the ACL at startup
     static void registerCommands();
 
+    // Прокидывает ядро в подмодули, которым оно нужно для LLM-запросов
+    // (например GourmetModule::processIngredients). Вызывается из
+    // J2JTelegramGateway::setJarvisCore, т.к. диспетчер создаётся до
+    // того, как ядро становится известно гейтвею.
+    void setJarvisCore(Jarvis* jarvis);
+
 private:
     // Individual command handlers
     DispatchResult cmdScreenshot(qint64 chatId, bool english);
@@ -72,6 +79,7 @@ private:
     DispatchResult cmdSummarize(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdRemind(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdWebcam(qint64 chatId, bool english);
+    DispatchResult cmdVideo(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdSurveillance(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdSecurity(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdEnrollFace(qint64 chatId, bool english);

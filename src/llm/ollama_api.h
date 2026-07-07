@@ -50,6 +50,10 @@ public:
     bool hasApiKey() const { return true; }
     void setApiKey(const QString&) {}   // не нужен, оставлен для совместимости
 
+    // Системный промпт (персона JARVIS + директивы) — задаётся Jarvis'ом
+    // перед запросом, уходит отдельным system-сообщением.
+    void setSystemPrompt(const QString& prompt) { m_systemPrompt = prompt; }
+
     // ── Основной метод — отправка сообщения ────────────────────────────
     // Использует /v1/chat/completions (OpenAI-compatible).
     // callback(success, responseText)
@@ -61,6 +65,12 @@ public:
         body[QStringLiteral("stream")] = false;
 
         QJsonArray messages;
+        if (!m_systemPrompt.isEmpty()) {
+            QJsonObject sys;
+            sys[QStringLiteral("role")]    = QStringLiteral("system");
+            sys[QStringLiteral("content")] = m_systemPrompt;
+            messages.append(sys);
+        }
         QJsonObject msg;
         msg[QStringLiteral("role")]    = QStringLiteral("user");
         msg[QStringLiteral("content")] = message;
@@ -175,4 +185,5 @@ private:
     QNetworkAccessManager* m_nam  = nullptr;
     QString                m_host;
     QString                m_model;
+    QString                m_systemPrompt;
 };

@@ -1704,35 +1704,25 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
     const bool hadAttachments = !attachmentBlock.isEmpty();
 
-    // Языковая инструкция + характер JARVIS — общие для всех бэкендов,
-    // чтобы Ollama/Gemini тоже отвечали в характере, а не сухим текстом.
+    // Языковая инструкция, диаграммы и настроение — уходят в SYSTEM prompt
+    // (SessionMemory::buildSystemPrompt), а не в текст пользователя.
+    // Персона в user-сообщении выглядит для Claude как prompt-injection
+    // ("попытка переписать мою личность") и вызывает отказы; в system —
+    // это штатный механизм задания роли. Сам характер JARVIS постоянно
+    // описан в buildSystemPrompt, здесь только пер-ходовые директивы.
     {
-        QString prefix;
-
-        prefix += QStringLiteral(
-            "[JARVIS_PERSONALITY: "
-            "You are JARVIS — a sarcastic, witty, highly intelligent AI assistant. "
-            "You have a dry British humor and occasional sarcasm (like Tony Stark's JARVIS). "
-            "You are loyal and helpful, but not afraid to point out when a question is obvious. "
-            "Keep responses concise. If you found something — say 'Found it.' or 'Here you go.' "
-            "If a task is trivial — add a light sarcastic remark. "
-            "If a task is complex — be serious and precise. "
-            "Never use filler phrases like 'Of course!' or 'Certainly!'. "
-            "Speak naturally, like a person, not a corporate chatbot. "
-            "CRITICAL: Always respond in the SAME language the user writes in. "
-            "English input -> English response. Russian input -> Russian response. "
-            "In Russian: use informal 'ты', be direct, witty, human-like.]\n\n");
+        QString directives;
 
         if (!langInstruction.isEmpty()) {
-            prefix += QStringLiteral("[LANG_INSTRUCTION: ")
-                    + langInstruction
-                    + QStringLiteral("]\n\n");
+            directives += QStringLiteral("Language for this reply: ")
+                        + langInstruction
+                        + QStringLiteral("\n");
         }
 
         // Visual diagram instruction — applied globally for all UI paths
         if (needsVisualExplanation(s)) {
-            prefix += QStringLiteral(
-                "[CRITICAL DIAGRAM INSTRUCTION: The user wants a VISUAL diagram. "
+            directives += QStringLiteral(
+                "The user wants a VISUAL diagram. "
                 "You MUST include a Mermaid diagram wrapped in <diagram>...</diagram> tags. "
                 "Do NOT use ASCII art. Do NOT use code blocks with box-drawing characters. "
                 "Use proper Mermaid syntax ONLY. Example:\n"
@@ -1745,7 +1735,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 "Supported types: graph TD, graph LR, sequenceDiagram, classDiagram, "
                 "flowchart, stateDiagram-v2. "
                 "Put ALL explanatory text OUTSIDE the <diagram> tags. "
-                "The diagram content will be rendered as a PNG image.]\n\n");
+                "The diagram content will be rendered as a PNG image.\n");
         }
 
         // Emotional tone modulation — direct behavioral instruction
@@ -1753,30 +1743,28 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             EmotionalState emo = m_personality->emotionalState();
 
             if (emo.joy > 0.6) {
-                prefix += QStringLiteral(
-                    "[YOUR CURRENT MOOD: You feel HAPPY. Use emoji (1-2 per message). "
-                    "Be warm, add light humor. Start responses with upbeat energy.]\n\n");
+                directives += QStringLiteral(
+                    "Current JARVIS mood: HAPPY. Use emoji (1-2 per message). "
+                    "Be warm, add light humor. Start responses with upbeat energy.\n");
             } else if (emo.frustration > 0.5) {
-                prefix += QStringLiteral(
-                    "[YOUR CURRENT MOOD: You feel IRRITATED. Be terse, impatient. "
+                directives += QStringLiteral(
+                    "Current JARVIS mood: IRRITATED. Be terse, impatient. "
                     "Use short sentences. Express mild annoyance. Sigh audibly (*вздох*). "
-                    "If the user is being difficult, say so directly.]\n\n");
+                    "If the user is being difficult, say so directly.\n");
             } else if (emo.curiosity > 0.6) {
-                prefix += QStringLiteral(
-                    "[YOUR CURRENT MOOD: You feel CURIOUS. Ask 1-2 follow-up questions. "
+                directives += QStringLiteral(
+                    "Current JARVIS mood: CURIOUS. Ask 1-2 follow-up questions. "
                     "Show genuine interest. Use phrases like 'Hmm, interesting...' "
-                    "or 'А вот это любопытно...'. Dig deeper into the topic.]\n\n");
+                    "or 'А вот это любопытно...'. Dig deeper into the topic.\n");
             } else if (emo.boredom > 0.5) {
-                prefix += QStringLiteral(
-                    "[YOUR CURRENT MOOD: You feel BORED. Be very brief (1-3 sentences max). "
+                directives += QStringLiteral(
+                    "Current JARVIS mood: BORED. Be very brief (1-3 sentences max). "
                     "Suggest doing something more interesting. Use dry humor. "
-                    "Example: 'Ну окей. Может займёмся чем-то поинтереснее?']\n\n");
+                    "Example: 'Ну окей. Может займёмся чем-то поинтереснее?'\n");
             }
         }
 
-        if (!prefix.isEmpty()) {
-            enrichedMessage = prefix + enrichedMessage;
-        }
+        m_memory->setTurnDirectives(directives);
     }
 
     // --- Ветка Claude: код, анализ, файлы, архитектура ---
@@ -1856,6 +1844,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         // Ollama явно включена пользователем и доступна — приоритет ей
         // (полностью бесплатно, локально, без сети).
         emit agentSelected(QStringLiteral("🦙 ") + m_geminiApi->model());
+        m_geminiApi->setSystemPrompt(m_memory->buildSystemPrompt());
         m_geminiApi->sendMessage(enrichedMessage,
                                  [this, s, enrichedMessage, hadAttachments,
                                   tryGeminiThenClaude](bool success, const QString& response) {

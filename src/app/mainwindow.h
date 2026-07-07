@@ -101,6 +101,10 @@ private:
     void showWelcomeDashboard();
     QString buildWelcomeHtml() const;
 
+    // Профиль: мастер первого запуска и редактирование
+    void runFirstRunProfileSetup();
+    void editCurrentUserProfile();
+
     void showClarification(const QString& question, const QStringList& options);
     void hideClarification();
 

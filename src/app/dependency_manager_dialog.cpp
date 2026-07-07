@@ -555,6 +555,7 @@ void DependencyManagerDialog::installOpenCV(ComponentCard* card)
             const QStringList dlls = {
                 QStringLiteral("opencv_world4100.dll"),
                 QStringLiteral("opencv_videoio_msmf4100_64.dll"),
+                QStringLiteral("opencv_videoio_ffmpeg4100_64.dll"),
             };
 
             bool anyOk = false;

@@ -100,6 +100,12 @@ public:
     // If a session already exists for another PC, replaces it.
     TgUserSession bindSession(qint64 chatId, const QString& pcName = QString());
 
+    // Record a binding of a chat to a REMOTE device (received over the
+    // J2J mesh). Lets this PC know "that chat belongs to another PC" so
+    // incoming updates get relayed instead of executed locally.
+    void bindSessionToDevice(qint64 chatId, const QString& deviceId,
+                             const QString& pcName);
+
     // Validate an auth token for a given chatId
     bool validateToken(qint64 chatId, const QString& token) const;
 

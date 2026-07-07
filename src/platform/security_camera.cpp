@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "security_camera.h"
+#include "face_registry.h"
 #include "jarvis_paths.h"
 
 #include <QDir>
@@ -11,6 +12,7 @@
 #include <QScreen>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QPainter>
 #include <QProcess>
 #include <QDebug>
 #include <QThread>
@@ -56,7 +58,11 @@ static cv::CascadeClassifier& faceCascade()
     static bool loaded = false;
     if (!loaded) {
         const QString path = SecurityCamera::cascadePath();
-        if (!path.isEmpty()) cascade.load(path.toStdString());
+        try {
+            if (!path.isEmpty()) cascade.load(path.toStdString());
+        } catch (const std::exception& e) {
+            qWarning() << "[SecurityCam] Cascade load failed:" << e.what();
+        }
         loaded = true;
     }
     return cascade;
@@ -68,8 +74,35 @@ static cv::VideoCapture& cam()
     return cap;
 }
 
-static void openCam()  { auto& c = cam(); if (!c.isOpened()) c.open(0); }
-static void closeCam() { auto& c = cam(); if (c.isOpened()) c.release(); }
+// Открытие камеры с fallback-бэкендом. Раньше необработанное
+// cv::Exception из open()/read() убивало приложение молча —
+// "включаешь камеру и всё вылетает без ошибок".
+static void openCam()
+{
+    auto& c = cam();
+    if (c.isOpened()) return;
+    try {
+        c.open(0, cv::CAP_MSMF);          // основной бэкенд Windows
+        if (!c.isOpened())
+            c.open(0, cv::CAP_DSHOW);     // fallback: DirectShow
+        if (!c.isOpened())
+            c.open(0, cv::CAP_ANY);
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] openCam exception:" << e.what();
+    } catch (...) {
+        qWarning() << "[SecurityCam] openCam unknown exception";
+    }
+}
+
+static void closeCam()
+{
+    auto& c = cam();
+    try {
+        if (c.isOpened()) c.release();
+    } catch (...) {
+        qWarning() << "[SecurityCam] closeCam exception";
+    }
+}
 
 // ── LBP (Local Binary Patterns) for face recognition ──────
 // Each pixel becomes an 8-bit code describing the texture pattern
@@ -141,11 +174,32 @@ static double compareLBPHistograms(const cv::Mat& a, const cv::Mat& b)
 
 static cv::Mat prepareFace(const cv::Mat& gray, const cv::Rect& face)
 {
-    cv::Mat roi = gray(face);
+    // Прямоугольник лица может частично выходить за кадр —
+    // roi вне границ бросает cv::Exception и валит приложение.
+    const cv::Rect safe = face & cv::Rect(0, 0, gray.cols, gray.rows);
+    if (safe.width < 10 || safe.height < 10) return {};
+
+    cv::Mat roi = gray(safe);
     cv::Mat resized;
     cv::resize(roi, resized, cv::Size(FACE_SZ, FACE_SZ));
     cv::equalizeHist(resized, resized);
     return resized;
+}
+
+// QVector<float> (FaceRegistry) ↔ cv::Mat (1 x N, CV_32F)
+static cv::Mat histFromVector(const QVector<float>& v)
+{
+    cv::Mat m(1, v.size(), CV_32F);
+    for (int i = 0; i < v.size(); ++i) m.at<float>(0, i) = v[i];
+    return m;
+}
+
+static QVector<float> histToVector(const cv::Mat& m)
+{
+    QVector<float> v;
+    v.reserve(m.cols);
+    for (int i = 0; i < m.cols; ++i) v.append(m.at<float>(0, i));
+    return v;
 }
 
 #endif
@@ -480,17 +534,22 @@ QImage SecurityCamera::captureFrameLowRes()
 {
 #ifdef JARVIS_HAS_OPENCV
     if (!isOpenCvAvailable()) return {};
-    auto& c = cam();
-    if (!c.isOpened()) return {};
-    cv::Mat frame;
-    c.read(frame);
-    if (frame.empty()) return {};
-    if (frame.cols > SENTINEL_RES_W) {
-        cv::Mat small;
-        cv::resize(frame, small, cv::Size(SENTINEL_RES_W, SENTINEL_RES_H));
-        return matToQImage(small);
+    try {
+        auto& c = cam();
+        if (!c.isOpened()) return {};
+        cv::Mat frame;
+        c.read(frame);
+        if (frame.empty()) return {};
+        if (frame.cols > SENTINEL_RES_W) {
+            cv::Mat small;
+            cv::resize(frame, small, cv::Size(SENTINEL_RES_W, SENTINEL_RES_H));
+            return matToQImage(small);
+        }
+        return matToQImage(frame);
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] captureFrameLowRes exception:" << e.what();
+        return {};
     }
-    return matToQImage(frame);
 #else
     return {};
 #endif
@@ -500,14 +559,24 @@ QImage SecurityCamera::captureFrameFullRes()
 {
 #ifdef JARVIS_HAS_OPENCV
     if (isOpenCvAvailable()) {
-        auto& c = cam();
-        if (!c.isOpened()) openCam();
-        c.set(cv::CAP_PROP_FRAME_WIDTH,  1280);
-        c.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
-        cv::Mat frame;
-        c.read(frame);
-        if (frame.empty()) return {};
-        return matToQImage(frame);
+        try {
+            auto& c = cam();
+            if (!c.isOpened()) openCam();
+            if (!c.isOpened()) {
+                emit alertMessage(QStringLiteral(
+                    "📷 Камера недоступна (занята другим приложением?)"));
+                return {};
+            }
+            c.set(cv::CAP_PROP_FRAME_WIDTH,  1280);
+            c.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+            cv::Mat frame;
+            c.read(frame);
+            if (frame.empty()) return {};
+            return matToQImage(frame);
+        } catch (const std::exception& e) {
+            qWarning() << "[SecurityCam] captureFrameFullRes exception:" << e.what();
+            return {};
+        }
     }
 #endif
     QScreen* screen = QApplication::primaryScreen();
@@ -523,16 +592,21 @@ int SecurityCamera::detectFaces(const QImage& frame)
 {
 #ifdef JARVIS_HAS_OPENCV
     if (!isOpenCvAvailable()) return 0;
-    auto& cascade = faceCascade();
-    if (cascade.empty()) return 0;
-    cv::Mat mat = qimageToMat(frame);
-    cv::Mat gray;
-    cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
-    cv::equalizeHist(gray, gray);
-    std::vector<cv::Rect> faces;
-    cascade.detectMultiScale(gray, faces, 1.1, 4,
-                              cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
-    return static_cast<int>(faces.size());
+    try {
+        auto& cascade = faceCascade();
+        if (cascade.empty()) return 0;
+        cv::Mat mat = qimageToMat(frame);
+        cv::Mat gray;
+        cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
+        cv::equalizeHist(gray, gray);
+        std::vector<cv::Rect> faces;
+        cascade.detectMultiScale(gray, faces, 1.1, 4,
+                                  cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+        return static_cast<int>(faces.size());
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] detectFaces exception:" << e.what();
+        return 0;
+    }
 #else
     Q_UNUSED(frame) return 0;
 #endif
@@ -542,6 +616,7 @@ bool SecurityCamera::isOwner(const QImage& frame)
 {
 #ifdef JARVIS_HAS_OPENCV
     if (!isOpenCvAvailable() || !m_ownerEnrolled) return false;
+    try {
 
     const QString samplesPath = ownerSamplesDir();
     const QStringList files = QDir(samplesPath).entryList(
@@ -572,6 +647,7 @@ bool SecurityCamera::isOwner(const QImage& frame)
 
     for (const auto& face : faces) {
         cv::Mat prepared = prepareFace(gray, face);
+        if (prepared.empty()) continue;
         cv::Mat probeHist = lbpGridHistogram(prepared);
 
         // Compare against every sample, take average of top-3 matches
@@ -592,6 +668,11 @@ bool SecurityCamera::isOwner(const QImage& frame)
         if (avg > 0.45) return true;
     }
     return false;
+
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] isOwner exception:" << e.what();
+        return false;
+    }
 #else
     Q_UNUSED(frame) return true;
 #endif
@@ -603,24 +684,160 @@ bool SecurityCamera::detectMotion(const QImage& frame)
 
 #ifdef JARVIS_HAS_OPENCV
     if (isOpenCvAvailable()) {
-        cv::Mat curr = qimageToMat(frame);
-        cv::Mat prev = qimageToMat(m_prevFrame);
-        m_prevFrame = frame;
+        try {
+            cv::Mat curr = qimageToMat(frame);
+            cv::Mat prev = qimageToMat(m_prevFrame);
+            m_prevFrame = frame;
 
-        cv::Mat gC, gP, diff;
-        cv::cvtColor(curr, gC, cv::COLOR_BGR2GRAY);
-        cv::cvtColor(prev, gP, cv::COLOR_BGR2GRAY);
-        cv::GaussianBlur(gC, gC, cv::Size(21, 21), 0);
-        cv::GaussianBlur(gP, gP, cv::Size(21, 21), 0);
-        cv::absdiff(gP, gC, diff);
-        cv::threshold(diff, diff, 30, 255, cv::THRESH_BINARY);
+            // Кадры разного размера (смена разрешения Sentinel↔FullAlert)
+            // роняли absdiff — приводим к одному размеру.
+            if (curr.size() != prev.size())
+                cv::resize(prev, prev, curr.size());
 
-        double pct = cv::countNonZero(diff) * 100.0 / (diff.rows * diff.cols);
-        return pct > MOTION_THRESHOLD;
+            cv::Mat gC, gP, diff;
+            cv::cvtColor(curr, gC, cv::COLOR_BGR2GRAY);
+            cv::cvtColor(prev, gP, cv::COLOR_BGR2GRAY);
+            cv::GaussianBlur(gC, gC, cv::Size(21, 21), 0);
+            cv::GaussianBlur(gP, gP, cv::Size(21, 21), 0);
+            cv::absdiff(gP, gC, diff);
+            cv::threshold(diff, diff, 30, 255, cv::THRESH_BINARY);
+
+            double pct = cv::countNonZero(diff) * 100.0 / (diff.rows * diff.cols);
+            return pct > MOTION_THRESHOLD;
+        } catch (const std::exception& e) {
+            qWarning() << "[SecurityCam] detectMotion exception:" << e.what();
+            return false;
+        }
     }
 #endif
     m_prevFrame = frame;
     return false;
+}
+
+// ============================================================
+//  Face identification — "кто перед камерой"
+// ============================================================
+
+QString FaceObservation::label() const
+{
+    if (!known)
+        return QStringLiteral("Неизвестный");
+    QStringList parts;
+    parts << name;
+    if (age > 0) parts << QString::number(age);
+    if (!status.isEmpty()) parts << status;
+    return parts.join(QStringLiteral(", "));
+}
+
+void SecurityCamera::setOwnerIdentity(const QString& name, int age,
+                                      const QString& status)
+{
+    m_ownerName   = name;
+    m_ownerAge    = age;
+    m_ownerStatus = status;
+}
+
+QList<FaceObservation> SecurityCamera::identifyFaces(const QImage& frame)
+{
+    QList<FaceObservation> result;
+#ifdef JARVIS_HAS_OPENCV
+    if (!isOpenCvAvailable() || frame.isNull()) return result;
+    try {
+        auto& cascade = faceCascade();
+        if (cascade.empty()) return result;
+
+        cv::Mat mat = qimageToMat(frame);
+        cv::Mat gray;
+        cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
+
+        std::vector<cv::Rect> faces;
+        cascade.detectMultiScale(gray, faces, 1.1, 4,
+                                  cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+        if (faces.empty()) return result;
+
+        // Известные лица: локальные + принятые по P2P-мешу с других узлов
+        const QList<KnownFace> knownFaces = FaceRegistry::instance().allFaces();
+
+        for (const auto& face : faces) {
+            FaceObservation obs;
+            obs.rect = QRect(face.x, face.y, face.width, face.height);
+
+            cv::Mat prepared = prepareFace(gray, face);
+            if (!prepared.empty() && !knownFaces.isEmpty()) {
+                cv::Mat probeHist = lbpGridHistogram(prepared);
+
+                const KnownFace* bestFace = nullptr;
+                double bestScore = 0.0;
+                for (const auto& kf : knownFaces) {
+                    // Средний скор по топ-3 образцам этого человека
+                    std::vector<double> scores;
+                    scores.reserve(kf.histograms.size());
+                    for (const auto& h : kf.histograms)
+                        scores.push_back(compareLBPHistograms(
+                            probeHist, histFromVector(h)));
+                    if (scores.empty()) continue;
+                    std::sort(scores.rbegin(), scores.rend());
+                    const int topN = static_cast<int>(
+                        std::min<size_t>(3, scores.size()));
+                    double avg = 0;
+                    for (int i = 0; i < topN; ++i) avg += scores[i];
+                    avg /= topN;
+                    if (avg > bestScore) { bestScore = avg; bestFace = &kf; }
+                }
+
+                if (bestFace && bestScore > 0.45) {
+                    obs.known      = true;
+                    obs.name       = bestFace->name;
+                    obs.age        = bestFace->age;
+                    obs.status     = bestFace->status;
+                    obs.confidence = bestScore;
+                }
+            }
+            result.append(obs);
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] identifyFaces exception:" << e.what();
+    }
+#else
+    Q_UNUSED(frame)
+#endif
+    return result;
+}
+
+QImage SecurityCamera::annotateFaces(const QImage& frame,
+                                     const QList<FaceObservation>& faces)
+{
+    if (frame.isNull()) return frame;
+
+    QImage annotated = frame.convertToFormat(QImage::Format_RGB32);
+    QPainter p(&annotated);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    QFont font = p.font();
+    font.setPointSize(qMax(10, annotated.width() / 60));
+    font.setBold(true);
+    p.setFont(font);
+
+    for (const auto& obs : faces) {
+        const QColor color = obs.known ? QColor(0, 220, 120)   // зелёный
+                                       : QColor(230, 60, 60);  // красный
+        p.setPen(QPen(color, qMax(2, annotated.width() / 300)));
+        p.drawRect(obs.rect);
+
+        const QString text = obs.label();
+        const QFontMetrics fm(font);
+        const int pad = 4;
+        QRect textRect = fm.boundingRect(text)
+                             .adjusted(-pad, -pad, pad, pad);
+        textRect.moveTo(obs.rect.left(),
+                        qMax(0, obs.rect.top() - textRect.height()));
+
+        p.fillRect(textRect, QColor(0, 0, 0, 180));
+        p.setPen(color);
+        p.drawText(textRect, Qt::AlignCenter, text);
+    }
+    p.end();
+    return annotated;
 }
 
 void SecurityCamera::lockScreen()
@@ -658,6 +875,7 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
     }
 
 #ifdef JARVIS_HAS_OPENCV
+    try {
     auto& cascade = faceCascade();
     if (cascade.empty()) {
         emit alertMessage(QStringLiteral("Cannot enroll: face cascade not found"));
@@ -711,15 +929,153 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
     }
     m_ownerEnrolled = true;
 
+    // Регистрируем владельца в FaceRegistry: камера сможет подписывать
+    // лицо ("Имя, возраст, статус"), а профиль уйдёт по P2P-мешу другим
+    // узлам JARVIS — ноутбук девушки тоже будет узнавать владельца.
+    {
+        KnownFace kf;
+        kf.name   = m_ownerName.isEmpty() ? QStringLiteral("Owner") : m_ownerName;
+        kf.age    = m_ownerAge;
+        kf.status = m_ownerStatus.isEmpty() ? QStringLiteral("владелец")
+                                            : m_ownerStatus;
+        kf.histograms.reserve(static_cast<int>(samples.size()));
+        for (const auto& s : samples)
+            kf.histograms.append(histToVector(lbpGridHistogram(s)));
+        FaceRegistry::instance().upsertFace(kf);
+    }
+
     emit enrollmentComplete(static_cast<int>(samples.size()));
     emit alertMessage(QStringLiteral("Owner enrolled (%1 samples)")
                           .arg(samples.size()));
+
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] enrollOwnerFace exception:" << e.what();
+        emit alertMessage(QStringLiteral("Enrollment error: %1")
+                              .arg(QString::fromUtf8(e.what())));
+    }
 #else
     Q_UNUSED(sampleCount)
 #endif
 }
 
 bool SecurityCamera::isOwnerEnrolled() const { return m_ownerEnrolled; }
+
+// ============================================================
+//  Обучение по загруженным фото (не с камеры)
+// ============================================================
+
+int SecurityCamera::enrollFaceFromImages(const QStringList& imagePaths,
+                                         const QString& name, int age,
+                                         const QString& status, bool isOwner)
+{
+#ifdef JARVIS_HAS_OPENCV
+    if (!isOpenCvAvailable()) {
+        emit alertMessage(QStringLiteral(
+            "Cannot enroll from photos: OpenCV not available."));
+        return 0;
+    }
+    if (name.trimmed().isEmpty()) {
+        emit alertMessage(QStringLiteral("Enrollment needs a name."));
+        return 0;
+    }
+
+    try {
+        auto& cascade = faceCascade();
+        if (cascade.empty()) {
+            emit alertMessage(QStringLiteral("Cannot enroll: face cascade not found"));
+            return 0;
+        }
+
+        std::vector<cv::Mat> samples;
+        int processed = 0;
+
+        for (const QString& path : imagePaths) {
+            QImage img(path);
+            if (img.isNull()) {
+                emit alertMessage(QStringLiteral("⚠ Cannot read image: %1")
+                                      .arg(QFileInfo(path).fileName()));
+                continue;
+            }
+
+            cv::Mat mat = qimageToMat(img);
+            cv::Mat gray;
+            cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
+            cv::equalizeHist(gray, gray);
+
+            std::vector<cv::Rect> faces;
+            cascade.detectMultiScale(gray, faces, 1.1, 4,
+                                      cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+            if (faces.empty()) {
+                emit alertMessage(QStringLiteral("⚠ No face found in: %1")
+                                      .arg(QFileInfo(path).fileName()));
+                continue;
+            }
+
+            // Несколько лиц на фото (групповое фото) — берём самое
+            // крупное: обычно это тот, кто снимался специально для этого.
+            cv::Rect best = faces.front();
+            for (const auto& f : faces)
+                if (f.area() > best.area()) best = f;
+
+            cv::Mat prepared = prepareFace(gray, best);
+            if (prepared.empty()) continue;
+
+            samples.push_back(prepared);
+            ++processed;
+            emit enrollmentProgress(processed, imagePaths.size());
+        }
+
+        if (samples.empty()) {
+            emit alertMessage(QStringLiteral(
+                "Enrollment failed: no usable face found in the provided photo(s)."));
+            return 0;
+        }
+
+        KnownFace kf;
+        kf.name   = name.trimmed();
+        kf.age    = age;
+        kf.status = status.trimmed().isEmpty() ? QStringLiteral("known") : status;
+        kf.histograms.reserve(static_cast<int>(samples.size()));
+        for (const auto& s : samples)
+            kf.histograms.append(histToVector(lbpGridHistogram(s)));
+        FaceRegistry::instance().upsertFace(kf);
+
+        if (isOwner) {
+            m_ownerEnrolled = true;
+            setOwnerIdentity(kf.name, age, kf.status);
+
+            // Также кладём образцы в ownerSamplesDir — на них полагается
+            // isOwner()/isOwnerEnrolled() для авто-блокировки экрана.
+            const QString dir = ownerSamplesDir();
+            QDir().mkpath(dir);
+            for (const auto& f : QDir(dir).entryList(QStringList{QStringLiteral("*.png")}, QDir::Files))
+                QFile::remove(dir + QStringLiteral("/") + f);
+            for (int i = 0; i < static_cast<int>(samples.size()); ++i) {
+                const QString outPath = QStringLiteral("%1/owner_%2.png")
+                    .arg(dir).arg(i, 3, 10, QLatin1Char('0'));
+                cv::imwrite(outPath.toStdString(), samples[i]);
+            }
+        }
+
+        emit enrollmentComplete(processed);
+        emit alertMessage(QStringLiteral("✅ %1: %2 photo sample(s) learned")
+                              .arg(kf.name).arg(processed));
+        return processed;
+
+    } catch (const std::exception& e) {
+        qWarning() << "[SecurityCam] enrollFaceFromImages exception:" << e.what();
+        emit alertMessage(QStringLiteral("Enrollment error: %1")
+                              .arg(QString::fromUtf8(e.what())));
+        return 0;
+    }
+#else
+    Q_UNUSED(imagePaths) Q_UNUSED(name) Q_UNUSED(age)
+    Q_UNUSED(status) Q_UNUSED(isOwner)
+    emit alertMessage(QStringLiteral(
+        "Binary was compiled WITHOUT OpenCV — photo enrollment unavailable."));
+    return 0;
+#endif
+}
 
 void SecurityCamera::confirmCompanionOk(int cooldownMinutes)
 {
@@ -813,6 +1169,16 @@ void SecurityCamera::onSentinelTick()
 
     // Faces detected → keep alert alive
     m_deescalateTimer->start(FULL_ALERT_TIMEOUT_MS);
+
+    // Идентификация: кто именно перед камерой (включая профили,
+    // принятые по P2P) + аннотированный кадр с рамками и подписями.
+    {
+        const QList<FaceObservation> observations = identifyFaces(frame);
+        if (!observations.isEmpty()) {
+            emit facesIdentified(annotateFaces(frame, observations),
+                                 observations);
+        }
+    }
 
     const bool ownerPresent = m_ownerEnrolled && isOwner(frame);
 
@@ -930,6 +1296,7 @@ void SecurityCamera::recordMotionClip()
     const int duration = MOTION_CLIP_DURATION_SEC;
 
     QtConcurrent::run([this, path, duration]() {
+        try {
         cv::VideoCapture recorder(0);
         if (!recorder.isOpened()) {
             qWarning() << "[SecurityCam] BG recorder: camera open failed";
@@ -997,6 +1364,21 @@ void SecurityCamera::recordMotionClip()
                 if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
             }
         }, Qt::QueuedConnection);
+
+        } catch (const std::exception& e) {
+            // Исключение в фоновом потоке = мгновенный крах всего
+            // приложения — глушим и восстанавливаем мониторинг.
+            qWarning() << "[SecurityCam] BG recorder exception:" << e.what();
+            QMetaObject::invokeMethod(this, [this]() {
+                m_recording = false;
+                if (m_stopping) return;
+                if (m_monitoring) {
+                    openCam();
+                    m_sentinelTimer->start();
+                    if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                }
+            }, Qt::QueuedConnection);
+        }
     });
 #endif
 }

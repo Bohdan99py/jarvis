@@ -44,7 +44,9 @@
 #include "telegram_access_manager.h"
 #include "jarvis_response.h"
 #include "security_camera.h"
+#include "face_registry.h"
 #include "dependency_manager_dialog.h"
+#include "profile_setup_dialog.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include <QFileDialog>
@@ -128,6 +130,13 @@ MainWindow::MainWindow(QWidget* parent)
             m_jarvis->setCurrentUserId(user->id);
             m_jarvis->memory()->setActiveUserName(user->name);
         }
+    }
+
+    // Первый запуск на новом ПК: спрашиваем имя и роль пользователя,
+    // а не используем дефолтное имя из БД. Отложенно через singleShot,
+    // чтобы окно успело создаться.
+    if (!cfg.value(QStringLiteral("user/profileSetupDone"), false).toBool()) {
+        QTimer::singleShot(0, this, [this]() { runFirstRunProfileSetup(); });
     }
 
     connect(m_jarvis, &Jarvis::speakingChanged,
@@ -620,6 +629,13 @@ void MainWindow::buildMenuBar()
             box.exec();
         });
 
+        // Edit profile (name, role, language)
+        auto* actEdit = userMenu->addAction(
+            IS_EN ? QStringLiteral("Edit Profile...") : QStringLiteral("Редактировать профиль..."));
+        connect(actEdit, &QAction::triggered, this, [this]() {
+            editCurrentUserProfile();
+        });
+
         // Delete user
         auto* actDelete = userMenu->addAction(
             IS_EN ? QStringLiteral("Delete User...") : QStringLiteral("Удалить пользователя..."));
@@ -845,45 +861,9 @@ void MainWindow::buildMenuBar()
         }
     });
 
-    settingsMenu->addSeparator();
-
-    // Role switcher — moved here from Tools menu
-    auto* roleMenu = settingsMenu->addMenu(
-        IS_EN ? QStringLiteral("Switch Role") : QStringLiteral("Сменить роль"));
-    struct RoleEntry { QString label; QString role; };
-    const QList<RoleEntry> roles = {
-        {IS_EN ? QStringLiteral("Developer") : QStringLiteral("Разработчик"),
-         QStringLiteral("Developer")},
-        {IS_EN ? QStringLiteral("QA Tester") : QStringLiteral("QA Тестировщик"),
-         QStringLiteral("QA_Tester")},
-        {IS_EN ? QStringLiteral("Digital Artist / Illustrator")
-               : QStringLiteral("Цифровой художник / Иллюстратор"),
-         QStringLiteral("Digital_Artist")},
-        {IS_EN ? QStringLiteral("Casual / Friend") : QStringLiteral("Дружеский / Casual"),
-         QStringLiteral("Casual_Friend")},
-        {IS_EN ? QStringLiteral("Student / Academic") : QStringLiteral("Студент / Академия"),
-         QStringLiteral("Student_Academic")},
-    };
-    auto* roleGroup = new QActionGroup(roleMenu);
-    roleGroup->setExclusive(true);
-    for (const auto& r : roles) {
-        auto* act = roleMenu->addAction(r.label);
-        act->setCheckable(true);
-        if (r.role == QStringLiteral("Developer")) act->setChecked(true);
-        roleGroup->addAction(act);
-        const QString roleName = r.role;
-        connect(act, &QAction::triggered, this, [this, roleName]() {
-            auto& db = DatabaseManager::instance();
-            auto user = db.getUser(m_jarvis->currentUserId());
-            if (user) {
-                user->currentRole = roleName;
-                db.updateUser(*user);
-            }
-            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                (IS_EN ? QStringLiteral("Role switched to: ") : QStringLiteral("Роль: ")) + roleName,
-                Theme::LogColors::system);
-        });
-    }
+    // Смена роли перенесена в «Редактировать профиль…» (User menu) —
+    // отдельный пункт "Switch Role" дублировал тот же выбор роли и
+    // расходился с ним по значению (scenario vs currentRole).
 
     settingsMenu->addSeparator();
 
@@ -2304,6 +2284,21 @@ void MainWindow::buildMenuBar()
                 Theme::LogColors::system);
 
             auto* sec = new SecurityCamera(this);
+
+            // Идентичность владельца для FaceRegistry: имя из профиля,
+            // возраст опционально, статус = "владелец".
+            {
+                auto user = DatabaseManager::instance().getUser(m_jarvis->currentUserId());
+                const QString ownerName = user ? user->name : QString();
+                bool ok = false;
+                const int age = QInputDialog::getInt(this,
+                    IS_EN ? QStringLiteral("Age (optional)") : QStringLiteral("Возраст (необязательно)"),
+                    IS_EN ? QStringLiteral("Your age (0 = skip):") : QStringLiteral("Ваш возраст (0 = пропустить):"),
+                    0, 0, 120, 1, &ok);
+                sec->setOwnerIdentity(ownerName, ok ? age : 0,
+                    IS_EN ? QStringLiteral("owner") : QStringLiteral("владелец"));
+            }
+
             connect(sec, &SecurityCamera::enrollmentProgress, this,
                     [this](int cur, int total) {
                 appendLog(Str::logSystem(),
@@ -2318,6 +2313,10 @@ void MainWindow::buildMenuBar()
                            : QStringLiteral("✅ Лицо обучено! %1 образцов. "
                                             "Теперь я вас узнаю.")).arg(samples),
                     Theme::LogColors::jarvis);
+                // Делимся профилем лица с другими узлами JARVIS (P2P):
+                // их камеры тоже будут узнавать владельца этого ПК.
+                if (auto* mesh = m_jarvis->meshConnector())
+                    mesh->broadcastFaceProfiles();
                 sec->deleteLater();
             });
             connect(sec, &SecurityCamera::alertMessage, this,
@@ -2352,6 +2351,118 @@ void MainWindow::buildMenuBar()
                 sec->deleteLater();
             });
             sec->enrollOwnerFace(10);
+        });
+
+        // ── Face enrollment from uploaded photos ───────────
+        auto* actEnrollFromPhoto = camMenu->addAction(
+            IS_EN ? QStringLiteral("🖼 Learn Face from Photo(s)...")
+                  : QStringLiteral("🖼 Обучить лицо по фото..."));
+        connect(actEnrollFromPhoto, &QAction::triggered, this, [this]() {
+            const QStringList files = QFileDialog::getOpenFileNames(this,
+                IS_EN ? QStringLiteral("Select photo(s) with a face")
+                      : QStringLiteral("Выберите фото с лицом"),
+                QDir::homePath(),
+                QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp)"));
+            if (files.isEmpty()) return;
+
+            bool ok = false;
+            const QString name = QInputDialog::getText(this,
+                IS_EN ? QStringLiteral("Name") : QStringLiteral("Имя"),
+                IS_EN ? QStringLiteral("Whose face is this?")
+                      : QStringLiteral("Чьё это лицо?"),
+                QLineEdit::Normal, QString(), &ok);
+            if (!ok || name.trimmed().isEmpty()) return;
+
+            const int age = QInputDialog::getInt(this,
+                IS_EN ? QStringLiteral("Age (optional)") : QStringLiteral("Возраст (необязательно)"),
+                IS_EN ? QStringLiteral("Age (0 = skip):") : QStringLiteral("Возраст (0 = пропустить):"),
+                0, 0, 120, 1, &ok);
+
+            const bool isOwner = QMessageBox::question(this,
+                IS_EN ? QStringLiteral("Owner?") : QStringLiteral("Владелец?"),
+                IS_EN ? QStringLiteral("Is this the PC owner (enables auto-lock/unlock)?")
+                      : QStringLiteral("Это владелец ПК (включает авто-блокировку по лицу)?"),
+                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes;
+
+            const QString status = isOwner
+                ? (IS_EN ? QStringLiteral("owner") : QStringLiteral("владелец"))
+                : (IS_EN ? QStringLiteral("known") : QStringLiteral("знакомый"));
+
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("🖼 Learning face from %1 photo(s)...").arg(files.size())
+                      : QStringLiteral("🖼 Обучаю лицо по %1 фото...").arg(files.size()),
+                Theme::LogColors::system);
+
+            auto* sec = new SecurityCamera(this);
+            connect(sec, &SecurityCamera::enrollmentComplete, this,
+                    [this, sec](int samples) {
+                appendLog(Str::logJarvis(),
+                    (IS_EN ? QStringLiteral("✅ Learned from %1 photo(s).")
+                           : QStringLiteral("✅ Обучено по %1 фото.")).arg(samples),
+                    Theme::LogColors::jarvis);
+                if (auto* mesh = m_jarvis->meshConnector())
+                    mesh->broadcastFaceProfiles();
+                sec->deleteLater();
+            });
+            connect(sec, &SecurityCamera::alertMessage, this,
+                    [this, sec](const QString& msg) {
+                appendLog(Str::logSystem(), msg, Theme::LogColors::error);
+                sec->deleteLater();
+            });
+            sec->enrollFaceFromImages(files, name.trimmed(), age, status, isOwner);
+        });
+
+        camMenu->addSeparator();
+
+        // ── Live View: кто перед камерой ───────────────────
+        auto* actWhoIsThere = camMenu->addAction(
+            IS_EN ? QStringLiteral("👁 Who's on Camera?")
+                  : QStringLiteral("👁 Кто перед камерой?"));
+        connect(actWhoIsThere, &QAction::triggered, this, [this]() {
+            SecurityCamera* sec = m_securityCam
+                ? m_securityCam : new SecurityCamera(this);
+            const bool temporary = (sec != m_securityCam);
+
+            const QImage frame = sec->snapshotFullRes();
+            if (frame.isNull()) {
+                appendLog(Str::logSystem(),
+                    IS_EN ? QStringLiteral("📷 Camera unavailable.")
+                          : QStringLiteral("📷 Камера недоступна."),
+                    Theme::LogColors::error);
+                if (temporary) sec->deleteLater();
+                return;
+            }
+
+            const auto faces = sec->identifyFaces(frame);
+            const QImage annotated = SecurityCamera::annotateFaces(frame, faces);
+
+            for (const auto& obs : faces) {
+                appendLog(QStringLiteral("📷 Камера"),
+                    (obs.known ? QStringLiteral("👤 ") : QStringLiteral("❓ "))
+                    + obs.label(),
+                    obs.known ? Theme::LogColors::jarvis : Theme::LogColors::error);
+            }
+            if (faces.isEmpty()) {
+                appendLog(QStringLiteral("📷 Камера"),
+                    IS_EN ? QStringLiteral("No faces in frame.")
+                          : QStringLiteral("Лиц в кадре нет."),
+                    Theme::LogColors::system);
+            }
+
+            // Показать аннотированный кадр
+            auto* dlg = new QDialog(this);
+            dlg->setWindowTitle(IS_EN ? QStringLiteral("Camera — Live View")
+                                      : QStringLiteral("Камера — кто в кадре"));
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            auto* lay = new QVBoxLayout(dlg);
+            auto* imgLabel = new QLabel(dlg);
+            imgLabel->setPixmap(QPixmap::fromImage(
+                annotated.scaledToWidth(qMin(900, annotated.width()),
+                                        Qt::SmoothTransformation)));
+            lay->addWidget(imgLabel);
+            dlg->show();
+
+            if (temporary) sec->deleteLater();
         });
 
         camMenu->addSeparator();
@@ -2522,6 +2633,17 @@ void MainWindow::buildMenuBar()
                     IS_EN ? QStringLiteral("👤 Owner recognized")
                           : QStringLiteral("👤 Владелец распознан"),
                     Theme::LogColors::jarvis);
+            });
+
+            // Идентифицированные лица (включая профили с других узлов P2P)
+            connect(m_securityCam, &SecurityCamera::facesIdentified, this,
+                    [this](const QImage&, const QList<FaceObservation>& faces) {
+                for (const auto& obs : faces) {
+                    if (!obs.known) continue;
+                    appendLog(QStringLiteral("🛡 Security"),
+                        QStringLiteral("👤 ") + obs.label(),
+                        Theme::LogColors::jarvis);
+                }
             });
 
             connect(m_securityCam, &SecurityCamera::motionVideoReady, this,
@@ -5606,4 +5728,58 @@ void MainWindow::onExportTrainingData()
             IS_EN ? QStringLiteral("Failed to write file: ") + filePath
                   : QStringLiteral("Не удалось записать файл: ") + filePath);
     }
+}
+
+// ============================================================
+// Профиль пользователя: первый запуск и редактирование
+// ============================================================
+
+void MainWindow::runFirstRunProfileSetup()
+{
+    auto& db = DatabaseManager::instance();
+    auto user = db.getUser(m_jarvis->currentUserId());
+    if (!user) {
+        qint64 id = db.getOrCreateDefaultUser();
+        user = db.getUser(id);
+        if (!user) return;
+        m_jarvis->setCurrentUserId(id);
+    }
+
+    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::FirstRun, IS_EN, this);
+    dlg.setProfile(*user);
+    dlg.exec(); // FirstRun: закрыть можно только заполнив имя (кнопка Start)
+
+    DbUserProfile updated = dlg.profile();
+    if (!updated.name.isEmpty()) {
+        db.updateUser(updated);
+        m_jarvis->memory()->setActiveUserName(updated.name);
+        appendLog(Str::logSystem(),
+            (IS_EN ? QStringLiteral("Nice to meet you, ") : QStringLiteral("Приятно познакомиться, "))
+            + updated.name + QStringLiteral("!"),
+            Theme::LogColors::system);
+    }
+
+    QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
+        .setValue(QStringLiteral("user/profileSetupDone"), true);
+}
+
+void MainWindow::editCurrentUserProfile()
+{
+    auto& db = DatabaseManager::instance();
+    auto user = db.getUser(m_jarvis->currentUserId());
+    if (!user) return;
+
+    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::Edit, IS_EN, this);
+    dlg.setProfile(*user);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    DbUserProfile updated = dlg.profile();
+    if (updated.name.isEmpty()) return;
+
+    db.updateUser(updated);
+    m_jarvis->memory()->setActiveUserName(updated.name);
+    appendLog(Str::logSystem(),
+        (IS_EN ? QStringLiteral("Profile updated: ") : QStringLiteral("Профиль обновлён: "))
+        + updated.name + QStringLiteral(" (") + updated.scenario + QStringLiteral(")"),
+        Theme::LogColors::system);
 }

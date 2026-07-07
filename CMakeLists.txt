@@ -302,6 +302,16 @@ target_link_libraries(JarvisCore PRIVATE
 
 if(VOSK_AVAILABLE)
     target_link_libraries(JarvisCore PUBLIC "${_vosk_dir}/libvosk.lib")
+
+    # Delay-load: exe запускается даже без libvosk.dll рядом. Перед первым
+    # вызовом vosk_* приложение само подгружает DLL (и её MinGW-зависимости
+    # libgcc/libstdc++/libwinpthread) по абсолютному пути — из папки exe или
+    # из AppData/vosk, куда их кладёт встроенный установщик.
+    # См. preloadVoskRuntime() в src/voice/voice_input.cpp.
+    if(MSVC)
+        target_link_libraries(JarvisCore PUBLIC delayimp)
+        target_link_options(JarvisCore PUBLIC "/DELAYLOAD:libvosk.dll")
+    endif()
 endif()
 
 if(MSVC)

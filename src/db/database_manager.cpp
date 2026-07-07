@@ -139,8 +139,8 @@ bool DatabaseManager::createTables()
 
     if (!execQuery(R"(CREATE TABLE IF NOT EXISTS users (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        name        TEXT    NOT NULL DEFAULT 'Bohdan',
-        scenario    TEXT    NOT NULL DEFAULT 'game_dev',
+        name        TEXT    NOT NULL DEFAULT 'User',
+        scenario    TEXT    NOT NULL DEFAULT 'general',
         language    TEXT    NOT NULL DEFAULT 'auto',
         preferences TEXT             DEFAULT '{}',
         created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -586,9 +586,13 @@ qint64 DatabaseManager::getOrCreateDefaultUser()
     q.exec("SELECT id FROM users WHERE id=1");
     if (q.next()) return 1;
 
+    // Нейтральный дефолт: имя аккаунта Windows, роль "general".
+    // Реальные имя/роль спрашиваются мастером первого запуска
+    // (ProfileSetupDialog) — не берём имя автора приложения.
     DbUserProfile def;
-    def.name        = QStringLiteral("Bohdan");
-    def.scenario    = QStringLiteral("game_dev");
+    QString winUser = QString::fromLocal8Bit(qgetenv("USERNAME")).trimmed();
+    def.name        = winUser.isEmpty() ? QStringLiteral("User") : winUser;
+    def.scenario    = QStringLiteral("general");
     def.language    = QStringLiteral("auto");
     def.preferences = QStringLiteral("{}");
     return addUser(def);

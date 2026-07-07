@@ -31,6 +31,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class Jarvis;
 class TranslationEngine;
+class J2JMeshConnector;
 class MobilePairingManager;
 class TelegramAccessManager;
 class CommandDispatcherTg;
@@ -117,9 +118,17 @@ public:
     QString botToken() const { return m_botToken; }
 
     // Jarvis core binding (for free-dialogue routing)
-    void setJarvisCore(Jarvis* jarvis) { m_jarvis = jarvis; }
+    void setJarvisCore(Jarvis* jarvis);
+    Jarvis* jarvisCore() const { return m_jarvis; }
     void setTranslationEngine(TranslationEngine* te) { m_translator = te; }
     void setPairingManager(MobilePairingManager* pm) { m_pairing = pm; }
+    void setMeshConnector(J2JMeshConnector* mesh) { m_mesh = mesh; }
+
+    // Входящие меш-пакеты Telegram-маршрутизации (вызывает J2JMeshConnector):
+    // onMeshRelay   — сообщение/привязка, пересланная с другого ПК;
+    // onMeshBinding — оповещение "чат N привязан к устройству X".
+    void onMeshRelay(const QJsonObject& data);
+    void onMeshBinding(const QJsonObject& data);
     TelegramAccessManager* accessManager() const { return m_accessMgr; }
     PcWakeAgent*           wakeAgent()     const { return m_wakeAgent; }
 
@@ -187,8 +196,15 @@ private slots:
 
 private:
     void processUpdate(const QJsonObject& update);
+    // fromRelay=true — сообщение пришло по мешу с другого ПК-поллера;
+    // в этом случае оно выполняется здесь безусловно (без повторной
+    // пересылки), т.к. отправитель уже определил владельца.
     void handleMessage(qint64 chatId, const QString& text,
-                       const QString& firstName);
+                       const QString& firstName, bool fromRelay = false);
+
+    // Multi-PC: клавиатура выбора "какой ПК ваш" + привязка
+    void sendPcSelectionKeyboard(qint64 chatId, bool english);
+    void bindChatToLocalPc(qint64 chatId, bool announce = true);
     void handleCallbackQuery(const QString& callbackId,
                              qint64 chatId, const QString& data);
     void handleVoiceMessage(qint64 chatId, const QJsonObject& voice,
@@ -267,6 +283,7 @@ private:
 
     Jarvis*                m_jarvis         = nullptr;
     TranslationEngine*     m_translator     = nullptr;
+    J2JMeshConnector*      m_mesh           = nullptr;
     MobilePairingManager*  m_pairing        = nullptr;
     TelegramAccessManager* m_accessMgr      = nullptr;
     CommandDispatcherTg*   m_dispatcher     = nullptr;

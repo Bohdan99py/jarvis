@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "j2j_mesh_connector.h"
+#include "face_registry.h"
 #include "mobile_pairing_manager.h"
 #include "j2j_telegram_gateway.h"
 #include "media_routing_manager.h"
@@ -294,6 +295,12 @@ void J2JMeshConnector::processPacket(QTcpSocket* socket, const QJsonObject& pack
         handleRequestCache(socket, packet[QStringLiteral("data")].toObject());
     else if (type == QStringLiteral("ProfileSync"))
         handleProfileSync(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("TgRelay"))
+        handleTgRelay(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("TgBinding"))
+        handleTgBinding(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("FaceSync"))
+        handleFaceSync(socket, packet[QStringLiteral("data")].toObject());
     else
         sendReply(socket, QStringLiteral("Error"),
                   QJsonObject{{QStringLiteral("message"), QStringLiteral("Unknown type")}}, false);
@@ -328,6 +335,10 @@ void J2JMeshConnector::handleHandshake(QTcpSocket* socket, const QJsonObject& da
 
     qDebug() << "[J2J] Handshake completed with" << peerName << "[" << data[QStringLiteral("role")].toString() << "]";
     emit peerAuthorized(peerName, socket->peerAddress().toString());
+
+    // Новый узел в мешe — делимся профилями известных лиц, чтобы его
+    // камера сразу узнавала людей, обученных на этом ПК.
+    broadcastFaceProfiles();
 }
 
 void J2JMeshConnector::handleSyncKnowledge(QTcpSocket* socket, const QJsonObject& data)
@@ -510,6 +521,129 @@ void J2JMeshConnector::delegateTask(const QString& peerId, const QJsonObject& ta
 }
 
 // ============================================================
+//  Face profiles (P2P sync)
+// ============================================================
+
+void J2JMeshConnector::broadcastFaceProfiles()
+{
+    const QJsonArray faces = FaceRegistry::instance().localFacesJson();
+    if (faces.isEmpty()) return;
+
+    for (auto it = m_peers.constBegin(); it != m_peers.constEnd(); ++it) {
+        const J2JPeer& peer = it.value();
+        auto* sock = new QTcpSocket(this);
+        const QString token    = authToken();
+        const QString fromNode = m_nodeId;
+
+        connect(sock, &QTcpSocket::connected, this,
+                [sock, token, fromNode, faces]() {
+            QJsonObject packet;
+            packet[QStringLiteral("token")] = token;
+            packet[QStringLiteral("type")]  = QStringLiteral("FaceSync");
+            QJsonObject data;
+            data[QStringLiteral("fromNode")] = fromNode;
+            data[QStringLiteral("faces")]    = faces;
+            packet[QStringLiteral("data")]   = data;
+            sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact) + "\n");
+            sock->flush();
+            QTimer::singleShot(5000, sock, &QTcpSocket::deleteLater);
+        });
+        connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+
+        sock->connectToHost(peer.address, peer.tcpPort);
+    }
+
+    qDebug() << "[J2J] Broadcasting" << faces.size()
+             << "face profile(s) to" << m_peers.size() << "peer(s)";
+}
+
+void J2JMeshConnector::handleFaceSync(QTcpSocket* socket, const QJsonObject& data)
+{
+    Q_UNUSED(socket)
+    const QString fromNode  = data[QStringLiteral("fromNode")].toString();
+    const QJsonArray faces  = data[QStringLiteral("faces")].toArray();
+    if (faces.isEmpty()) return;
+
+    const int imported = FaceRegistry::instance().importFromJson(faces, fromNode);
+    if (imported > 0)
+        emit faceProfilesReceived(fromNode, imported);
+}
+
+// ============================================================
+//  Telegram multi-PC routing
+// ============================================================
+
+bool J2JMeshConnector::sendTgRelay(const QString& peerId, const QJsonObject& payload)
+{
+    if (!m_peers.contains(peerId)) return false;
+    const J2JPeer& peer = m_peers[peerId];
+
+    auto* sock = new QTcpSocket(this);
+    const QString token    = authToken();
+    const QString fromNode = m_nodeId;
+
+    connect(sock, &QTcpSocket::connected, this,
+            [sock, token, fromNode, payload]() {
+        QJsonObject packet;
+        packet[QStringLiteral("token")] = token;
+        packet[QStringLiteral("type")]  = QStringLiteral("TgRelay");
+        QJsonObject data = payload;
+        data[QStringLiteral("fromNode")] = fromNode;
+        packet[QStringLiteral("data")]   = data;
+        sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact) + "\n");
+        sock->flush();
+        QTimer::singleShot(5000, sock, &QTcpSocket::deleteLater);
+    });
+    connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+
+    sock->connectToHost(peer.address, peer.tcpPort);
+    return true;
+}
+
+void J2JMeshConnector::broadcastTgBinding(qint64 chatId, const QString& deviceId,
+                                          const QString& pcName)
+{
+    QJsonObject data;
+    data[QStringLiteral("chatId")]   = static_cast<double>(chatId);
+    data[QStringLiteral("deviceId")] = deviceId;
+    data[QStringLiteral("pcName")]   = pcName;
+
+    for (auto it = m_peers.constBegin(); it != m_peers.constEnd(); ++it) {
+        const J2JPeer& peer = it.value();
+        auto* sock = new QTcpSocket(this);
+        const QString token = authToken();
+
+        connect(sock, &QTcpSocket::connected, this,
+                [sock, token, data]() {
+            QJsonObject packet;
+            packet[QStringLiteral("token")] = token;
+            packet[QStringLiteral("type")]  = QStringLiteral("TgBinding");
+            packet[QStringLiteral("data")]  = data;
+            sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact) + "\n");
+            sock->flush();
+            QTimer::singleShot(5000, sock, &QTcpSocket::deleteLater);
+        });
+        connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+
+        sock->connectToHost(peer.address, peer.tcpPort);
+    }
+}
+
+void J2JMeshConnector::handleTgRelay(QTcpSocket* socket, const QJsonObject& data)
+{
+    Q_UNUSED(socket)
+    if (m_telegramGw)
+        m_telegramGw->onMeshRelay(data);
+}
+
+void J2JMeshConnector::handleTgBinding(QTcpSocket* socket, const QJsonObject& data)
+{
+    Q_UNUSED(socket)
+    if (m_telegramGw)
+        m_telegramGw->onMeshBinding(data);
+}
+
+// ============================================================
 //  Auth & helpers
 // ============================================================
 
@@ -558,6 +692,7 @@ void J2JMeshConnector::initTelegramGateway()
 {
     if (m_telegramGw) return;
     m_telegramGw = new J2JTelegramGateway(this);
+    m_telegramGw->setMeshConnector(this);
     MediaRoutingManager::instance().setTelegramGateway(m_telegramGw);
     qDebug() << "[J2J] Telegram gateway initialized";
 }

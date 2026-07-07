@@ -29,6 +29,7 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/stop_voice"), TelegramRole::User },
         { QStringLiteral("/fridge"),     TelegramRole::User },
         { QStringLiteral("/remind"),     TelegramRole::User },
+        { QStringLiteral("/pc"),         TelegramRole::User },  // выбор/смена своего ПК
 
         // ── Tester (+ bug reports, kanban) ──────────────────
         { QStringLiteral("/bug"),        TelegramRole::Tester },
@@ -48,6 +49,7 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         // ── Admin (full access) ─────────────────────────────
         { QStringLiteral("/webcam"),          TelegramRole::Admin },
         { QStringLiteral("/cam"),             TelegramRole::Admin },
+        { QStringLiteral("/video"),           TelegramRole::Admin },
         { QStringLiteral("/surveillance"),    TelegramRole::Admin },
         { QStringLiteral("/watch"),           TelegramRole::Admin },
         { QStringLiteral("/security"),        TelegramRole::Admin },
@@ -251,6 +253,36 @@ TgUserSession TelegramAccessManager::bindSession(qint64 chatId, const QString& p
     return session;
 }
 
+void TelegramAccessManager::bindSessionToDevice(qint64 chatId,
+                                                const QString& deviceId,
+                                                const QString& pcName)
+{
+    if (deviceId.isEmpty()) return;
+
+    QMutexLocker lock(&m_mutex);
+    QSqlQuery q(QSqlDatabase::database());
+    q.prepare(QStringLiteral(
+        "INSERT INTO user_sessions "
+        "  (chat_id, device_id, auth_token, pc_name, status) "
+        "VALUES (:cid, :did, :tok, :name, 'active') "
+        "ON CONFLICT(chat_id) DO UPDATE SET "
+        "  device_id  = excluded.device_id, "
+        "  auth_token = excluded.auth_token, "
+        "  pc_name    = excluded.pc_name, "
+        "  status     = 'active', "
+        "  last_used  = datetime('now')"));
+    q.bindValue(QStringLiteral(":cid"),  chatId);
+    q.bindValue(QStringLiteral(":did"),  deviceId);
+    q.bindValue(QStringLiteral(":tok"),  generateAuthToken());
+    q.bindValue(QStringLiteral(":name"),
+                pcName.isEmpty() ? QStringLiteral("PC-%1").arg(deviceId.left(8))
+                                 : pcName);
+    q.exec();
+
+    qDebug() << "[AccessManager] Remote binding recorded: chat" << chatId
+             << "→ device" << deviceId << "pc:" << pcName;
+}
+
 bool TelegramAccessManager::validateToken(qint64 chatId, const QString& token) const
 {
     QMutexLocker lock(&m_mutex);
@@ -439,12 +471,9 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
             fix.exec();
         }
 
-        // Auto-bind session to this PC if no active session exists
-        lock.unlock();
-        auto existing = resolveSession(chatId);
-        if (!existing.has_value() || existing->status != QStringLiteral("active")) {
-            bindSession(chatId);
-        }
+        // Привязку сессии к ПК теперь выполняет J2JTelegramGateway
+        // (мульти-ПК: возможно, чат принадлежит другому устройству,
+        // и пользователю нужно предложить выбор).
         return;
     }
 
@@ -468,9 +497,6 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
         m_primaryOwnerId = chatId;
 
     lock.unlock();
-
-    // Auto-bind first session to this PC
-    bindSession(chatId);
 
     emit userRegistered(chatId, role);
 
