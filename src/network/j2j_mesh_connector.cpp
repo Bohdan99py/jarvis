@@ -287,6 +287,8 @@ void J2JMeshConnector::processPacket(QTcpSocket* socket, const QJsonObject& pack
         handleHandshake(socket, packet[QStringLiteral("data")].toObject());
     else if (type == QStringLiteral("SyncKnowledge"))
         handleSyncKnowledge(socket, packet[QStringLiteral("data")].toObject());
+    else if (type == QStringLiteral("KnowledgeQuery"))
+        handleKnowledgeQuery(socket, packet[QStringLiteral("data")].toObject());
     else if (type == QStringLiteral("DelegateTask"))
         handleDelegateTask(socket, packet[QStringLiteral("data")].toObject());
     else if (type == QStringLiteral("DelegateAsset"))
@@ -491,6 +493,80 @@ void J2JMeshConnector::broadcastKnowledge(const QJsonArray& facts)
 
         sock->connectToHost(peer.address, peer.tcpPort);
     }
+}
+
+void J2JMeshConnector::requestKnowledge(const QString& queryId, const QString& topic)
+{
+    for (auto it = m_peers.constBegin(); it != m_peers.constEnd(); ++it) {
+        const J2JPeer& peer = it.value();
+        auto* sock = new QTcpSocket(this);
+        const QString token = authToken();
+        const QString from  = m_nodeName;
+
+        connect(sock, &QTcpSocket::connected, this,
+                [sock, token, from, queryId, topic]() {
+            QJsonObject packet;
+            packet[QStringLiteral("token")] = token;
+            packet[QStringLiteral("type")]  = QStringLiteral("KnowledgeQuery");
+            QJsonObject d;
+            d[QStringLiteral("fromNode")] = from;
+            d[QStringLiteral("queryId")]  = queryId;
+            d[QStringLiteral("topic")]    = topic;
+            packet[QStringLiteral("data")] = d;
+            sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact));
+            sock->flush();
+        });
+
+        connect(sock, &QTcpSocket::readyRead, this,
+                [this, sock]() {
+            const QByteArray raw = sock->readAll();
+            const QJsonObject resp = QJsonDocument::fromJson(raw).object();
+            emit knowledgeQueryResult(
+                resp[QStringLiteral("queryId")].toString(),
+                resp[QStringLiteral("fromNode")].toString(),
+                resp[QStringLiteral("facts")].toArray());
+            sock->disconnectFromHost();
+            sock->deleteLater();
+        });
+
+        connect(sock, &QTcpSocket::errorOccurred, sock, &QTcpSocket::deleteLater);
+        sock->connectToHost(peer.address, peer.tcpPort);
+        QTimer::singleShot(8000, sock, &QTcpSocket::deleteLater); // give up waiting
+    }
+}
+
+void J2JMeshConnector::handleKnowledgeQuery(QTcpSocket* socket, const QJsonObject& data)
+{
+    const QString queryId = data[QStringLiteral("queryId")].toString();
+    const QString topic   = data[QStringLiteral("topic")].toString().trimmed();
+
+    QJsonArray facts;
+    if (!topic.isEmpty()) {
+        QSqlQuery q(QSqlDatabase::database());
+        q.prepare(R"(SELECT category, key, value FROM knowledge_base
+                     WHERE (key LIKE :t OR value LIKE :t) AND confidence >= 0.4
+                     ORDER BY confidence DESC LIMIT 5)");
+        q.bindValue(QStringLiteral(":t"), QStringLiteral("%") + topic + QStringLiteral("%"));
+        if (q.exec()) {
+            while (q.next()) {
+                facts.append(QJsonObject{
+                    {QStringLiteral("category"), q.value(0).toString()},
+                    {QStringLiteral("key"),      q.value(1).toString()},
+                    {QStringLiteral("value"),    q.value(2).toString()}
+                });
+            }
+        }
+    }
+
+    QJsonObject reply;
+    reply[QStringLiteral("fromNode")] = m_nodeName;
+    reply[QStringLiteral("queryId")]  = queryId;
+    reply[QStringLiteral("facts")]    = facts;
+    socket->write(QJsonDocument(reply).toJson(QJsonDocument::Compact));
+    socket->flush();
+
+    qDebug() << "[J2J] Answered KnowledgeQuery" << queryId << "topic:" << topic
+             << "with" << facts.size() << "facts";
 }
 
 void J2JMeshConnector::delegateTask(const QString& peerId, const QJsonObject& task)

@@ -23,6 +23,8 @@
 #include <QStringList>
 #include <QVector>
 
+class J2JMeshConnector;
+
 // ============================================================
 //  ActivityEntry — one snapshot of user activity
 // ============================================================
@@ -78,6 +80,11 @@ public:
     // Time spent in current activity (seconds)
     int currentActivityDuration() const;
 
+    // Lets newly learned facts propagate to other JARVIS instances on
+    // the mesh (e.g. laptop + desktop sharing what they learn about the
+    // same user). Optional — facts stay local if never set.
+    void setMeshConnector(J2JMeshConnector* mesh) { m_mesh = mesh; }
+
     // --- Knowledge Base ---
     void learnFact(qint64 userId, const QString& category,
                    const QString& key, const QString& value,
@@ -113,6 +120,7 @@ private:
 
     QTimer*     m_timer = nullptr;
     bool        m_running = false;
+    J2JMeshConnector* m_mesh = nullptr;
 
     // Current activity tracking
     QString     m_currentApp;

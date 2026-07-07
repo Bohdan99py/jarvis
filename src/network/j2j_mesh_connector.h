@@ -57,6 +57,12 @@ public:
     void broadcastKnowledge(const QJsonArray& facts);
     void delegateTask(const QString& peerId, const QJsonObject& task);
 
+    // Ask every mesh peer "does anyone know about <topic>?" — e.g. an
+    // unfamiliar phrase heard in another language. Peers search their
+    // own knowledge_base and reply; results arrive via knowledgeQueryResult
+    // (fired once per responding peer, so listen for a short window).
+    void requestKnowledge(const QString& queryId, const QString& topic);
+
     // ── Face profiles (P2P) ─────────────────────────────────
     // Рассылает локально обученные лица (имя, возраст, статус,
     // LBP-признаки) всем узлам меша — их камеры будут узнавать
@@ -92,6 +98,8 @@ signals:
     void peerLost(const QString& nodeName);
     void peerAuthorized(const QString& nodeName, const QString& address);
     void knowledgeReceived(const QString& fromNode, int factCount);
+    void knowledgeQueryResult(const QString& queryId, const QString& fromNode,
+                              const QJsonArray& facts);
     void faceProfilesReceived(const QString& fromNode, int faceCount);
     void taskReceived(const QString& fromNode, const QString& taskTitle);
     void assetDelegated(const QString& toNode, const QString& assetType);
@@ -112,6 +120,7 @@ private:
     void processPacket(QTcpSocket* socket, const QJsonObject& packet);
     void handleHandshake(QTcpSocket* socket, const QJsonObject& data);
     void handleSyncKnowledge(QTcpSocket* socket, const QJsonObject& data);
+    void handleKnowledgeQuery(QTcpSocket* socket, const QJsonObject& data);
     void handleDelegateTask(QTcpSocket* socket, const QJsonObject& data);
     void handleDelegateAsset(QTcpSocket* socket, const QJsonObject& data);
     void handleRequestCache(QTcpSocket* socket, const QJsonObject& data);

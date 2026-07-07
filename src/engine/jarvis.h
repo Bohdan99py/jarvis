@@ -67,7 +67,8 @@ public:
     // attachmentBlock — готовый блок из AttachmentsManager::buildAttachmentBlock().
     QString processCommand(const QString& input,
                            const QString& attachmentBlock = QString(),
-                           const QString& langInstruction = QString());
+                           const QString& langInstruction = QString(),
+                           qint64 chatId = 0);
 
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
@@ -248,7 +249,7 @@ private:
 
     bool              m_multiAgentMode    = false;
     bool              m_telegramOrigin    = false;
-    bool              m_uiEnglish         = true;   // synced from MainWindow
+    bool              m_uiEnglish         = false;  // synced from MainWindow; default RU until setUiLanguage() runs
     bool              m_ideOpenedThisSession = false; // CLion открыт авто-режимом в этой сессии
     std::atomic<bool> m_speaking{false};
     QMutex            m_ttsMutex;

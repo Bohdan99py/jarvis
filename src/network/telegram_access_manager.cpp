@@ -30,6 +30,7 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/fridge"),     TelegramRole::User },
         { QStringLiteral("/remind"),     TelegramRole::User },
         { QStringLiteral("/pc"),         TelegramRole::User },  // выбор/смена своего ПК
+        { QStringLiteral("/history"),    TelegramRole::User },  // хронологическая история чата
 
         // ── Tester (+ bug reports, kanban) ──────────────────
         { QStringLiteral("/bug"),        TelegramRole::Tester },
@@ -55,6 +56,7 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/security"),        TelegramRole::Admin },
         { QStringLiteral("/guard"),           TelegramRole::Admin },
         { QStringLiteral("/enroll_face"),     TelegramRole::Admin },
+        { QStringLiteral("/browse"),          TelegramRole::Admin },
         { QStringLiteral("/companion_ok"),   TelegramRole::Admin },
         { QStringLiteral("/companion_no"),   TelegramRole::Admin },
         { QStringLiteral("/admin_stats"),     TelegramRole::Admin },

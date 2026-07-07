@@ -63,6 +63,7 @@ public:
     void setActivityTracker(ActivityTracker* at) { m_activity = at; }
     void setScreenshotLearner(ScreenshotLearner* sl) { m_screenshotLearner = sl; }
     void setTargetChatId(qint64 chatId) { m_targetChatId = chatId; }
+    void setUiEnglish(bool english) { m_uiEnglish = english; }
 
     void start(int intervalMinutes = 120);
     void stop();
@@ -73,6 +74,14 @@ public:
     void saveResponse(qint64 chatId,
                       const QString& question,
                       const QString& answer);
+
+    // --- Pending-question state: lets callers tell "this is the answer
+    //     to my proactive question" apart from a normal chat message ---
+    bool hasPendingQuestion() const;
+    // If a question is pending (and not expired) for chatId, records
+    // answerText as the answer, clears the pending state, and returns
+    // true. Otherwise returns false and leaves state untouched.
+    bool consumeAnswer(qint64 chatId, const QString& answerText);
 
     void ensureTable();
 
@@ -101,7 +110,9 @@ public:
     Q_ENUM(ProactiveCategory)
 
 signals:
-    void questionPosted(const QString& question);
+    // options is always {"Да","Нет"} / {"Yes","No"} today — Jarvis still
+    // accepts free-text answers too, buttons are just the fast path.
+    void questionPosted(const QString& question, const QStringList& options);
     void proactiveDialogue(const QString& message, ProactiveCategory category);
 
 private:
@@ -117,6 +128,7 @@ private:
     QString buildDoubtVerificationQuestion() const;
     QString buildPersonalProfilingQuestion() const;
     bool shouldInterrupt() const;
+    void expirePendingIfStale();
 
     J2JTelegramGateway* m_gateway          = nullptr;
     ActivityTracker*    m_activity          = nullptr;
@@ -124,6 +136,7 @@ private:
     QTimer*             m_idleTimer        = nullptr;
     qint64              m_targetChatId     = 0;
     int                 m_questionIndex    = 0;
+    bool                m_uiEnglish        = false;
 
     QDateTime           m_lastUserActivity;
     QDateTime           m_lastQuestionTime;
@@ -133,15 +146,27 @@ private:
     // Visual context from last ScreenshotLearner capture
     VisualContext       m_visualCtx;
 
+    // Pending question awaiting a user answer (Telegram button, PC button,
+    // or free text) — lets Jarvis::processCommand tell "this message is
+    // the answer to my question" apart from a normal chat message.
+    QString             m_pendingQuestion;
+    qint64              m_pendingChatId    = 0;
+    QDateTime           m_pendingTimestamp;
+    ProactiveCategory   m_pendingCategory  = ProactiveCategory::Casual;
+
     static constexpr int MIN_IDLE_SECONDS = 300;
     static constexpr int MIN_MESSAGES_BETWEEN = 8;
     static constexpr int MAX_QUESTIONS_PER_SESSION = 5;
     static constexpr int COOLDOWN_MINUTES = 45;
+    // Short window: only the next message shortly after the question is
+    // treated as its answer, so an unrelated command typed later isn't
+    // accidentally swallowed as a reply.
+    static constexpr int PENDING_ANSWER_WINDOW_MINUTES = 5;
 
-    static const QStringList& philosophyPool();
-    static const QStringList& wellBeingPool();
-    static const QStringList& projectPool();
-    static const QStringList& techPool();
-    static const QStringList& lateNightPool();
-    static const QStringList& casualPool();
+    static const QStringList& philosophyPool(bool english);
+    static const QStringList& wellBeingPool(bool english);
+    static const QStringList& projectPool(bool english);
+    static const QStringList& techPool(bool english);
+    static const QStringList& lateNightPool(bool english);
+    static const QStringList& casualPool(bool english);
 };

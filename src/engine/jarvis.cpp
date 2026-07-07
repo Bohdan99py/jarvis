@@ -20,6 +20,7 @@
 #include <QSqlDatabase>
 #include "user_profile.h"
 #include "activity_tracker.h"
+#include "face_registry.h"
 #include "user_profile_manager.h"
 #include "training_processing_worker.h"
 #include "system_manifest.h"
@@ -89,6 +90,16 @@ Jarvis::Jarvis(QObject* parent)
     m_activity     = new ActivityTracker(this);
     m_activity->start(15); // capture every 15 seconds
 
+    // Face/photo enrollment feeds the same knowledge_base training system
+    // as voice/text learning — new "appearance" category, not a silo.
+    connect(&FaceRegistry::instance(), &FaceRegistry::faceEnrolled, this,
+            [this](const QString& name, const QString& status) {
+        m_activity->learnFact(m_currentUserId, QStringLiteral("appearance"),
+                              name,
+                              status.isEmpty() ? QStringLiteral("recognized face") : status,
+                              0.8f);
+    });
+
     // Background training data pipeline: voice_journal → training pairs → .jsonl
     m_trainingPipeline = new TrainingPipelineController(this);
     m_trainingPipeline->setUserId(m_currentUserId);
@@ -97,6 +108,7 @@ Jarvis::Jarvis(QObject* parent)
 
     // J2J Mesh: peer-to-peer network for multi-instance knowledge sync
     m_mesh = new J2JMeshConnector(this);
+    m_activity->setMeshConnector(m_mesh);
     {
         auto userOpt = DatabaseManager::instance().getUser(m_currentUserId);
         if (userOpt && !userOpt->currentRole.isEmpty())
@@ -136,6 +148,7 @@ Jarvis::Jarvis(QObject* parent)
     m_translator->setLlmApi(m_claudeApi);
     m_translator->setTracker(m_activity);
     m_translator->setUserId(m_currentUserId);
+    m_translator->setMeshConnector(m_mesh);
 
     // Vectorized core memory — always active, not just in Telegram
     MemoryManager::instance().initialize();
@@ -1041,10 +1054,25 @@ void Jarvis::speakAsync(const QString& text)
 // Обработка команд (гибридный режим)
 // ============================================================
 
-QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction)
+QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction, qint64 chatId)
 {
     QString s = input.trimmed();
     if (s.isEmpty()) return QString();
+
+    // CuriosityEngine pending question — intercepts the reply to a proactive
+    // question (button tap or free text) so it isn't routed into normal
+    // chat/LLM handling. chatId==0 (desktop) always matches the target chat,
+    // since PC and Telegram are the same person.
+    if (CuriosityEngine::instance().hasPendingQuestion()) {
+        if (CuriosityEngine::instance().consumeAnswer(chatId, s)) {
+            m_memory->addMessage(QStringLiteral("user"), s);
+            const QString ack = m_uiEnglish
+                ? QStringLiteral("Got it, thanks! 👍")
+                : QStringLiteral("Понял, спасибо! 👍");
+            m_memory->addMessage(QStringLiteral("assistant"), ack);
+            return ack;
+        }
+    }
 
     // Binary feedback handler — intercepts yes/no replies to "was this helpful?"
     {

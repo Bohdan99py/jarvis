@@ -16,6 +16,7 @@
 
 class ClaudeApi;
 class ActivityTracker;
+class J2JMeshConnector;
 
 class TranslationEngine : public QObject
 {
@@ -26,6 +27,7 @@ public:
     void setLlmApi(ClaudeApi* api)        { m_api = api; }
     void setTracker(ActivityTracker* t)    { m_tracker = t; }
     void setUserId(qint64 id)             { m_userId = id; }
+    void setMeshConnector(J2JMeshConnector* mesh) { m_mesh = mesh; }
 
     // Active translation pair
     void setSourceLang(const QString& l)  { m_sourceLang = l; }
@@ -43,6 +45,14 @@ public:
     void processAudioFile(const QString& filePath, const QString& targetLang,
                           const QString& knowledgeTag = QStringLiteral("University"));
 
+    // Heard/read a phrase in a language Jarvis doesn't recognize. First
+    // asks mesh peers ("has anyone seen this before?"); if none answer
+    // in time, falls back to an LLM translation call. Either way, the
+    // result is remembered via ActivityTracker so the same phrase is
+    // recognized instantly next time — a pragmatic lookup-and-remember
+    // loop, not full language acquisition.
+    void learnUnknownLanguageSnippet(const QString& text);
+
 signals:
     void translationReady(const QString& original, const QString& translated,
                           const QString& targetLang);
@@ -59,8 +69,9 @@ private:
                                const QString& targetLang,
                                const QString& knowledgeTag);
 
-    ClaudeApi*       m_api     = nullptr;
-    ActivityTracker* m_tracker = nullptr;
+    ClaudeApi*        m_api     = nullptr;
+    ActivityTracker*  m_tracker = nullptr;
+    J2JMeshConnector*  m_mesh    = nullptr;
     qint64           m_userId  = 1;
     QString          m_sourceLang = QStringLiteral("auto");
     QString          m_targetLang = QStringLiteral("en");

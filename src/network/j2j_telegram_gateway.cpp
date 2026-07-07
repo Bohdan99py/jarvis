@@ -23,6 +23,7 @@
 #include "jarvis.h"
 #include "translation_engine.h"
 #include "jarvis_paths.h"
+#include "curiosity_engine.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -650,6 +651,25 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             sendPcSelectionKeyboard(chatId, session.isEnglish);
             return;
         }
+        if (cmd == QStringLiteral("/history")) {
+            TgChatSession& session = getOrCreateSession(chatId);
+            sendHistorySessions(chatId, session.isEnglish);
+            return;
+        }
+        if (cmd == QStringLiteral("/browse")) {
+            // Full filesystem access — Admin-only, AND only for a chat
+            // bound to THIS PC (each owner only reaches their own machine).
+            TgChatSession& session = getOrCreateSession(chatId);
+            if (!m_accessMgr->isSessionBoundHere(chatId)) {
+                sendMessage(chatId, session.isEnglish
+                    ? QStringLiteral("❌ This chat isn't bound to this PC. Use /pc first.")
+                    : QStringLiteral("❌ Этот чат не привязан к этому ПК. Сначала используйте /pc."));
+                return;
+            }
+            m_accessMgr->logActivity(chatId, QStringLiteral("fs_browse_start"));
+            sendFsListing(chatId, QString(), session.isEnglish);
+            return;
+        }
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
             TgChatSession& session = getOrCreateSession(chatId);
             session.wizardStep = QaWizardStep::Idle;
@@ -993,6 +1013,91 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
 
     answerCallbackQuery(callbackId);
 
+    // ── CuriosityEngine question answered via Да/Нет button ─────────
+    if (data == QStringLiteral("curiosity_yes") || data == QStringLiteral("curiosity_no")) {
+        const QString answer = (data == QStringLiteral("curiosity_yes"))
+            ? (en ? QStringLiteral("Yes") : QStringLiteral("Да"))
+            : (en ? QStringLiteral("No")  : QStringLiteral("Нет"));
+        if (CuriosityEngine::instance().consumeAnswer(chatId, answer)) {
+            sendMessage(chatId, en
+                ? QStringLiteral("Got it, thanks! 👍")
+                : QStringLiteral("Понял, спасибо! 👍"));
+        }
+        return;
+    }
+
+    // ── /history session-transcript callback ─────────────────────────
+    if (data.startsWith(QStringLiteral("histnav:"))) {
+        bool ok = false;
+        const int idx = data.mid(8).toInt(&ok);
+        if (ok && idx >= 0 && idx < session.historySessionIds.size())
+            sendHistoryTranscript(chatId, session.historySessionIds[idx], en);
+        return;
+    }
+
+    // ── /browse filesystem navigation callbacks ─────────────────────
+    // Callback queries bypass the slash-command RBAC gate entirely, so
+    // this is re-checked here (defense in depth) rather than trusting
+    // that only /browse could have produced this button.
+    if (data.startsWith(QStringLiteral("fsnav:"))) {
+        if (!m_accessMgr->isSessionBoundHere(chatId)
+            || !m_accessMgr->hasAccess(chatId, QStringLiteral("/browse"))) {
+            sendMessage(chatId, en
+                ? QStringLiteral("🔒 Access denied.")
+                : QStringLiteral("🔒 Доступ запрещён."));
+            return;
+        }
+
+        if (data == QStringLiteral("fsnav:root")) {
+            sendFsListing(chatId, QString(), en);
+            return;
+        }
+        if (data == QStringLiteral("fsnav:up")) {
+            QDir d(session.browsePath);
+            const QString before = d.absolutePath();
+            if (d.cdUp() && d.absolutePath() != before && d.absolutePath().length() > 3) {
+                sendFsListing(chatId, d.absolutePath(), en);
+            } else {
+                sendFsListing(chatId, QString(), en); // back to drive list
+            }
+            return;
+        }
+        if (data.startsWith(QStringLiteral("fsnav:d:"))) {
+            bool ok = false;
+            const int idx = data.mid(8).toInt(&ok);
+            if (ok && idx >= 0 && idx < session.browseEntries.size())
+                sendFsListing(chatId, session.browseEntries[idx], en);
+            return;
+        }
+        if (data.startsWith(QStringLiteral("fsnav:f:"))) {
+            bool ok = false;
+            const int idx = data.mid(8).toInt(&ok);
+            if (ok && idx >= 0 && idx < session.browseEntries.size()) {
+                const QString filePath = session.browseEntries[idx];
+                QFileInfo fi(filePath);
+                constexpr qint64 TG_MAX_BYTES = 50LL * 1024 * 1024;
+                if (!fi.exists()) {
+                    sendMessage(chatId, en ? QStringLiteral("❌ File no longer exists.")
+                                           : QStringLiteral("❌ Файл больше не существует."));
+                } else if (fi.size() > TG_MAX_BYTES) {
+                    sendMessage(chatId, en
+                        ? QStringLiteral("❌ File too large for Telegram (%1 MB, limit 50 MB).")
+                              .arg(fi.size() / (1024 * 1024))
+                        : QStringLiteral("❌ Файл слишком большой для Telegram (%1 МБ, лимит 50 МБ).")
+                              .arg(fi.size() / (1024 * 1024)));
+                } else {
+                    m_accessMgr->logActivity(chatId, QStringLiteral("fs_download"), filePath);
+                    sendMessage(chatId, en
+                        ? QStringLiteral("📤 Sending: `%1`...").arg(fi.fileName())
+                        : QStringLiteral("📤 Отправляю: `%1`...").arg(fi.fileName()));
+                    sendDocumentToMobile(chatId, filePath, QString());
+                }
+            }
+            return;
+        }
+        return;
+    }
+
     // ── Multi-PC: выбор своего ПК ("bindpc:<nodeId>" | "bindpc:local") ──
     if (data.startsWith(QStringLiteral("bindpc:"))) {
         const QString target = data.mid(7);
@@ -1113,6 +1218,24 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
         return;
     }
 
+    if (data == QStringLiteral("action_history")) {
+        sendHistorySessions(chatId, en);
+        return;
+    }
+
+    if (data == QStringLiteral("action_browse")) {
+        if (!m_accessMgr->isSessionBoundHere(chatId)
+            || !m_accessMgr->hasAccess(chatId, QStringLiteral("/browse"))) {
+            sendMessage(chatId, en
+                ? QStringLiteral("🔒 Access denied.")
+                : QStringLiteral("🔒 Доступ запрещён."));
+            return;
+        }
+        m_accessMgr->logActivity(chatId, QStringLiteral("fs_browse_start"));
+        sendFsListing(chatId, QString(), en);
+        return;
+    }
+
     // ── Settings sub-menu callbacks ─────────────────────────
     if (data == QStringLiteral("settings_model")) {
         QString modelInfo;
@@ -1210,6 +1333,10 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
         m_dispatcher->dispatch(chatId, QStringLiteral("/webcam"), en);
         return;
     }
+    if (data == QStringLiteral("sec_video")) {
+        m_dispatcher->dispatch(chatId, QStringLiteral("/video"), en);
+        return;
+    }
     if (data == QStringLiteral("sec_lock")) {
         auto* sec = m_dispatcher->findChild<SecurityCamera*>();
         if (sec) sec->lockScreen();
@@ -1233,6 +1360,11 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
         row1.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("📷 Камера")},
                                 {QStringLiteral("callback_data"), QStringLiteral("sec_webcam")}});
         rows.append(row1);
+
+        QJsonArray row1b;
+        row1b.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("🎥 Видео (10с)")},
+                                 {QStringLiteral("callback_data"), QStringLiteral("sec_video")}});
+        rows.append(row1b);
 
         QJsonArray row2;
         row2.append(QJsonObject{{QStringLiteral("text"), QStringLiteral("🔒 Заблокировать")},
@@ -1504,7 +1636,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     // Mood + diagram instructions are now injected globally in Jarvis::processCommand()
 
     m_jarvis->setTelegramOrigin(true);
-    QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction);
+    QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction, chatId);
 
     if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
         m_jarvis->setTelegramOrigin(false);
@@ -2076,6 +2208,13 @@ void J2JTelegramGateway::sendOutboundWithButtons(qint64 chatId, const QString& t
                                                    const QJsonObject& replyMarkup)
 {
     sendMessage(chatId, text, replyMarkup);
+}
+
+void J2JTelegramGateway::sendProactiveQuestion(qint64 chatId, const QString& text, bool english)
+{
+    sendMessage(chatId, text,
+        buildConfirmButtons(QStringLiteral("curiosity_yes"),
+                            QStringLiteral("curiosity_no"), english));
 }
 
 void J2JTelegramGateway::markAwaitingCompanionAnswer(qint64 chatId)
@@ -2797,6 +2936,172 @@ void J2JTelegramGateway::sendSettingsSubMenu(qint64 chatId, bool en)
 }
 
 // ============================================================
+//  /browse — full filesystem navigation (Admin-only)
+// ============================================================
+
+void J2JTelegramGateway::sendFsListing(qint64 chatId, const QString& path, bool en)
+{
+    TgChatSession& session = getOrCreateSession(chatId);
+    QJsonArray rows;
+
+    // Empty path — drive list (navigation root)
+    if (path.isEmpty()) {
+        session.browsePath.clear();
+        session.browseEntries.clear();
+
+        const QFileInfoList drives = QDir::drives();
+        QJsonArray row;
+        for (const QFileInfo& d : drives) {
+            const QString drivePath = d.absoluteFilePath();
+            session.browseEntries.append(drivePath);
+            row.append(QJsonObject{
+                {QStringLiteral("text"), QStringLiteral("\xF0\x9F\x92\xBD ") + drivePath}, // 💽
+                {QStringLiteral("callback_data"),
+                 QStringLiteral("fsnav:d:%1").arg(session.browseEntries.size() - 1)}
+            });
+            if (row.size() == 3) { rows.append(row); row = QJsonArray(); }
+        }
+        if (!row.isEmpty()) rows.append(row);
+
+        sendMessage(chatId,
+            en ? QStringLiteral("\xF0\x9F\x97\x82 *Browse PC* — choose a drive:")
+               : QStringLiteral("\xF0\x9F\x97\x82 *Обзор ПК* — выберите диск:"),
+            buildInlineKeyboard(rows));
+        return;
+    }
+
+    QDir dir(path);
+    if (!dir.exists()) {
+        sendMessage(chatId,
+            en ? QStringLiteral("\xE2\x9D\x8C Folder no longer exists.")
+               : QStringLiteral("\xE2\x9D\x8C Папка больше не существует."));
+        return;
+    }
+
+    session.browsePath = path;
+    session.browseEntries.clear();
+
+    QFileInfoList entries = dir.entryInfoList(
+        QDir::AllEntries | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name);
+
+    static constexpr int MAX_ENTRIES = 40;
+    QString note;
+    if (entries.size() > MAX_ENTRIES) {
+        note = en
+            ? QStringLiteral("\n_(showing first %1 of %2 items)_").arg(MAX_ENTRIES).arg(entries.size())
+            : QStringLiteral("\n_(показаны первые %1 из %2)_").arg(MAX_ENTRIES).arg(entries.size());
+        entries = entries.mid(0, MAX_ENTRIES);
+    }
+
+    for (const QFileInfo& fi : entries) {
+        session.browseEntries.append(fi.absoluteFilePath());
+        const int idx = session.browseEntries.size() - 1;
+
+        QString label;
+        QString callback;
+        if (fi.isDir()) {
+            label = QStringLiteral("\xF0\x9F\x93\x81 ") + fi.fileName(); // 📁
+            callback = QStringLiteral("fsnav:d:%1").arg(idx);
+        } else {
+            const qint64 bytes = fi.size();
+            QString size = bytes < 1024 ? QStringLiteral("%1 B").arg(bytes)
+                : bytes < 1024 * 1024 ? QStringLiteral("%1 KB").arg(bytes / 1024)
+                                      : QStringLiteral("%1 MB").arg(bytes / (1024 * 1024));
+            label = QStringLiteral("\xF0\x9F\x93\x84 ") + fi.fileName() // 📄
+                  + QStringLiteral(" (") + size + QStringLiteral(")");
+            callback = QStringLiteral("fsnav:f:%1").arg(idx);
+        }
+
+        QJsonArray row;
+        row.append(QJsonObject{{QStringLiteral("text"), label},
+                               {QStringLiteral("callback_data"), callback}});
+        rows.append(row);
+    }
+
+    QJsonArray navRow;
+    navRow.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("\xE2\xAC\x86\xEF\xB8\x8F Up") : QStringLiteral("\xE2\xAC\x86\xEF\xB8\x8F Вверх")},
+        {QStringLiteral("callback_data"), QStringLiteral("fsnav:up")}});
+    navRow.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("\xF0\x9F\x8F\xA0 Drives") : QStringLiteral("\xF0\x9F\x8F\xA0 Диски")},
+        {QStringLiteral("callback_data"), QStringLiteral("fsnav:root")}});
+    rows.append(navRow);
+
+    sendMessage(chatId,
+        QStringLiteral("\xF0\x9F\x93\x82 `%1`%2").arg(path, note),
+        buildInlineKeyboard(rows));
+}
+
+// ============================================================
+//  /history — chronological chat history browser
+// ============================================================
+
+void J2JTelegramGateway::sendHistorySessions(qint64 chatId, bool en)
+{
+    TgChatSession& session = getOrCreateSession(chatId);
+    session.historySessionIds.clear();
+
+    const auto sessions = DatabaseManager::instance().getSessions(1, 30);
+    if (sessions.isEmpty()) {
+        sendMessage(chatId, en
+            ? QStringLiteral("\xF0\x9F\x95\x98 No chat history yet.")
+            : QStringLiteral("\xF0\x9F\x95\x98 История чатов пока пуста."));
+        return;
+    }
+
+    QJsonArray rows;
+    for (const auto& row : sessions) {
+        const QString sid      = row.value(QStringLiteral("session_id"));
+        const QString lastAt   = row.value(QStringLiteral("last_at"));
+        const QString msgCount = row.value(QStringLiteral("msg_count"));
+        const QDateTime dt = QDateTime::fromString(lastAt, Qt::ISODate);
+
+        session.historySessionIds.append(sid);
+        const int idx = session.historySessionIds.size() - 1;
+
+        const QString label = (dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd")) : sid)
+            + QStringLiteral("  (") + msgCount + (en ? QStringLiteral(" msgs)") : QStringLiteral(" сообщ.)"));
+
+        QJsonArray r;
+        r.append(QJsonObject{{QStringLiteral("text"), label},
+                             {QStringLiteral("callback_data"), QStringLiteral("histnav:%1").arg(idx)}});
+        rows.append(r);
+    }
+
+    sendMessage(chatId,
+        en ? QStringLiteral("\xF0\x9F\x95\x98 *Chat History* — pick a day:")
+           : QStringLiteral("\xF0\x9F\x95\x98 *История чатов* — выберите день:"),
+        buildInlineKeyboard(rows));
+}
+
+void J2JTelegramGateway::sendHistoryTranscript(qint64 chatId, const QString& sessionId, bool en)
+{
+    const auto messages = DatabaseManager::instance().getSession(sessionId);
+    if (messages.isEmpty()) {
+        sendMessage(chatId, en ? QStringLiteral("(empty)") : QStringLiteral("(пусто)"));
+        return;
+    }
+
+    QString text;
+    for (const auto& m : messages) {
+        const QString who = (m.role == QStringLiteral("user"))
+            ? (en ? QStringLiteral("You") : QStringLiteral("Вы"))
+            : QStringLiteral("J.A.R.V.I.S.");
+        const QString ts = m.createdAt.isValid()
+            ? m.createdAt.toString(QStringLiteral("HH:mm")) : QString();
+        const QString line = QStringLiteral("[%1] *%2:* %3\n\n").arg(ts, who, m.content);
+
+        // Telegram messages cap at ~4096 chars — flush in chunks.
+        if (text.size() + line.size() > 3500) {
+            sendMessage(chatId, text);
+            text.clear();
+        }
+        text += line;
+    }
+    if (!text.isEmpty()) sendMessage(chatId, text);
+}
+
+// ============================================================
 //  Inline Context Buttons (Yes/No confirmations)
 // ============================================================
 
@@ -2870,6 +3175,19 @@ QJsonArray J2JTelegramGateway::buildMainMenuButtons(bool en)
         {QStringLiteral("callback_data"), QStringLiteral("action_help")}
     });
     rows.append(row3);
+
+    // Row 4: Browse PC filesystem (Admin-only, enforced on the callback)
+    //        + Chat History (available to everyone)
+    QJsonArray row4;
+    row4.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("🗂 Browse PC") : QStringLiteral("🗂 Обзор ПК")},
+        {QStringLiteral("callback_data"), QStringLiteral("action_browse")}
+    });
+    row4.append(QJsonObject{
+        {QStringLiteral("text"), en ? QStringLiteral("🕘 History") : QStringLiteral("🕘 История")},
+        {QStringLiteral("callback_data"), QStringLiteral("action_history")}
+    });
+    rows.append(row4);
 
     return rows;
 }

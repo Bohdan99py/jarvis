@@ -96,6 +96,17 @@ struct TgChatSession {
     QaBugReport   pendingBug;
     bool          awaitingLlm = false; // true while LLM is generating
     bool          awaitingCompanionAnswer = false; // waiting for ok/no re: security
+
+    // /browse filesystem navigation state (Admin-only) — browseEntries
+    // holds the absolute paths currently on screen so callback_data can
+    // reference them by short index instead of embedding full paths
+    // (Telegram callback_data is capped at 64 bytes).
+    QString       browsePath;      // empty = showing the drive list
+    QStringList   browseEntries;
+
+    // /history session list state — same short-index trick as browseEntries,
+    // since callback_data can't hold a full session_id list.
+    QStringList   historySessionIds;
 };
 
 // ── Gateway class ────────────────────────────────────────────
@@ -151,6 +162,11 @@ public:
     // Send message with inline keyboard buttons
     void sendOutboundWithButtons(qint64 chatId, const QString& text,
                                  const QJsonObject& replyMarkup);
+
+    // Send a CuriosityEngine proactive question with Да/Нет (Yes/No)
+    // inline buttons attached — used so the reply can be recognized as
+    // an answer via a callback as well as free text.
+    void sendProactiveQuestion(qint64 chatId, const QString& text, bool english);
 
     // Mark a chat as waiting for a companion answer (да/нет/ок)
     void markAwaitingCompanionAnswer(qint64 chatId);
@@ -263,6 +279,15 @@ private:
 
     // Sub-menu for Settings
     void sendSettingsSubMenu(qint64 chatId, bool english);
+
+    // /browse — full filesystem navigation (Admin-only, this-PC-only).
+    // path.isEmpty() shows the drive list.
+    void sendFsListing(qint64 chatId, const QString& path, bool english);
+
+    // /history — chronological chat history browser (complements keyword
+    // search: no need to remember what Jarvis "remembered").
+    void sendHistorySessions(qint64 chatId, bool english);
+    void sendHistoryTranscript(qint64 chatId, const QString& sessionId, bool english);
 
     // Inline context buttons (e.g., Yes/No confirmations)
     static QJsonObject buildConfirmButtons(const QString& yesData,

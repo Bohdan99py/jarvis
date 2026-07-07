@@ -77,6 +77,10 @@ private slots:
 
     void onClarificationChoice(int choice);
 
+    // CuriosityEngine proactive question — mirrors Telegram's inline
+    // Да/Нет buttons on the PC side via the clarify bar.
+    void onCuriosityQuestionPosted(const QString& question, const QStringList& options);
+
     // Самообучение: подтверждение выученной команды
     void onCommandLearned(const LearnedCommand& cmd);
 
@@ -145,6 +149,7 @@ private:
     QLabel*                 m_clarifyText    = nullptr;
     QHBoxLayout*            m_clarifyBtnLay  = nullptr;
     QString                 m_pendingInput;
+    QStringList              m_pendingOptions; // labels for the active m_clarifyBar buttons
 
     QWidget*                m_updateBar       = nullptr;
     QLabel*                 m_updateLabel     = nullptr;

@@ -27,6 +27,7 @@
 #include <QSqlQuery>
 #include "local_trainer.h"
 #include "task_manager_dialog.h"
+#include "chat_history_dialog.h"
 #include "translation_engine.h"
 #include "VoskSetupDialog.h"
 #include <QClipboard>
@@ -112,13 +113,13 @@ MainWindow::MainWindow(QWidget* parent)
 
     // Загружаем язык из настроек (для UI-строк)
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
-    bool english = cfg.value(QStringLiteral("ui/english"), true).toBool();
+    bool english = cfg.value(QStringLiteral("ui/english"), false).toBool();
     gUiLanguage() = english ? UiLanguage::English : UiLanguage::Russian;
-    // Синхронизируем детектор языка с настройкой
-    // (дефолт — русский, совпадает с конструктором LanguageDetector)
+    // Дефолт — русский, пока пользователь явно не переключит язык в настройках.
 
     m_jarvis = new Jarvis(this);
     m_jarvis->setUiLanguage(english);
+    CuriosityEngine::instance().setUiEnglish(english);
 
     m_audioManager = new AudioManager(this);
 
@@ -172,6 +173,9 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](const QString& message) {
                 appendLog(QStringLiteral("J.A.R.V.I.S."), message, "#66FCF1");
             });
+
+    connect(&CuriosityEngine::instance(), &CuriosityEngine::questionPosted,
+            this, &MainWindow::onCuriosityQuestionPosted);
 
     connect(m_jarvis->attachments(), &AttachmentsManager::changed,
             this, &MainWindow::onAttachmentsChanged);
@@ -363,6 +367,7 @@ void MainWindow::applyLanguage(bool english)
 {
     gUiLanguage() = english ? UiLanguage::English : UiLanguage::Russian;
     m_jarvis->setUiLanguage(english);
+    CuriosityEngine::instance().setUiEnglish(english);
     QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
     cfg.setValue(QStringLiteral("ui/english"), english);
 
@@ -1563,6 +1568,14 @@ void MainWindow::buildMenuBar()
                           : QStringLiteral("Доска задач обновлена."),
                     Theme::LogColors::system);
             });
+            dlg.exec();
+        });
+
+        auto* actChatHistory = taskMenu->addAction(
+            IS_EN ? QStringLiteral("Chat History...")
+                  : QStringLiteral("История чатов..."));
+        connect(actChatHistory, &QAction::triggered, this, [this]() {
+            ChatHistoryDialog dlg(m_jarvis->currentUserId(), IS_EN, this);
             dlg.exec();
         });
 
@@ -3995,9 +4008,35 @@ void MainWindow::hideClarification()
     m_pendingInput.clear();
 }
 
+void MainWindow::onCuriosityQuestionPosted(const QString& question, const QStringList& options)
+{
+    // The question text itself already reaches the chat log via
+    // Jarvis::asyncResponseReady (CuriosityEngine::proactiveDialogue is
+    // forwarded there) — here we only surface the quick-reply buttons.
+    m_pendingInput = question;
+    m_pendingOptions = options;
+    m_pendingSuggestionAction = QStringLiteral("curiosity_answer");
+    showClarification(question, options);
+}
+
 void MainWindow::onClarificationChoice(int choice)
 {
     if (m_pendingInput.isEmpty()) return;
+
+    // CuriosityEngine question answered via Да/Нет (or other option) button
+    if (m_pendingSuggestionAction == QStringLiteral("curiosity_answer")) {
+        const QString answer = (choice >= 1 && choice <= m_pendingOptions.size())
+            ? m_pendingOptions[choice - 1] : QString();
+        hideClarification();
+        m_pendingSuggestionAction.clear();
+        m_pendingOptions.clear();
+        m_pendingInput.clear();
+        if (!answer.isEmpty()) {
+            m_input->setPlainText(answer);
+            onSend();
+        }
+        return;
+    }
 
     // Специальный случай: open_url — предложение открыть сайт
     if (m_pendingSuggestionAction.startsWith(QStringLiteral("open_url:"))) {
@@ -5592,6 +5631,14 @@ void MainWindow::onVoiceText(const QString& text, const QString& lang)
     // Помечаем что ввод голосовой — onAsyncResponse сохранит пару в voice_journal
     m_lastInputWasVoice = true;
     m_lastVoiceLanguage = lang;
+
+    // Speech that doesn't look like Russian or English text at all (not
+    // just short/ambiguous) — try to look it up and remember it, so an
+    // unfamiliar language becomes recognizable over time.
+    if (LanguageDetector::detect(text) == LanguageDetector::Language::Unknown
+        && text.length() >= 6 && m_jarvis->translationEngine()) {
+        m_jarvis->translationEngine()->learnUnknownLanguageSnippet(text);
+    }
 
     // Автоматически отправляем голосовую команду
     onSend();

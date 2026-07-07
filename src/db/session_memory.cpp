@@ -4,6 +4,7 @@
 
 #include "session_memory.h"
 #include "jarvis_paths.h"
+#include "database_manager.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -194,6 +195,18 @@ void SessionMemory::addMessage(const QString& role, const QString& content)
 
     while (m_sessionMessages.size() > MAX_SESSION_MESSAGES) {
         m_sessionMessages.removeFirst();
+    }
+
+    // Persist to chat_history so a full chronological history (not just
+    // in-memory session summaries) is browsable later — one session_id
+    // per calendar day, grouping messages the same way the history
+    // browser lists them.
+    if (DatabaseManager::instance().isOpen()) {
+        DbChatMessage db;
+        db.role      = role;
+        db.content   = content;
+        db.sessionId = QDate::currentDate().toString(Qt::ISODate);
+        DatabaseManager::instance().addMessage(db);
     }
 }
 

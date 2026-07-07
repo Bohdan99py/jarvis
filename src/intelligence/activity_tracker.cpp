@@ -4,6 +4,7 @@
 
 #include "activity_tracker.h"
 #include "database_manager.h"
+#include "j2j_mesh_connector.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -432,6 +433,20 @@ void ActivityTracker::learnFact(qint64 userId, const QString& category,
     q.exec();
 
     emit knowledgeLearned(key, value);
+
+    // Share reasonably confident facts with other JARVIS instances on
+    // the mesh — this is what lets a fact learned on one PC ("он мог
+    // передавать между собой") show up on another without re-learning it.
+    if (m_mesh && confidence >= 0.6f) {
+        QJsonArray facts;
+        facts.append(QJsonObject{
+            {QStringLiteral("category"), category},
+            {QStringLiteral("key"),      key},
+            {QStringLiteral("value"),    value},
+            {QStringLiteral("origin"),   originRole}
+        });
+        m_mesh->broadcastKnowledge(facts);
+    }
 }
 
 void ActivityTracker::reinforceFact(qint64 userId, const QString& key)

@@ -171,6 +171,7 @@ qint64 FaceRegistry::upsertFace(const KnownFace& face)
     }
 
     emit registryChanged();
+    emit faceEnrolled(face.name, face.status);
     qDebug() << "[FaceRegistry] Upserted face:" << face.name
              << "samples:" << merged.size()
              << "origin:" << (face.originNode.isEmpty()

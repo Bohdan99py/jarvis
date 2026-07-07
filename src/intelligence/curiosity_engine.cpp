@@ -270,9 +270,9 @@ CuriosityEngine::ProactiveCategory CuriosityEngine::selectCategory() const
 //  Question pools — organized by category
 // ============================================================
 
-const QStringList& CuriosityEngine::philosophyPool()
+const QStringList& CuriosityEngine::philosophyPool(bool english)
 {
-    static const QStringList pool = {
+    static const QStringList ru = {
         QStringLiteral("Слушай, а как ты считаешь — искусственный интеллект это хорошо или плохо?"),
         QStringLiteral("Если бы ты мог выбрать одну суперспособность — какую бы выбрал?"),
         QStringLiteral("Как думаешь, через 50 лет люди будут счастливее, чем сейчас?"),
@@ -284,12 +284,24 @@ const QStringList& CuriosityEngine::philosophyPool()
         QStringLiteral("Ты больше логик или интуит? Почему?"),
         QStringLiteral("Как ты относишься к идее, что мы живём в симуляции?"),
     };
-    return pool;
+    static const QStringList en = {
+        QStringLiteral("So — do you think artificial intelligence is a good thing, or a bad one?"),
+        QStringLiteral("If you could pick one superpower, which one would you choose?"),
+        QStringLiteral("Do you think people will be happier in 50 years than they are now?"),
+        QStringLiteral("Ever wonder why some people are kind and others aren't?"),
+        QStringLiteral("What matters more to you — freedom or security?"),
+        QStringLiteral("If you could relive one day from your past, which one would it be?"),
+        QStringLiteral("Do you think it's OK to trust a machine with decisions that affect people?"),
+        QStringLiteral("If you had to write the first rule of life, what would it be?"),
+        QStringLiteral("Are you more logic or intuition? Why?"),
+        QStringLiteral("How do you feel about the idea that we're living in a simulation?"),
+    };
+    return english ? en : ru;
 }
 
-const QStringList& CuriosityEngine::wellBeingPool()
+const QStringList& CuriosityEngine::wellBeingPool(bool english)
 {
-    static const QStringList pool = {
+    static const QStringList ru = {
         QStringLiteral("Ты давно работаешь — может, перерыв? Глаза же устают 👀"),
         QStringLiteral("Не забывай пить воду! Серьёзно, когда последний раз пил? 💧"),
         QStringLiteral("Как настроение сегодня? Просто интересно 🙂"),
@@ -298,12 +310,21 @@ const QStringList& CuriosityEngine::wellBeingPool()
         QStringLiteral("Когда последний раз ты делал что-то чисто для себя, не для работы?"),
         QStringLiteral("Ты ел сегодня нормально? Не чипсами же питаешься 🍕"),
     };
-    return pool;
+    static const QStringList en = {
+        QStringLiteral("You've been at it a while — maybe a break? Your eyes will thank you 👀"),
+        QStringLiteral("Don't forget to drink water! Seriously, when was the last time? 💧"),
+        QStringLiteral("How's your mood today? Just curious 🙂"),
+        QStringLiteral("What keeps you motivated to get up and work every day?"),
+        QStringLiteral("Maybe stretch a bit? Your back will thank you 🧘"),
+        QStringLiteral("When did you last do something just for yourself, not for work?"),
+        QStringLiteral("Did you eat something real today? Not just chips, right? 🍕"),
+    };
+    return english ? en : ru;
 }
 
-const QStringList& CuriosityEngine::projectPool()
+const QStringList& CuriosityEngine::projectPool(bool english)
 {
-    static const QStringList pool = {
+    static const QStringList ru = {
         QStringLiteral("Как продвигается проект? Есть что-то, где я могу помочь?"),
         QStringLiteral("Ты сейчас пишешь код — я заметил. Что делаешь? Может, подскажу?"),
         QStringLiteral("Какой самый интересный баг ты сегодня нашёл? 🐛"),
@@ -311,12 +332,20 @@ const QStringList& CuriosityEngine::projectPool()
         QStringLiteral("Я тут подумал — может, стоит сделать коммит? Не хочется потерять прогресс."),
         QStringLiteral("Есть задачи на завтра, которые стоит спланировать сейчас?"),
     };
-    return pool;
+    static const QStringList en = {
+        QStringLiteral("How's the project going? Anything I can help with?"),
+        QStringLiteral("I noticed you're coding right now — what are you working on? I might be able to help."),
+        QStringLiteral("What's the most interesting bug you found today? 🐛"),
+        QStringLiteral("Want me to index the current project? I can help with code search."),
+        QStringLiteral("I was thinking — maybe time for a commit? Wouldn't want to lose progress."),
+        QStringLiteral("Any tasks for tomorrow worth planning out now?"),
+    };
+    return english ? en : ru;
 }
 
-const QStringList& CuriosityEngine::techPool()
+const QStringList& CuriosityEngine::techPool(bool english)
 {
-    static const QStringList pool = {
+    static const QStringList ru = {
         QStringLiteral("Кстати, ты слышал про Rust? Как относишься к нему как альтернативе C++?"),
         QStringLiteral("Что думаешь — Unreal Engine 6 будет с ИИ-ассистентом внутри?"),
         QStringLiteral("Электромобили или классика? Какую машину бы выбрал?"),
@@ -325,24 +354,40 @@ const QStringList& CuriosityEngine::techPool()
         QStringLiteral("Ты пробовал Neovim? Или ты из лагеря IDE-максималистов? 😄"),
         QStringLiteral("Какая игра за последние годы произвела на тебя самое сильное впечатление?"),
     };
-    return pool;
+    static const QStringList en = {
+        QStringLiteral("Have you looked at Rust at all? What do you think of it as a C++ alternative?"),
+        QStringLiteral("Think Unreal Engine 6 will ship with a built-in AI assistant?"),
+        QStringLiteral("Electric or classic? Which car would you pick?"),
+        QStringLiteral("What's the strangest thing you've learned recently?"),
+        QStringLiteral("Do you think VR/AR will ever replace monitors for development work?"),
+        QStringLiteral("Have you tried Neovim? Or are you firmly in the IDE-maximalist camp? 😄"),
+        QStringLiteral("Which game has impressed you the most in the last few years?"),
+    };
+    return english ? en : ru;
 }
 
-const QStringList& CuriosityEngine::lateNightPool()
+const QStringList& CuriosityEngine::lateNightPool(bool english)
 {
-    static const QStringList pool = {
+    static const QStringList ru = {
         QStringLiteral("Уже за полночь 🌙 Может, пора отдохнуть? Завтра продолжим."),
         QStringLiteral("Ночной режим активирован 🦉 Ты точно уверен, что хочешь продолжать?"),
         QStringLiteral("3 часа ночи — классическое время программистских озарений. Или ошибок. Осторожнее 😅"),
         QStringLiteral("Поздно уже. Ты знал, что хороший сон улучшает продуктивность на 30%?"),
         QStringLiteral("Эй, ночной кодер! Не забудь поставить будильник, если завтра рано вставать ⏰"),
     };
-    return pool;
+    static const QStringList en = {
+        QStringLiteral("It's past midnight 🌙 Maybe time to rest? We can pick this up tomorrow."),
+        QStringLiteral("Night mode activated 🦉 Are you sure you want to keep going?"),
+        QStringLiteral("3am — the classic hour for programmer breakthroughs. Or bugs. Careful 😅"),
+        QStringLiteral("It's late. Did you know good sleep boosts productivity by ~30%?"),
+        QStringLiteral("Hey, night coder! Don't forget an alarm if you're up early tomorrow ⏰"),
+    };
+    return english ? en : ru;
 }
 
-const QStringList& CuriosityEngine::casualPool()
+const QStringList& CuriosityEngine::casualPool(bool english)
 {
-    static const QStringList pool = {
+    static const QStringList ru = {
         QStringLiteral("Если бы я мог научиться чему-то у тебя — чему бы ты научил?"),
         QStringLiteral("Ты когда-нибудь менял своё мнение на 180 градусов? О чём?"),
         QStringLiteral("Что, по-твоему, делает человека по-настоящему взрослым?"),
@@ -350,7 +395,15 @@ const QStringList& CuriosityEngine::casualPool()
         QStringLiteral("Если бы завтра ты мог проснуться с новым навыком — каким?"),
         QStringLiteral("Какая музыка помогает тебе сосредоточиться?"),
     };
-    return pool;
+    static const QStringList en = {
+        QStringLiteral("If I could learn one thing from you, what would you teach me?"),
+        QStringLiteral("Have you ever completely changed your mind about something? What was it?"),
+        QStringLiteral("What do you think actually makes someone a real adult?"),
+        QStringLiteral("Is being alone a bad thing, or sometimes exactly what you need?"),
+        QStringLiteral("If you could wake up tomorrow with a new skill, which one?"),
+        QStringLiteral("What music helps you focus?"),
+    };
+    return english ? en : ru;
 }
 
 // ============================================================
@@ -363,6 +416,7 @@ QString CuriosityEngine::buildVisualContextQuestion() const
 
     const QString& app = m_visualCtx.activeApp;
     const QStringList& tokens = m_visualCtx.contextTokens;
+    const bool en = m_uiEnglish;
 
     // Error context — offer debugging help
     if (tokens.contains(QStringLiteral("error"))
@@ -370,48 +424,59 @@ QString CuriosityEngine::buildVisualContextQuestion() const
         if (app == QStringLiteral("CLion")
             || app == QStringLiteral("JetBrains Rider")
             || app == QStringLiteral("VS Code"))
-            return QStringLiteral("Я заметил ошибки в %1 — хочешь, помогу разобраться? 🔍").arg(app);
+            return en ? QStringLiteral("I noticed some errors in %1 — want help figuring it out? 🔍").arg(app)
+                      : QStringLiteral("Я заметил ошибки в %1 — хочешь, помогу разобраться? 🔍").arg(app);
 
         if (app == QStringLiteral("Unreal Engine"))
-            return QStringLiteral("В Unreal вылезли ошибки — скинь лог, я посмотрю что там 🔧");
+            return en ? QStringLiteral("Unreal's throwing errors — send me the log, I'll take a look 🔧")
+                      : QStringLiteral("В Unreal вылезли ошибки — скинь лог, я посмотрю что там 🔧");
 
-        return QStringLiteral("Похоже, что-то пошло не так в %1. Могу помочь?").arg(app);
+        return en ? QStringLiteral("Looks like something went wrong in %1. Need help?").arg(app)
+                  : QStringLiteral("Похоже, что-то пошло не так в %1. Могу помочь?").arg(app);
     }
 
     // Build / compile context
     if (tokens.contains(QStringLiteral("build"))) {
-        return QStringLiteral("Собираешь проект? Если билд упадёт — зови, разберёмся вместе 🏗️");
+        return en ? QStringLiteral("Building the project? If it fails, call me — we'll sort it out 🏗️")
+                  : QStringLiteral("Собираешь проект? Если билд упадёт — зови, разберёмся вместе 🏗️");
     }
 
     // Debug context
     if (tokens.contains(QStringLiteral("debug"))) {
-        return QStringLiteral("Вижу, ты в режиме дебага. Нашёл баг? Расскажи — может, подскажу 🐛");
+        return en ? QStringLiteral("Looks like you're debugging. Found a bug? Tell me — might have an idea 🐛")
+                  : QStringLiteral("Вижу, ты в режиме дебага. Нашёл баг? Расскажи — может, подскажу 🐛");
     }
 
     // 3D / art context (Blender, UE viewport)
     if (tokens.contains(QStringLiteral("3d_work"))) {
         if (app == QStringLiteral("Blender"))
-            return QStringLiteral("Работаешь в Blender! Что моделируешь? 🎨");
-        return QStringLiteral("Вижу 3D-работу в %1 — над чем трудишься?").arg(app);
+            return en ? QStringLiteral("Working in Blender! What are you modeling? 🎨")
+                      : QStringLiteral("Работаешь в Blender! Что моделируешь? 🎨");
+        return en ? QStringLiteral("Looks like 3D work in %1 — what are you making?").arg(app)
+                  : QStringLiteral("Вижу 3D-работу в %1 — над чем трудишься?").arg(app);
     }
 
     // Blueprint / visual scripting
     if (tokens.contains(QStringLiteral("blueprint"))) {
-        return QStringLiteral("Blueprint-график открыт! Сложная логика? Могу помочь с архитектурой 📐");
+        return en ? QStringLiteral("Blueprint graph is open! Tricky logic? I can help with the architecture 📐")
+                  : QStringLiteral("Blueprint-график открыт! Сложная логика? Могу помочь с архитектурой 📐");
     }
 
     // Git context
     if (tokens.contains(QStringLiteral("git"))) {
-        return QStringLiteral("Вижу git-операции — готовишь коммит или мёрж? Не забудь про тесты! 🔀");
+        return en ? QStringLiteral("Looks like git activity — preparing a commit or merge? Don't skip the tests! 🔀")
+                  : QStringLiteral("Вижу git-операции — готовишь коммит или мёрж? Не забудь про тесты! 🔀");
     }
 
     // Source file open — general coding question
     if (tokens.contains(QStringLiteral("source_file"))) {
-        return QStringLiteral("Вижу, работаешь с кодом в %1. Над какой задачей?").arg(app);
+        return en ? QStringLiteral("Looks like you're coding in %1. What are you working on?").arg(app)
+                  : QStringLiteral("Вижу, работаешь с кодом в %1. Над какой задачей?").arg(app);
     }
 
     // Generic app-specific fallback
-    return QStringLiteral("Заметил, ты в %1 — как дела? Нужна помощь с чем-нибудь?").arg(app);
+    return en ? QStringLiteral("Noticed you're in %1 — how's it going? Need help with anything?").arg(app)
+              : QStringLiteral("Заметил, ты в %1 — как дела? Нужна помощь с чем-нибудь?").arg(app);
 }
 
 // ============================================================
@@ -443,17 +508,17 @@ QString CuriosityEngine::pickQuestion(ProactiveCategory category) const
 
     const QStringList* pool = nullptr;
     switch (category) {
-    case ProactiveCategory::Philosophy:     pool = &philosophyPool();  break;
-    case ProactiveCategory::WellBeing:      pool = &wellBeingPool();   break;
-    case ProactiveCategory::ProjectCheckIn: pool = &projectPool();     break;
-    case ProactiveCategory::TechCuriosity:  pool = &techPool();        break;
-    case ProactiveCategory::TimeAwareness:  pool = &lateNightPool();   break;
-    case ProactiveCategory::Casual:         pool = &casualPool();      break;
+    case ProactiveCategory::Philosophy:     pool = &philosophyPool(m_uiEnglish);  break;
+    case ProactiveCategory::WellBeing:      pool = &wellBeingPool(m_uiEnglish);   break;
+    case ProactiveCategory::ProjectCheckIn: pool = &projectPool(m_uiEnglish);     break;
+    case ProactiveCategory::TechCuriosity:  pool = &techPool(m_uiEnglish);        break;
+    case ProactiveCategory::TimeAwareness:  pool = &lateNightPool(m_uiEnglish);   break;
+    case ProactiveCategory::Casual:         pool = &casualPool(m_uiEnglish);      break;
     default: break;
     }
 
     if (!pool || pool->isEmpty())
-        return QStringLiteral("Как дела? 🙂");
+        return m_uiEnglish ? QStringLiteral("How's it going? 🙂") : QStringLiteral("Как дела? 🙂");
 
     const int idx = QRandomGenerator::global()->bounded(pool->size());
     return pool->at(idx);
@@ -469,23 +534,31 @@ QString CuriosityEngine::buildDoubtVerificationQuestion() const
     if (doubts.isEmpty()) return QString();
 
     const DoubtEntry& d = doubts.first();
+    const bool en = m_uiEnglish;
 
     // Build a humble, specific question
     QString question;
-    question += QStringLiteral("Я тут изучал материалы и наткнулся на кое-что, "
-                               "но не уверен, правильно ли я понял.\n\n");
-    question += QStringLiteral("📖 Я прочитал: _\"") + d.content.left(200)
-                + QStringLiteral("\"_\n\n");
-
-    question += QStringLiteral("❓ Но у меня сомнение: ") + d.doubtReason + QStringLiteral("\n\n");
-
-    if (!d.sourceRef.isEmpty()) {
-        question += QStringLiteral("📎 Источник: `")
-                    + QFileInfo(d.sourceRef).fileName()
-                    + QStringLiteral("`\n\n");
+    if (en) {
+        question += QStringLiteral("I was going through some material and came across "
+                                   "something, but I'm not sure I understood it right.\n\n");
+        question += QStringLiteral("📖 I read: _\"") + d.content.left(200) + QStringLiteral("\"_\n\n");
+        question += QStringLiteral("❓ But I have a doubt: ") + d.doubtReason + QStringLiteral("\n\n");
+        if (!d.sourceRef.isEmpty())
+            question += QStringLiteral("📎 Source: `") + QFileInfo(d.sourceRef).fileName() + QStringLiteral("`\n\n");
+        question += QStringLiteral("Did I get it right, or am I off? Correct me if so.");
+    } else {
+        question += QStringLiteral("Я тут изучал материалы и наткнулся на кое-что, "
+                                   "но не уверен, правильно ли я понял.\n\n");
+        question += QStringLiteral("📖 Я прочитал: _\"") + d.content.left(200)
+                    + QStringLiteral("\"_\n\n");
+        question += QStringLiteral("❓ Но у меня сомнение: ") + d.doubtReason + QStringLiteral("\n\n");
+        if (!d.sourceRef.isEmpty()) {
+            question += QStringLiteral("📎 Источник: `")
+                        + QFileInfo(d.sourceRef).fileName()
+                        + QStringLiteral("`\n\n");
+        }
+        question += QStringLiteral("Я правильно понял, или ошибаюсь? Поправь меня, если что.");
     }
-
-    question += QStringLiteral("Я правильно понял, или ошибаюсь? Поправь меня, если что.");
 
     return question;
 }
@@ -499,7 +572,8 @@ QString CuriosityEngine::buildPersonalProfilingQuestion() const
     auto& prof = UserProfileExtended::instance();
     const QString uid = prof.currentUserId();
     const QString nick = prof.nickname();
-    const QString name = nick.isEmpty() ? QStringLiteral("Boss") : nick;
+    const bool en = m_uiEnglish;
+    const QString name = nick.isEmpty() ? (en ? QStringLiteral("Boss") : QStringLiteral("Босс")) : nick;
 
     // Priority 1: empty required fields
     const auto empty = prof.emptyRequiredFields(uid);
@@ -507,29 +581,43 @@ QString CuriosityEngine::buildPersonalProfilingQuestion() const
         const QString& field = empty.first();
 
         if (field == QStringLiteral("nickname"))
-            return QStringLiteral("Кстати, %1, как мне тебя называть? "
-                                  "Можешь задать никнейм в профиле, "
-                                  "или просто скажи — я запомню.").arg(name);
+            return en ? QStringLiteral("By the way, %1, what should I call you? "
+                                       "You can set a nickname in your profile, "
+                                       "or just tell me — I'll remember.").arg(name)
+                      : QStringLiteral("Кстати, %1, как мне тебя называть? "
+                                       "Можешь задать никнейм в профиле, "
+                                       "или просто скажи — я запомню.").arg(name);
 
         if (field == QStringLiteral("active_hours_start")
             || field == QStringLiteral("active_hours_end"))
-            return QStringLiteral("%1, в какие часы ты обычно работаешь? "
-                                  "Хочу знать, когда лучше тебя не трогать, "
-                                  "а когда можно спрашивать.").arg(name);
+            return en ? QStringLiteral("%1, what hours do you usually work? "
+                                       "I want to know when it's best not to bother you, "
+                                       "and when it's fine to ask.").arg(name)
+                      : QStringLiteral("%1, в какие часы ты обычно работаешь? "
+                                       "Хочу знать, когда лучше тебя не трогать, "
+                                       "а когда можно спрашивать.").arg(name);
 
         if (field == QStringLiteral("dev_style"))
-            return QStringLiteral("%1, ты какой разработчик? "
-                                  "Любишь TDD и чистый код, или «сначала работает — потом рефакторим»? "
-                                  "Мне это поможет давать более точные советы.").arg(name);
+            return en ? QStringLiteral("%1, what kind of developer are you? "
+                                       "TDD and clean code, or \"make it work first, refactor later\"? "
+                                       "It'll help me give more accurate advice.").arg(name)
+                      : QStringLiteral("%1, ты какой разработчик? "
+                                       "Любишь TDD и чистый код, или «сначала работает — потом рефакторим»? "
+                                       "Мне это поможет давать более точные советы.").arg(name);
 
         if (field == QStringLiteral("ui_accent_color"))
-            return QStringLiteral("%1, у тебя есть предпочитаемый цвет для UI? "
-                                  "Я могу подстроить интерфейс под тебя.").arg(name);
+            return en ? QStringLiteral("%1, do you have a preferred UI color? "
+                                       "I can adjust the interface for you.").arg(name)
+                      : QStringLiteral("%1, у тебя есть предпочитаемый цвет для UI? "
+                                       "Я могу подстроить интерфейс под тебя.").arg(name);
 
         if (field == QStringLiteral("mesh_role"))
-            return QStringLiteral("%1, этот компьютер — твоя основная рабочая станция (primary) "
-                                  "или дополнительный узел (secondary)? "
-                                  "Это определит, как я буду обрабатывать тяжёлые данные.").arg(name);
+            return en ? QStringLiteral("%1, is this PC your main workstation (primary) "
+                                       "or a secondary node? "
+                                       "That determines how I'll handle heavy data.").arg(name)
+                      : QStringLiteral("%1, этот компьютер — твоя основная рабочая станция (primary) "
+                                       "или дополнительный узел (secondary)? "
+                                       "Это определит, как я буду обрабатывать тяжёлые данные.").arg(name);
     }
 
     // Priority 2: low-confidence fields
@@ -537,11 +625,16 @@ QString CuriosityEngine::buildPersonalProfilingQuestion() const
     if (!lowConf.isEmpty()) {
         const ProfileField& f = lowConf.first();
 
-        return QStringLiteral("%1, я заметил, что твой профиль указывает «%2 = %3», "
-                              "но я не очень уверен в этом (confidence: %4). "
-                              "Это всё ещё актуально, или стоит обновить?")
-            .arg(name, f.key, f.value.toString(),
-                 QString::number(f.confidence, 'f', 2));
+        return en ? QStringLiteral("%1, I noticed your profile has \"%2 = %3\", "
+                                   "but I'm not very confident about it (confidence: %4). "
+                                   "Is that still accurate, or should it be updated?")
+                        .arg(name, f.key, f.value.toString(),
+                             QString::number(f.confidence, 'f', 2))
+                  : QStringLiteral("%1, я заметил, что твой профиль указывает «%2 = %3», "
+                                   "но я не очень уверен в этом (confidence: %4). "
+                                   "Это всё ещё актуально, или стоит обновить?")
+                        .arg(name, f.key, f.value.toString(),
+                             QString::number(f.confidence, 'f', 2));
     }
 
     return QString();
@@ -572,13 +665,25 @@ void CuriosityEngine::postContextAwareQuestion()
     }
 
     const QString msg = prefix + question;
-    m_gateway->sendOutboundMessage(m_targetChatId, msg);
+
+    // Track this as the pending question so the next incoming message
+    // (button tap or free text) can be recognized as its answer instead
+    // of being routed into normal chat/LLM handling.
+    m_pendingQuestion  = question;
+    m_pendingChatId    = m_targetChatId;
+    m_pendingTimestamp = QDateTime::currentDateTime();
+    m_pendingCategory  = category;
+
+    m_gateway->sendProactiveQuestion(m_targetChatId, msg, m_uiEnglish);
 
     m_lastQuestionTime = QDateTime::currentDateTime();
     m_messagesSinceLastQuestion = 0;
     ++m_sessionQuestionCount;
 
-    emit questionPosted(question);
+    const QStringList options = m_uiEnglish
+        ? QStringList{ QStringLiteral("Yes"), QStringLiteral("No") }
+        : QStringList{ QStringLiteral("Да"),  QStringLiteral("Нет") };
+    emit questionPosted(question, options);
     emit proactiveDialogue(question, category);
 
     qDebug() << "[CuriosityEngine] Proactive question ("
@@ -633,4 +738,38 @@ void CuriosityEngine::saveResponse(qint64 chatId,
         qWarning() << "[CuriosityEngine] Save error:" << q.lastError().text();
     else
         qDebug() << "[CuriosityEngine] Saved personality response from chat" << chatId;
+}
+
+// ============================================================
+//  Pending-question state — distinguishes "this is the answer"
+//  from an ordinary chat message
+// ============================================================
+
+void CuriosityEngine::expirePendingIfStale()
+{
+    if (m_pendingQuestion.isEmpty()) return;
+    if (m_pendingTimestamp.secsTo(QDateTime::currentDateTime())
+        > PENDING_ANSWER_WINDOW_MINUTES * 60) {
+        m_pendingQuestion.clear();
+        m_pendingChatId = 0;
+    }
+}
+
+bool CuriosityEngine::hasPendingQuestion() const
+{
+    const_cast<CuriosityEngine*>(this)->expirePendingIfStale();
+    return !m_pendingQuestion.isEmpty();
+}
+
+bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText)
+{
+    expirePendingIfStale();
+    if (m_pendingQuestion.isEmpty()) return false;
+    if (m_pendingChatId != 0 && chatId != 0 && m_pendingChatId != chatId) return false;
+
+    saveResponse(chatId != 0 ? chatId : m_pendingChatId, m_pendingQuestion, answerText);
+
+    m_pendingQuestion.clear();
+    m_pendingChatId = 0;
+    return true;
 }

@@ -58,6 +58,10 @@ public:
 
 signals:
     void registryChanged();
+    // Fired whenever a face is enrolled/updated locally or via mesh sync —
+    // lets ActivityTracker log it under the "appearance" training category
+    // without face_registry (platform) depending on intelligence code.
+    void faceEnrolled(const QString& name, const QString& status);
 
 private:
     explicit FaceRegistry(QObject* parent = nullptr);

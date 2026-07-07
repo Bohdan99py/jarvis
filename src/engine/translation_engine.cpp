@@ -7,6 +7,11 @@
 #include "activity_tracker.h"
 #include "database_manager.h"
 #include "voice_input.h"
+#include "j2j_mesh_connector.h"
+
+#include <QUuid>
+#include <QTimer>
+#include <memory>
 
 #ifdef JARVIS_VOSK_AVAILABLE
 #include "vosk_api.h"
@@ -130,6 +135,59 @@ void TranslationEngine::translateText(const QString& text, const QString& target
         } else {
             if (callback) callback(false, ok ? QStringLiteral("Empty response") : resp);
         }
+    });
+}
+
+// ============================================================
+//  Unknown-language lookup-and-remember loop
+// ============================================================
+
+void TranslationEngine::learnUnknownLanguageSnippet(const QString& text)
+{
+    const QString snippet = text.trimmed();
+    if (snippet.length() < 4) return;
+
+    auto rememberTranslation = [this, snippet](const QString& translated) {
+        if (m_tracker && !translated.trimmed().isEmpty()) {
+            m_tracker->learnFact(m_userId, QStringLiteral("language"),
+                                 snippet.left(80), translated.trimmed(), 0.7f);
+        }
+    };
+
+    if (!m_mesh) {
+        translateText(snippet, QStringLiteral("ru"),
+            [rememberTranslation](bool ok, const QString& translated) {
+                if (ok) rememberTranslation(translated);
+            });
+        return;
+    }
+
+    // Ask mesh peers first — "has anyone seen this phrase before?" — and
+    // only fall back to an LLM call if nobody answers in time.
+    const QString queryId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    auto answered = std::make_shared<bool>(false);
+    auto conn = std::make_shared<QMetaObject::Connection>();
+
+    *conn = connect(m_mesh, &J2JMeshConnector::knowledgeQueryResult, this,
+        [queryId, answered, conn, rememberTranslation]
+        (const QString& qid, const QString& fromNode, const QJsonArray& facts) {
+        if (qid != queryId || *answered || facts.isEmpty()) return;
+        *answered = true;
+        QObject::disconnect(*conn);
+        qDebug() << "[TranslationEngine] Peer" << fromNode << "answered unknown-language query" << queryId;
+        rememberTranslation(facts.first().toObject()[QStringLiteral("value")].toString());
+    });
+
+    m_mesh->requestKnowledge(queryId, snippet);
+
+    QTimer::singleShot(4000, this, [this, answered, conn, snippet, rememberTranslation]() {
+        if (*answered) return;
+        *answered = true;
+        QObject::disconnect(*conn);
+        translateText(snippet, QStringLiteral("ru"),
+            [rememberTranslation](bool ok, const QString& translated) {
+                if (ok) rememberTranslation(translated);
+            });
     });
 }
 
