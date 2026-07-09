@@ -15,6 +15,12 @@
 #include "attachments_manager.h"
 #include "brain.h"
 #include "pc_command_registry.h"
+#include "pc_controller.h"
+#include "file_organizer.h"
+#include "local_trainer.h"
+#include "background_learner.h"
+#include <QTimer>
+#include <QSettings>
 #include "database_manager.h"
 #include <QSqlQuery>
 #include <QSqlDatabase>
@@ -105,6 +111,43 @@ Jarvis::Jarvis(QObject* parent)
     m_trainingPipeline->setUserId(m_currentUserId);
     m_trainingPipeline->setDatasetPath(JarvisPaths::subPath(QStringLiteral("training_export")));
     m_trainingPipeline->start(10);
+
+    // Self-tuning: bake newly liked replies into a personalized Ollama
+    // model automatically — no more manual "Start Training" click, and
+    // no dependency on the .jsonl export (which nothing else reads).
+    m_localTrainer = new LocalTrainer(this);
+    connect(m_localTrainer, &LocalTrainer::trainingFinished, this,
+            [this](bool success, const QString& message) {
+        if (!success) {
+            qWarning() << "[Jarvis] Auto-tune failed:" << message;
+            return;
+        }
+        QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
+        cfg.setValue(QStringLiteral("autotrain/lastLikedCount"),
+                     DatabaseManager::instance().trainingLogCount(m_currentUserId, 1));
+        qDebug() << "[Jarvis] Auto-tune finished:" << message;
+    });
+
+    m_autoTrainTimer = new QTimer(this);
+    connect(m_autoTrainTimer, &QTimer::timeout, this, [this]() {
+        static constexpr int MIN_NEW_LIKES = 15;
+        if (!m_localTrainer->isOllamaAvailable()) return;
+
+        const int likedNow = DatabaseManager::instance().trainingLogCount(m_currentUserId, 1);
+        QSettings cfg(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"));
+        const int baseline = cfg.value(QStringLiteral("autotrain/lastLikedCount"), 0).toInt();
+
+        if (likedNow - baseline >= MIN_NEW_LIKES)
+            m_localTrainer->train(&DatabaseManager::instance());
+    });
+    m_autoTrainTimer->start(60 * 60 * 1000); // check hourly
+
+    // Behavior-pattern learning — the class existed and was described in
+    // UI tooltips as active, but was never actually instantiated anywhere.
+    m_backgroundLearner = new BackgroundLearner(this);
+    if (m_indexer && !m_indexer->projectRoot().isEmpty())
+        m_backgroundLearner->setWatchPaths({m_indexer->projectRoot()});
+    m_backgroundLearner->start();
 
     // J2J Mesh: peer-to-peer network for multi-instance knowledge sync
     m_mesh = new J2JMeshConnector(this);
@@ -311,6 +354,7 @@ Jarvis::~Jarvis()
 {
     m_mesh->stop();
     m_trainingPipeline->stop();
+    if (m_backgroundLearner) m_backgroundLearner->stop();
     m_predictor->savePatterns();
     m_memory->savePersistent();
     m_indexer->saveIndex();
@@ -2911,4 +2955,25 @@ bool Jarvis::updateTaskStatus(qint64 taskId, const QString& newStatus)
 QString Jarvis::getOverdueTasksSummary() const
 {
     return TaskNotifications::checkDeadlines(m_currentUserId, m_uiEnglish);
+}
+
+// ============================================================
+// FileOrganizer facade
+// ============================================================
+
+bool Jarvis::organizePathAllowed(const QString& path)
+{
+    return SystemController::isPathAllowedForOrganize(path);
+}
+
+QString Jarvis::organizeApplyPlan(const OrganizePlan& plan)
+{
+    if (!m_pcCommands) return QString();
+    return FileOrganizer::instance().applyPlan(plan, m_pcCommands->controller()->system());
+}
+
+bool Jarvis::organizeUndoLast()
+{
+    if (!m_pcCommands) return false;
+    return FileOrganizer::instance().undoLastBatch(m_pcCommands->controller()->system());
 }

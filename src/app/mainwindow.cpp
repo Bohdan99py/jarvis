@@ -50,6 +50,7 @@
 #include "profile_setup_dialog.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
+#include "file_organizer.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -97,6 +98,7 @@
 #include <QMimeData>
 #include <QToolTip>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QCoreApplication>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -1577,6 +1579,52 @@ void MainWindow::buildMenuBar()
         connect(actChatHistory, &QAction::triggered, this, [this]() {
             ChatHistoryDialog dlg(m_jarvis->currentUserId(), IS_EN, this);
             dlg.exec();
+        });
+
+        auto* actOrganize = taskMenu->addAction(
+            IS_EN ? QStringLiteral("🗂 Organize Folder...")
+                  : QStringLiteral("🗂 Организовать папку..."));
+        connect(actOrganize, &QAction::triggered, this, [this]() {
+            const QString startDir =
+                QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+            QString folder = QFileDialog::getExistingDirectory(this,
+                IS_EN ? QStringLiteral("Choose a folder to organize")
+                      : QStringLiteral("Выберите папку для организации"),
+                startDir);
+            if (folder.isEmpty()) return;
+
+            if (!Jarvis::organizePathAllowed(folder)) {
+                appendLog(Str::logJarvis(),
+                    IS_EN ? QStringLiteral("❌ This folder isn't in the allowed roots "
+                                           "(Downloads/Desktop/Documents/Pictures).")
+                          : QStringLiteral("❌ Эта папка вне разрешённых корней "
+                                           "(Загрузки/Рабочий стол/Документы/Изображения)."),
+                    Theme::LogColors::error);
+                return;
+            }
+
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("🔍 Scanning folder — this may take a moment for ambiguous files...")
+                      : QStringLiteral("🔍 Сканирую папку — для неоднозначных файлов это может занять время..."),
+                Theme::LogColors::system);
+
+            FileOrganizer::instance().setLlmApi(m_jarvis->claudeApi());
+            FileOrganizer::instance().buildPlan(folder, [this](const OrganizePlan& plan) {
+                showOrganizePlanDialog(plan);
+            });
+        });
+
+        auto* actUndoOrganize = taskMenu->addAction(
+            IS_EN ? QStringLiteral("↩ Undo Last Organize")
+                  : QStringLiteral("↩ Отменить последнюю организацию"));
+        connect(actUndoOrganize, &QAction::triggered, this, [this]() {
+            const bool ok = m_jarvis->organizeUndoLast();
+            appendLog(Str::logJarvis(),
+                ok ? (IS_EN ? QStringLiteral("↩ Last organize batch undone.")
+                            : QStringLiteral("↩ Последняя организация отменена."))
+                   : (IS_EN ? QStringLiteral("Nothing to undo.")
+                            : QStringLiteral("Нечего отменять.")),
+                Theme::LogColors::system);
         });
 
         auto* actQuickAdd = taskMenu->addAction(
@@ -3756,6 +3804,44 @@ void MainWindow::onSend()
         }
     }
 
+    // ── 1.2 Организация файлов ("организуй загрузки") ────
+    // Content-aware auto-sort — always shows a plan for confirmation
+    // (FileOrganizer::buildPlan never touches disk by itself).
+    {
+        const QString lo = text.toLower();
+        static const QStringList kOrganizeTriggers = {
+            QStringLiteral("организуй"), QStringLiteral("рассортируй"),
+            QStringLiteral("разбери"),   QStringLiteral("organize"), QStringLiteral("sort out"),
+        };
+        bool isOrganize = false;
+        for (const QString& t : kOrganizeTriggers) {
+            if (lo.contains(t)) { isOrganize = true; break; }
+        }
+        if (isOrganize) {
+            QStandardPaths::StandardLocation loc = QStandardPaths::DownloadLocation;
+            if (lo.contains(QStringLiteral("рабочий стол")) || lo.contains(QStringLiteral("desktop")))
+                loc = QStandardPaths::DesktopLocation;
+            else if (lo.contains(QStringLiteral("документ")) || lo.contains(QStringLiteral("document")))
+                loc = QStandardPaths::DocumentsLocation;
+            else if (lo.contains(QStringLiteral("изображени")) || lo.contains(QStringLiteral("picture")))
+                loc = QStandardPaths::PicturesLocation;
+
+            const QString folder = QStandardPaths::writableLocation(loc);
+            appendLog(Str::logSender(), text, Theme::LogColors::user);
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("🔍 Scanning %1...").arg(folder)
+                      : QStringLiteral("🔍 Сканирую %1...").arg(folder),
+                Theme::LogColors::system);
+
+            FileOrganizer::instance().setLlmApi(m_jarvis->claudeApi());
+            FileOrganizer::instance().buildPlan(folder, [this](const OrganizePlan& plan) {
+                showOrganizePlanDialog(plan);
+            });
+            m_input->setFocus();
+            return;
+        }
+    }
+
     // ── 1.5 Контекстные подсказки браузера ──────────────
     // "хочу посмотреть что-нибудь" → предлагает YouTube (без явного "открой")
     {
@@ -4005,6 +4091,79 @@ void MainWindow::onSend()
     }
 
     m_input->setFocus();
+}
+
+// ============================================================
+// FileOrganizer — план организации папки, требует подтверждения
+// ============================================================
+
+void MainWindow::showOrganizePlanDialog(const OrganizePlan& plan)
+{
+    if (plan.items.isEmpty()) {
+        appendLog(Str::logJarvis(),
+            IS_EN ? QStringLiteral("Folder is already empty — nothing to organize.")
+                  : QStringLiteral("Папка пуста — организовывать нечего."),
+            Theme::LogColors::system);
+        return;
+    }
+
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("Organize: %1").arg(plan.targetFolder)
+                              : QStringLiteral("Организация: %1").arg(plan.targetFolder));
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->setMinimumSize(440, 340);
+    auto* layout = new QVBoxLayout(dlg);
+
+    auto* title = new QLabel(IS_EN
+        ? QStringLiteral("📦 Proposed organization (%1 files):").arg(plan.items.size())
+        : QStringLiteral("📦 Предложенная организация (%1 файлов):").arg(plan.items.size()),
+        dlg);
+    layout->addWidget(title);
+
+    for (const auto& pair : plan.categoryCounts()) {
+        const QString& category = pair.first;
+        const int count = pair.second;
+        const QString icon = (category == QStringLiteral("Нераспознано"))
+            ? QStringLiteral("❓") : QStringLiteral("📁");
+        auto* row = new QLabel(QStringLiteral("%1 %2  —  %3")
+            .arg(icon, category,
+                 IS_EN ? QStringLiteral("%1 file(s)").arg(count)
+                       : QStringLiteral("%1 файл(ов)").arg(count)), dlg);
+        layout->addWidget(row);
+    }
+
+    auto* note = new QLabel(IS_EN
+        ? QStringLiteral("\"Нераспознано\" items are left untouched — only confidently "
+                         "classified files are moved. Every move is logged and can be undone.")
+        : QStringLiteral("Файлы категории «Нераспознано» не трогаются — перемещаются только "
+                         "уверенно классифицированные. Каждое перемещение можно отменить."),
+        dlg);
+    note->setWordWrap(true);
+    note->setStyleSheet(QStringLiteral("color: gray; font-size: 11px;"));
+    layout->addWidget(note);
+    layout->addStretch(1);
+
+    auto* btnRow = new QHBoxLayout();
+    auto* applyBtn  = new QPushButton(IS_EN ? QStringLiteral("✅ Apply") : QStringLiteral("✅ Применить"), dlg);
+    auto* cancelBtn = new QPushButton(IS_EN ? QStringLiteral("❌ Cancel") : QStringLiteral("❌ Отмена"), dlg);
+    btnRow->addWidget(applyBtn);
+    btnRow->addWidget(cancelBtn);
+    layout->addLayout(btnRow);
+
+    connect(cancelBtn, &QPushButton::clicked, dlg, &QDialog::close);
+    connect(applyBtn, &QPushButton::clicked, dlg, [this, plan, dlg]() {
+        const QString batchId = m_jarvis->organizeApplyPlan(plan);
+        appendLog(Str::logJarvis(),
+            !batchId.isEmpty()
+                ? (IS_EN ? QStringLiteral("✅ Organized. Undo with \"Undo Last Organize\" if needed.")
+                         : QStringLiteral("✅ Организовано. При необходимости — «Отменить последнюю организацию»."))
+                : (IS_EN ? QStringLiteral("Nothing was moved.")
+                         : QStringLiteral("Ничего не было перемещено.")),
+            Theme::LogColors::system);
+        dlg->close();
+    });
+
+    dlg->show();
 }
 
 // ============================================================

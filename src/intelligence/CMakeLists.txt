@@ -51,6 +51,8 @@ add_library(jarvis_intelligence OBJECT
     project_indexer.cpp
     code_actions.h
     code_actions.cpp
+    file_organizer.h
+    file_organizer.cpp
 )
 
 target_include_directories(jarvis_intelligence PUBLIC
@@ -59,6 +61,7 @@ target_include_directories(jarvis_intelligence PUBLIC
 
 target_include_directories(jarvis_intelligence PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../network
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform
 )
 
 target_link_libraries(jarvis_intelligence

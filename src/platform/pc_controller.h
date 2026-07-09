@@ -244,6 +244,20 @@ public:
                           const QString& rootPath = QStringLiteral("C:\\"),
                           int maxResults = 10) const;
 
+    // ── Safe file organization primitives ───────────────────────
+    // Every operation below is restricted to a small allow-list of
+    // user folders (Downloads/Desktop/Documents/Pictures) and always
+    // rejects system paths (Windows, Program Files, ProgramData, etc.)
+    // regardless of the allow-list — used by FileOrganizer and the
+    // "создай папку/перемести файл" voice commands.
+    static QStringList allowedOrganizeRoots();
+    static bool isPathAllowedForOrganize(const QString& path);
+
+    bool createFolder(const QString& path);
+    bool moveFile(const QString& sourcePath, const QString& destPath);
+    bool copyFile(const QString& sourcePath, const QString& destPath);
+    bool renameFile(const QString& sourcePath, const QString& newName);
+
 signals:
     void volumeChanged(int percent);
     void errorOccurred(const QString& message);

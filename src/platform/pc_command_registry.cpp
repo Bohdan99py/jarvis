@@ -23,6 +23,7 @@
 #include <QStringList>
 #include <QThread>
 #include <QFile>
+#include <QStandardPaths>
 #include <QFileInfo>
 #include <QDir>
 #include <QDirIterator>
@@ -638,6 +639,63 @@ void PcCommandRegistry::registerFileCommands(CommandRegistry& r)
             return QStringLiteral("%1: %2 MB").arg(dir.dirName()).arg(mb, 0, 'f', 1);
         },
         QStringLiteral("folder size <path>"),
+        /*prefixMatch=*/true);
+
+    r.registerCommand({"создай папку", "create folder"},
+        [sys](const QString& full) -> QString {
+            QString name = remainderAfter(full, QStringLiteral("папку"));
+            if (name.isEmpty()) name = remainderAfter(full, QStringLiteral("folder"));
+            name = name.trimmed().remove(QLatin1Char('"'));
+            if (name.isEmpty()) return QStringLiteral("Specify a folder name");
+
+            const QString path = QDir(QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation)).filePath(name);
+            return sys->createFolder(path)
+                ? QStringLiteral("Created: ") + path
+                : QStringLiteral("Failed to create folder: ") + path;
+        },
+        QStringLiteral("create folder <name> — creates it on the Desktop"),
+        /*prefixMatch=*/true);
+
+    r.registerCommand({"перемести файл", "move file"},
+        [sys](const QString& full) -> QString {
+            QString rest = remainderAfter(full, QStringLiteral("файл"));
+            if (rest.isEmpty()) rest = remainderAfter(full, QStringLiteral("file"));
+            if (rest.isEmpty())
+                return QStringLiteral("Specify: move file <name> to <folder>");
+
+            int sepIdx = rest.indexOf(QStringLiteral(" в "), 0, Qt::CaseInsensitive);
+            if (sepIdx < 0) sepIdx = rest.indexOf(QStringLiteral(" to "), 0, Qt::CaseInsensitive);
+            if (sepIdx < 0) return QStringLiteral("Specify a destination — e.g. '... в документы'");
+
+            const QString fileName  = rest.left(sepIdx).trimmed().remove(QLatin1Char('"'));
+            const QString destAlias = rest.mid(sepIdx + 3).trimmed().toLower();
+            if (fileName.isEmpty()) return QStringLiteral("Specify a file name");
+
+            QStandardPaths::StandardLocation destLoc = QStandardPaths::DownloadLocation;
+            if (destAlias.contains(QStringLiteral("рабоч")) || destAlias.contains(QStringLiteral("desktop")))
+                destLoc = QStandardPaths::DesktopLocation;
+            else if (destAlias.contains(QStringLiteral("документ")) || destAlias.contains(QStringLiteral("document")))
+                destLoc = QStandardPaths::DocumentsLocation;
+            else if (destAlias.contains(QStringLiteral("изображени")) || destAlias.contains(QStringLiteral("picture")))
+                destLoc = QStandardPaths::PicturesLocation;
+
+            // Source must already live inside one of the allowed roots.
+            QString sourcePath;
+            for (const QString& root : SystemController::allowedOrganizeRoots()) {
+                if (root.isEmpty()) continue;
+                const QStringList found = sys->findFiles(QStringLiteral("*%1*").arg(fileName), root, 1);
+                if (!found.isEmpty()) { sourcePath = found.first(); break; }
+            }
+            if (sourcePath.isEmpty()) return QStringLiteral("File not found: ") + fileName;
+
+            const QString destDir  = QStandardPaths::writableLocation(destLoc);
+            const QString destPath = QDir(destDir).filePath(QFileInfo(sourcePath).fileName());
+            return sys->moveFile(sourcePath, destPath)
+                ? QStringLiteral("Moved to: ") + destPath
+                : QStringLiteral("Failed to move: ") + sourcePath;
+        },
+        QStringLiteral("move file <name> to <folder> — e.g. 'move file report.pdf to documents'"),
         /*prefixMatch=*/true);
 }
 

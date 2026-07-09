@@ -24,6 +24,9 @@
 #include <QClipboard>
 #include <QDir>
 #include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
 
 // ============================================================
 //  Helpers
@@ -767,6 +770,116 @@ QStringList SystemController::findFiles(const QString& pattern,
     while (it.hasNext() && found.size() < maxResults)
         found << it.next();
     return found;
+}
+
+// ============================================================
+//  SystemController — safe file organization primitives
+// ============================================================
+
+QStringList SystemController::allowedOrganizeRoots()
+{
+    return {
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
+        QStandardPaths::writableLocation(QStandardPaths::DesktopLocation),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        QStandardPaths::writableLocation(QStandardPaths::PicturesLocation),
+    };
+}
+
+bool SystemController::isPathAllowedForOrganize(const QString& path)
+{
+    if (path.trimmed().isEmpty()) return false;
+
+    // Resolve to an absolute path without requiring the target to exist
+    // yet (createFolder/moveFile destinations may not exist), but still
+    // normalize "." / ".." segments.
+    const QString abs = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+
+    // Hard-blocked regardless of allow-list — belt and suspenders even
+    // though these would never match an allowed root below.
+    static const QStringList blocked = {
+        QDir::cleanPath(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)),
+        QStringLiteral("C:/Windows"), QStringLiteral("C:/Program Files"),
+        QStringLiteral("C:/Program Files (x86)"), QStringLiteral("C:/ProgramData"),
+    };
+    for (const QString& b : blocked) {
+        if (!b.isEmpty() && (abs == b || abs.startsWith(b + QLatin1Char('/'), Qt::CaseInsensitive)))
+            return false;
+    }
+
+    for (const QString& root : allowedOrganizeRoots()) {
+        if (root.isEmpty()) continue;
+        const QString cleanRoot = QDir::cleanPath(root);
+        if (abs == cleanRoot || abs.startsWith(cleanRoot + QLatin1Char('/'), Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
+bool SystemController::createFolder(const QString& path)
+{
+    if (!isPathAllowedForOrganize(path)) {
+        emit errorOccurred(QStringLiteral("createFolder: path not in allowed roots: ") + path);
+        return false;
+    }
+    return QDir().mkpath(path);
+}
+
+bool SystemController::moveFile(const QString& sourcePath, const QString& destPath)
+{
+    if (!isPathAllowedForOrganize(sourcePath) || !isPathAllowedForOrganize(destPath)) {
+        emit errorOccurred(QStringLiteral("moveFile: path not in allowed roots"));
+        return false;
+    }
+    QFileInfo src(sourcePath);
+    if (!src.exists() || !src.isFile()) {
+        emit errorOccurred(QStringLiteral("moveFile: source does not exist: ") + sourcePath);
+        return false;
+    }
+    if (QFile::exists(destPath)) {
+        emit errorOccurred(QStringLiteral("moveFile: destination already exists: ") + destPath);
+        return false;
+    }
+    QDir().mkpath(QFileInfo(destPath).absolutePath());
+
+    if (QFile::rename(sourcePath, destPath))
+        return true;
+
+    // Cross-volume fallback: copy then remove the original.
+    if (QFile::copy(sourcePath, destPath))
+        return QFile::remove(sourcePath);
+
+    emit errorOccurred(QStringLiteral("moveFile: failed to move ") + sourcePath);
+    return false;
+}
+
+bool SystemController::copyFile(const QString& sourcePath, const QString& destPath)
+{
+    if (!isPathAllowedForOrganize(sourcePath) || !isPathAllowedForOrganize(destPath)) {
+        emit errorOccurred(QStringLiteral("copyFile: path not in allowed roots"));
+        return false;
+    }
+    QFileInfo src(sourcePath);
+    if (!src.exists() || !src.isFile()) {
+        emit errorOccurred(QStringLiteral("copyFile: source does not exist: ") + sourcePath);
+        return false;
+    }
+    if (QFile::exists(destPath)) {
+        emit errorOccurred(QStringLiteral("copyFile: destination already exists: ") + destPath);
+        return false;
+    }
+    QDir().mkpath(QFileInfo(destPath).absolutePath());
+    return QFile::copy(sourcePath, destPath);
+}
+
+bool SystemController::renameFile(const QString& sourcePath, const QString& newName)
+{
+    if (newName.contains(QLatin1Char('/')) || newName.contains(QLatin1Char('\\'))) {
+        emit errorOccurred(QStringLiteral("renameFile: newName must not contain a path"));
+        return false;
+    }
+    const QString destPath = QFileInfo(sourcePath).absoluteDir().filePath(newName);
+    return moveFile(sourcePath, destPath);
 }
 
 // ============================================================

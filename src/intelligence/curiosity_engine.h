@@ -153,6 +153,7 @@ private:
     qint64              m_pendingChatId    = 0;
     QDateTime           m_pendingTimestamp;
     ProactiveCategory   m_pendingCategory  = ProactiveCategory::Casual;
+    qint64              m_pendingDoubtId   = 0; // set when category == DoubtVerification
 
     static constexpr int MIN_IDLE_SECONDS = 300;
     static constexpr int MIN_MESSAGES_BETWEEN = 8;

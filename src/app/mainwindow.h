@@ -22,6 +22,7 @@
 #include <QStyle>
 
 class Jarvis;
+struct OrganizePlan;
 class VirtualKeyboardWidget;
 class QScrollArea;
 class QHBoxLayout;
@@ -111,6 +112,10 @@ private:
 
     void showClarification(const QString& question, const QStringList& options);
     void hideClarification();
+
+    // Автономная организация файлов (FileOrganizer) — показывает план
+    // и выполняет его только после подтверждения пользователем.
+    void showOrganizePlanDialog(const OrganizePlan& plan);
 
     void showUpdateBar(const QString& version);
     void hideUpdateBar();

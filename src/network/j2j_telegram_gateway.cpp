@@ -36,6 +36,7 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QDir>
+#include <QStandardPaths>
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -672,6 +673,71 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             sendFsListing(chatId, QString(), session.isEnglish);
             return;
         }
+        if (cmd == QStringLiteral("/organize")) {
+            TgChatSession& session = getOrCreateSession(chatId);
+            const bool en = session.isEnglish;
+            if (m_accessMgr->isSessionBoundElsewhere(chatId)) {
+                sendMessage(chatId, en
+                    ? QStringLiteral("❌ This chat is bound to a different PC. Use /pc to switch.")
+                    : QStringLiteral("❌ Этот чат привязан к другому ПК. Используйте /pc, чтобы переключиться."));
+                return;
+            }
+
+            const QString arg = effectiveText.section(QLatin1Char(' '), 1).trimmed().toLower();
+            QStandardPaths::StandardLocation loc = QStandardPaths::DownloadLocation;
+            if (arg == QStringLiteral("desktop") || arg == QStringLiteral("рабочий"))
+                loc = QStandardPaths::DesktopLocation;
+            else if (arg == QStringLiteral("documents") || arg == QStringLiteral("документы"))
+                loc = QStandardPaths::DocumentsLocation;
+            else if (arg == QStringLiteral("pictures") || arg == QStringLiteral("изображения"))
+                loc = QStandardPaths::PicturesLocation;
+
+            const QString folder = QStandardPaths::writableLocation(loc);
+            if (!Jarvis::organizePathAllowed(folder)) {
+                sendMessage(chatId, en ? QStringLiteral("❌ Folder not allowed.")
+                                       : QStringLiteral("❌ Папка недоступна."));
+                return;
+            }
+
+            sendMessage(chatId, en
+                ? QStringLiteral("🔍 Scanning `%1`...").arg(folder)
+                : QStringLiteral("🔍 Сканирую `%1`...").arg(folder));
+
+            if (m_jarvis) FileOrganizer::instance().setLlmApi(m_jarvis->claudeApi());
+            FileOrganizer::instance().buildPlan(folder, [this, chatId, en](const OrganizePlan& plan) {
+                TgChatSession& s = getOrCreateSession(chatId);
+                if (plan.items.isEmpty()) {
+                    sendMessage(chatId, en ? QStringLiteral("Folder is empty.")
+                                           : QStringLiteral("Папка пуста."));
+                    return;
+                }
+                s.pendingOrganizePlan = plan;
+                s.hasPendingOrganizePlan = true;
+
+                QString summary = en
+                    ? QStringLiteral("📦 *Proposed organization* (%1 files):\n\n").arg(plan.items.size())
+                    : QStringLiteral("📦 *Предложенная организация* (%1 файлов):\n\n").arg(plan.items.size());
+                for (const auto& pair : plan.categoryCounts()) {
+                    const QString icon = (pair.first == QStringLiteral("Нераспознано"))
+                        ? QStringLiteral("❓") : QStringLiteral("📁");
+                    summary += QStringLiteral("%1 %2 — %3\n").arg(icon, pair.first).arg(pair.second);
+                }
+                sendMessage(chatId, summary, buildConfirmButtons(
+                    QStringLiteral("organize_apply"), QStringLiteral("organize_cancel"), en));
+            });
+            return;
+        }
+        if (cmd == QStringLiteral("/undo_organize")) {
+            TgChatSession& session = getOrCreateSession(chatId);
+            const bool en = session.isEnglish;
+            const bool ok = m_jarvis && m_jarvis->organizeUndoLast();
+            sendMessage(chatId, ok
+                ? (en ? QStringLiteral("↩ Last organize batch undone.")
+                      : QStringLiteral("↩ Последняя организация отменена."))
+                : (en ? QStringLiteral("Nothing to undo.")
+                      : QStringLiteral("Нечего отменять.")));
+            return;
+        }
         if (cmd == QStringLiteral("/start") || cmd == QStringLiteral("/menu")) {
             TgChatSession& session = getOrCreateSession(chatId);
             session.wizardStep = QaWizardStep::Idle;
@@ -1025,6 +1091,30 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
                 ? QStringLiteral("Got it, thanks! 👍")
                 : QStringLiteral("Понял, спасибо! 👍"));
         }
+        return;
+    }
+
+    // ── /organize confirmation callbacks ─────────────────────────────
+    if (data == QStringLiteral("organize_apply") || data == QStringLiteral("organize_cancel")) {
+        if (!session.hasPendingOrganizePlan) {
+            sendMessage(chatId, en ? QStringLiteral("No pending plan.")
+                                   : QStringLiteral("Нет ожидающего плана."));
+            return;
+        }
+        if (data == QStringLiteral("organize_cancel")) {
+            session.hasPendingOrganizePlan = false;
+            sendMessage(chatId, en ? QStringLiteral("❌ Cancelled — nothing moved.")
+                                   : QStringLiteral("❌ Отменено — ничего не перемещено."));
+            return;
+        }
+        const QString batchId = m_jarvis
+            ? m_jarvis->organizeApplyPlan(session.pendingOrganizePlan) : QString();
+        session.hasPendingOrganizePlan = false;
+        sendMessage(chatId, !batchId.isEmpty()
+            ? (en ? QStringLiteral("✅ Organized. Use /undo_organize if needed.")
+                  : QStringLiteral("✅ Организовано. При необходимости — /undo_organize."))
+            : (en ? QStringLiteral("Nothing was moved.")
+                  : QStringLiteral("Ничего не было перемещено.")));
         return;
     }
 

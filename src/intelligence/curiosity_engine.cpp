@@ -673,6 +673,11 @@ void CuriosityEngine::postContextAwareQuestion()
     m_pendingChatId    = m_targetChatId;
     m_pendingTimestamp = QDateTime::currentDateTime();
     m_pendingCategory  = category;
+    m_pendingDoubtId   = 0;
+    if (category == ProactiveCategory::DoubtVerification) {
+        const auto doubts = SelfJournal::instance().topDoubtsForVerification(1);
+        if (!doubts.isEmpty()) m_pendingDoubtId = doubts.first().id;
+    }
 
     m_gateway->sendProactiveQuestion(m_targetChatId, msg, m_uiEnglish);
 
@@ -769,7 +774,25 @@ bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText)
 
     saveResponse(chatId != 0 ? chatId : m_pendingChatId, m_pendingQuestion, answerText);
 
+    // Close the self-correction loop: a DoubtVerification question that
+    // gets contradicted shouldn't just sit "resolved" in the journal —
+    // the correction becomes a fact of its own, so the same mistake
+    // isn't repeated (and, per the mesh hook in ActivityTracker::learnFact,
+    // propagates to other JARVIS instances too).
+    if (m_pendingCategory == ProactiveCategory::DoubtVerification && m_pendingDoubtId != 0) {
+        const QString lower = answerText.trimmed().toLower();
+        const bool correct = lower.startsWith(QStringLiteral("да"))
+                           || lower.startsWith(QStringLiteral("yes"));
+        SelfJournal::instance().resolveDoubt(m_pendingDoubtId, correct,
+            correct ? QString() : answerText);
+        if (!correct && m_activity) {
+            m_activity->learnFact(1, QStringLiteral("correction"),
+                                  m_pendingQuestion.left(80), answerText, 0.7f);
+        }
+    }
+
     m_pendingQuestion.clear();
-    m_pendingChatId = 0;
+    m_pendingChatId  = 0;
+    m_pendingDoubtId = 0;
     return true;
 }

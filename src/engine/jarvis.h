@@ -38,6 +38,10 @@ class J2JMeshConnector;
 class TranslationEngine;
 class PersonalityEngine;
 class ReflectionEngine;
+class LocalTrainer;
+class BackgroundLearner;
+class QTimer;
+struct OrganizePlan;
 
 // RAII-обёртка для COM
 class ComInitializer
@@ -108,6 +112,15 @@ public:
     TranslationEngine*  translationEngine()  const { return m_translator; }
     PersonalityEngine*  personalityEngine()  const { return m_personality; }
     ReflectionEngine*   reflectionEngine()   const { return m_reflection; }
+
+    // FileOrganizer facade — keeps SystemController's full type (defined
+    // in pc_controller.h) out of callers like MainWindow/J2JTelegramGateway,
+    // which already pull in an unrelated, same-named SystemController from
+    // common/systemcontroller.h (a real ODR collision if both headers land
+    // in the same translation unit).
+    static bool organizePathAllowed(const QString& path);
+    QString     organizeApplyPlan(const OrganizePlan& plan);
+    bool        organizeUndoLast();
 
     // Multi-user: switch active user (all data scoped to userId)
     void setCurrentUserId(qint64 id) { m_currentUserId = id; }
@@ -240,6 +253,9 @@ private:
     PcCommandRegistry*  m_pcCommands   = nullptr;  // голосовое управление ПК (мышь/окна/система/макросы)
     ActivityTracker*    m_activity     = nullptr;  // deep context awareness + knowledge base
     TrainingPipelineController* m_trainingPipeline = nullptr; // background voice→training data
+    LocalTrainer*       m_localTrainer = nullptr;  // self-tuning: bakes liked replies into an Ollama Modelfile
+    QTimer*             m_autoTrainTimer = nullptr;
+    BackgroundLearner*  m_backgroundLearner = nullptr; // behavior-pattern learning (was dead code — now wired in)
     J2JMeshConnector*   m_mesh             = nullptr;  // P2P mesh network
     TranslationEngine*  m_translator       = nullptr;  // multilingual translation + audio pipeline
     PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation

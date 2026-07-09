@@ -26,6 +26,7 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QImage>
+#include "file_organizer.h"
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -107,6 +108,10 @@ struct TgChatSession {
     // /history session list state — same short-index trick as browseEntries,
     // since callback_data can't hold a full session_id list.
     QStringList   historySessionIds;
+
+    // /organize — plan awaiting confirmation (Apply/Cancel buttons).
+    OrganizePlan  pendingOrganizePlan;
+    bool          hasPendingOrganizePlan = false;
 };
 
 // ── Gateway class ────────────────────────────────────────────

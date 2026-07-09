@@ -57,6 +57,8 @@ QMap<QString, TelegramRole> TelegramAccessManager::buildCommandAcl()
         { QStringLiteral("/guard"),           TelegramRole::Admin },
         { QStringLiteral("/enroll_face"),     TelegramRole::Admin },
         { QStringLiteral("/browse"),          TelegramRole::Admin },
+        { QStringLiteral("/organize"),        TelegramRole::Admin },
+        { QStringLiteral("/undo_organize"),   TelegramRole::Admin },
         { QStringLiteral("/companion_ok"),   TelegramRole::Admin },
         { QStringLiteral("/companion_no"),   TelegramRole::Admin },
         { QStringLiteral("/admin_stats"),     TelegramRole::Admin },
