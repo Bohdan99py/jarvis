@@ -4,6 +4,7 @@
 
 #include "content_search.h"
 #include "ocr_extractor.h"
+#include "synonym_learner.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -454,6 +455,11 @@ QVector<ContentHit> ContentSearch::search(const QStringList& filePaths,
 {
     QVector<ContentHit> allHits;
 
+    // Expand with any synonyms Jarvis has learned ("отчёт" also matches
+    // files mentioning "репорт" if the user taught that mapping before) —
+    // pure local dictionary lookup, no model/LLM call.
+    const QStringList expandedKeywords = SynonymLearner::instance().expandAll(keywords);
+
     for (const QString& path : filePaths) {
         if (allHits.size() >= maxResults) break;
         if (!isSupportedFormat(path)) continue;
@@ -466,7 +472,7 @@ QVector<ContentHit> ContentSearch::search(const QStringList& filePaths,
         const QString text = extractText(path, 200000);
         if (text.isEmpty()) continue;
 
-        const auto hits = findInText(text, path, keywords,
+        const auto hits = findInText(text, path, expandedKeywords,
                                       maxResults - allHits.size());
         allHits.append(hits);
     }

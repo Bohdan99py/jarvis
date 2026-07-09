@@ -4,6 +4,8 @@
 
 #include "action_predictor.h"
 #include "session_memory.h"
+#include "activity_tracker.h"
+#include "database_manager.h"
 #include "jarvis_paths.h"
 
 #include <QJsonDocument>
@@ -12,8 +14,86 @@
 #include <QFile>
 #include <QStandardPaths>
 #include <QDir>
+#include <QDateTime>
+#include <QSqlQuery>
+#include <QSqlDatabase>
 #include <QDebug>
 #include <algorithm>
+#include <array>
+
+#ifdef JARVIS_HAS_OPENCV
+#include <opencv2/ml.hpp>
+
+// ============================================================
+//  Local experience classifier — feature encoding + model cache
+//  (kept file-local; no cv:: types leak into action_predictor.h)
+// ============================================================
+namespace {
+
+constexpr int kEthicsCatCount   = 4;  // system_command, web_search, entertainment, code_review
+constexpr int kActivityCatCount = 10;
+constexpr int kFeatureCount     = kEthicsCatCount + kActivityCatCount + 1; // + hour-of-day
+
+const QStringList& ethicsCategoryVocab()
+{
+    static const QStringList v = {
+        QStringLiteral("system_command"), QStringLiteral("web_search"),
+        QStringLiteral("entertainment"),  QStringLiteral("code_review"),
+    };
+    return v;
+}
+
+const QStringList& activityCategoryVocab()
+{
+    static const QStringList v = {
+        QStringLiteral("coding"), QStringLiteral("game_engine"), QStringLiteral("art"),
+        QStringLiteral("browsing"), QStringLiteral("communication"), QStringLiteral("office"),
+        QStringLiteral("gaming"), QStringLiteral("terminal"), QStringLiteral("music"),
+        QStringLiteral("other"),
+    };
+    return v;
+}
+
+std::array<float, kFeatureCount> encodeFeatures(const QString& category,
+                                                 const QString& activityCategory,
+                                                 int hourOfDay)
+{
+    std::array<float, kFeatureCount> f{};
+    const int catIdx = ethicsCategoryVocab().indexOf(category);
+    if (catIdx >= 0) f[catIdx] = 1.0f;
+    const int actIdx = activityCategoryVocab().indexOf(activityCategory);
+    if (actIdx >= 0) f[kEthicsCatCount + actIdx] = 1.0f;
+    f[kFeatureCount - 1] = hourOfDay >= 0 ? hourOfDay / 24.0f : 0.5f;
+    return f;
+}
+
+QString experienceModelPath()
+{
+    return JarvisPaths::subPath(QStringLiteral("ethics_experience_model.yml"));
+}
+
+// Cached across calls; invalidated (reloaded) after each retrain.
+cv::Ptr<cv::ml::LogisticRegression> g_experienceModel;
+bool g_experienceModelLoaded = false;
+
+cv::Ptr<cv::ml::LogisticRegression> loadExperienceModel()
+{
+    if (g_experienceModelLoaded) return g_experienceModel;
+    g_experienceModelLoaded = true;
+    const QString path = experienceModelPath();
+    if (!QFile::exists(path)) { g_experienceModel = nullptr; return nullptr; }
+    try {
+        g_experienceModel =
+            cv::Algorithm::load<cv::ml::LogisticRegression>(path.toStdString());
+    } catch (const cv::Exception& e) {
+        qWarning() << "[ActionPredictor] Failed to load experience model:" << e.what();
+        g_experienceModel = nullptr;
+    }
+    return g_experienceModel;
+}
+
+} // namespace
+#endif // JARVIS_HAS_OPENCV
 
 // ============================================================
 // Constructor
@@ -27,6 +107,7 @@ ActionPredictor::ActionPredictor(SessionMemory* memory, QObject* parent)
     initEthicsDictionary();
     loadPatterns();
     loadEthicsWeights();
+    ensureFeedbackSamplesTable();
 }
 
 // ============================================================
@@ -165,14 +246,24 @@ EthicsEvaluation ActionPredictor::evaluateAction(const QString& action) const
     const QString lower = action.toLower().trimmed();
     EthicsEvaluation best{0.0, QStringLiteral("uncategorized"), false};
 
+    const QString activityCat = m_activity ? m_activity->currentCategory() : QString();
+    const int hourOfDay = QDateTime::currentDateTime().time().hour();
+
     for (const auto& rule : m_ethicsRules) {
         for (const QString& keyword : rule.keywords) {
             if (lower.contains(keyword)) {
                 double effectiveWeight = rule.weight;
 
                 if (qAbs(rule.weight) < 1.0) {
-                    const double learned = m_experienceWeights[rule.category].toDouble(0.0);
-                    effectiveWeight = qBound(-1.0, rule.weight + learned, 1.0);
+                    double adjustment = 0.0;
+                    if (predictExperience(rule.category, activityCat, hourOfDay, adjustment)) {
+                        // Context-aware ML prediction — replaces the flat weight
+                        // once enough labeled feedback samples exist.
+                        effectiveWeight = qBound(-1.0, rule.weight + adjustment, 1.0);
+                    } else {
+                        const double learned = m_experienceWeights[rule.category].toDouble(0.0);
+                        effectiveWeight = qBound(-1.0, rule.weight + learned, 1.0);
+                    }
                 }
 
                 if (qAbs(effectiveWeight) > qAbs(best.score)) {
@@ -210,6 +301,33 @@ void ActionPredictor::recordFeedback(const QString& action, bool positive)
                 double delta = positive ? LEARNING_RATE : -LEARNING_RATE;
                 double updated = qBound(-0.5, current + delta, 0.5);
                 m_experienceWeights[rule.category] = updated;
+
+                // Real experience sample for the cv::ml classifier — context-
+                // aware (what you were doing, what time it was), unlike the
+                // flat weight above (kept as the cold-start fallback).
+                {
+                    auto db = QSqlDatabase::database(QStringLiteral("jarvis_main"));
+                    if (db.isOpen()) {
+                        const QString activityCat = m_activity ? m_activity->currentCategory() : QString();
+                        const int hourOfDay = QDateTime::currentDateTime().time().hour();
+
+                        QSqlQuery ins(db);
+                        ins.prepare(QStringLiteral(
+                            "INSERT INTO ethics_feedback_samples "
+                            "(category, activity_category, hour_of_day, positive) "
+                            "VALUES (:cat, :act, :hour, :pos)"));
+                        ins.bindValue(QStringLiteral(":cat"),  rule.category);
+                        ins.bindValue(QStringLiteral(":act"),  activityCat);
+                        ins.bindValue(QStringLiteral(":hour"), hourOfDay);
+                        ins.bindValue(QStringLiteral(":pos"),  positive ? 1 : 0);
+                        ins.exec();
+
+                        QSqlQuery cnt(db);
+                        cnt.exec(QStringLiteral("SELECT COUNT(*) FROM ethics_feedback_samples"));
+                        if (cnt.next() && cnt.value(0).toInt() >= MIN_SAMPLES_FOR_ML)
+                            trainExperienceModel();
+                    }
+                }
 
                 qDebug() << "[ActionPredictor] Feedback for" << rule.category
                          << ":" << (positive ? "+1" : "-1")
@@ -496,3 +614,108 @@ void ActionPredictor::saveEthicsWeights()
     file.write(QJsonDocument(m_experienceWeights).toJson(QJsonDocument::Indented));
     file.close();
 }
+
+// ============================================================
+// Local experience classifier (cv::ml)
+// ============================================================
+
+void ActionPredictor::ensureFeedbackSamplesTable()
+{
+    if (!DatabaseManager::instance().isOpen()) return;
+    auto db = QSqlDatabase::database(QStringLiteral("jarvis_main"));
+    if (!db.isOpen()) return;
+
+    QSqlQuery q(db);
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS ethics_feedback_samples ("
+        "  id                INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  category          TEXT NOT NULL,"
+        "  activity_category TEXT NOT NULL DEFAULT '',"
+        "  hour_of_day       INTEGER NOT NULL DEFAULT -1,"
+        "  positive          INTEGER NOT NULL,"
+        "  created_at        TEXT NOT NULL DEFAULT (datetime('now'))"
+        ")"));
+}
+
+#ifdef JARVIS_HAS_OPENCV
+
+void ActionPredictor::trainExperienceModel()
+{
+    auto db = QSqlDatabase::database(QStringLiteral("jarvis_main"));
+    if (!db.isOpen()) return;
+
+    QSqlQuery q(db);
+    q.exec(QStringLiteral(
+        "SELECT category, activity_category, hour_of_day, positive "
+        "FROM ethics_feedback_samples"));
+
+    std::vector<std::array<float, kFeatureCount>> features;
+    std::vector<float> labels;
+    while (q.next()) {
+        features.push_back(encodeFeatures(q.value(0).toString(),
+                                          q.value(1).toString(),
+                                          q.value(2).toInt()));
+        labels.push_back(q.value(3).toInt() ? 1.0f : 0.0f);
+    }
+    if (static_cast<int>(features.size()) < MIN_SAMPLES_FOR_ML) return;
+
+    cv::Mat samples(static_cast<int>(features.size()), kFeatureCount, CV_32F);
+    for (size_t i = 0; i < features.size(); ++i)
+        for (int j = 0; j < kFeatureCount; ++j)
+            samples.at<float>(static_cast<int>(i), j) = features[i][j];
+
+    cv::Mat labelsMat(static_cast<int>(labels.size()), 1, CV_32F, labels.data());
+    labelsMat = labelsMat.clone(); // detach from the local vector's buffer
+
+    try {
+        auto model = cv::ml::LogisticRegression::create();
+        model->setLearningRate(0.01);
+        model->setIterations(200);
+        model->setRegularization(cv::ml::LogisticRegression::REG_L2);
+        model->setTrainMethod(cv::ml::LogisticRegression::MINI_BATCH);
+        model->setMiniBatchSize(qMin(10, static_cast<int>(features.size())));
+
+        auto trainData = cv::ml::TrainData::create(samples, cv::ml::ROW_SAMPLE, labelsMat);
+        model->train(trainData);
+        model->save(experienceModelPath().toStdString());
+
+        g_experienceModelLoaded = false; // reload the cache on next predict
+        qDebug() << "[ActionPredictor] Experience model retrained on"
+                 << features.size() << "samples";
+    } catch (const cv::Exception& e) {
+        qWarning() << "[ActionPredictor] Experience model training failed:" << e.what();
+    }
+}
+
+bool ActionPredictor::predictExperience(const QString& category,
+                                        const QString& activityCategory,
+                                        int hourOfDay, double& outAdjustment) const
+{
+    auto model = loadExperienceModel();
+    if (!model) return false;
+
+    auto feat = encodeFeatures(category, activityCategory, hourOfDay);
+    cv::Mat sample(1, kFeatureCount, CV_32F, feat.data());
+
+    try {
+        cv::Mat result;
+        model->predict(sample, result);
+        const float predictedClass = result.at<float>(0, 0); // binary class, not a calibrated probability
+        outAdjustment = (predictedClass > 0.5f) ? 0.35 : -0.35;
+        return true;
+    } catch (const cv::Exception& e) {
+        qWarning() << "[ActionPredictor] Experience model prediction failed:" << e.what();
+        return false;
+    }
+}
+
+#else // !JARVIS_HAS_OPENCV
+
+void ActionPredictor::trainExperienceModel() {}
+
+bool ActionPredictor::predictExperience(const QString&, const QString&, int, double&) const
+{
+    return false;
+}
+
+#endif

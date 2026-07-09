@@ -19,6 +19,7 @@
 #include "file_organizer.h"
 #include "local_trainer.h"
 #include "background_learner.h"
+#include "synonym_learner.h"
 #include <QTimer>
 #include <QSettings>
 #include "database_manager.h"
@@ -95,6 +96,7 @@ Jarvis::Jarvis(QObject* parent)
     m_profile      = new UserProfile(this);
     m_activity     = new ActivityTracker(this);
     m_activity->start(15); // capture every 15 seconds
+    m_predictor->setActivityTracker(m_activity); // context for the cv::ml experience classifier
 
     // Face/photo enrollment feeds the same knowledge_base training system
     // as voice/text learning — new "appearance" category, not a silo.
@@ -1118,6 +1120,19 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         }
     }
 
+    // SynonymLearner pending clarification — reply to "what does X mean?"
+    // asked right after a zero-result search (see SearchRouter::formatResults).
+    if (SynonymLearner::instance().hasPendingClarification()) {
+        if (SynonymLearner::instance().consumeClarification(s)) {
+            m_memory->addMessage(QStringLiteral("user"), s);
+            const QString ack = m_uiEnglish
+                ? QStringLiteral("Got it — I'll remember that. 🧠")
+                : QStringLiteral("Понял — запомню. 🧠");
+            m_memory->addMessage(QStringLiteral("assistant"), ack);
+            return ack;
+        }
+    }
+
     // Binary feedback handler — intercepts yes/no replies to "was this helpful?"
     {
         const QString lower = s.trimmed().toLower();
@@ -1208,11 +1223,23 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 if (!consolDigest.isEmpty())
                     msCtx += QStringLiteral("\n") + consolDigest;
 
+                // Blend in relevance-ranked (not just recency-ranked) memory —
+                // TF-IDF/cosine search against everything ever stored, so an
+                // old-but-relevant memory doesn't lose to a recent-but-unrelated one.
+                const QString semanticCtx =
+                    MemoryManager::instance().buildSemanticContext(s, 3);
+                if (!semanticCtx.isEmpty())
+                    msCtx += QStringLiteral("\n") + semanticCtx;
+
                 m_memory->setMemoryStreamContext(msCtx);
             } else {
                 // No memory stream events — still include consolidation digest
-                const QString consolDigest =
+                QString consolDigest =
                     MemoryConsolidation::instance().buildMemoryDigest(5);
+                const QString semanticCtx =
+                    MemoryManager::instance().buildSemanticContext(s, 3);
+                if (!semanticCtx.isEmpty())
+                    consolDigest += QStringLiteral("\n") + semanticCtx;
                 m_memory->setMemoryStreamContext(consolDigest);
             }
         }

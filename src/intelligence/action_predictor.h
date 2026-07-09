@@ -18,6 +18,7 @@
 #include "jarvis_core_export.h"
 
 class SessionMemory;
+class ActivityTracker;
 
 struct ActionSuggestion
 {
@@ -44,6 +45,11 @@ class JARVIS_CORE_EXPORT ActionPredictor : public QObject
 
 public:
     explicit ActionPredictor(SessionMemory* memory, QObject* parent = nullptr);
+
+    // Gives evaluateAction()/recordFeedback() real situational context
+    // (what the user is doing, what time it is) for the cv::ml experience
+    // classifier — optional, falls back to the flat weight without it.
+    void setActivityTracker(ActivityTracker* at) { m_activity = at; }
 
     // --- Pattern-based suggestions ---
     QVector<ActionSuggestion> suggest(int maxSuggestions = 3) const;
@@ -85,7 +91,18 @@ private:
     void initEthicsDictionary();
     void learnFromHistory();
 
-    SessionMemory* m_memory = nullptr;
+    // --- Local experience classifier (cv::ml — see D2 plan notes) ---
+    // Real, context-aware ML replacing the flat per-category EMA below,
+    // once enough labeled samples exist. No cv:: types appear in this
+    // header — kept entirely inside action_predictor.cpp (same header-
+    // isolation convention as security_camera.h/.cpp).
+    void ensureFeedbackSamplesTable();
+    void trainExperienceModel();
+    bool predictExperience(const QString& category, const QString& activityCategory,
+                           int hourOfDay, double& outAdjustment) const;
+
+    SessionMemory*    m_memory   = nullptr;
+    ActivityTracker*  m_activity = nullptr;
     QVector<PatternRule> m_rules;
     QStringList m_recentCommands;
 
@@ -106,4 +123,5 @@ private:
     static constexpr double MIN_CONFIDENCE = 0.3;
     static constexpr int FEEDBACK_INTERVAL = 12;
     static constexpr double LEARNING_RATE = 0.15;
+    static constexpr int MIN_SAMPLES_FOR_ML = 20; // cold-start threshold
 };

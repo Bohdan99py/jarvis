@@ -53,6 +53,8 @@ add_library(jarvis_intelligence OBJECT
     code_actions.cpp
     file_organizer.h
     file_organizer.cpp
+    synonym_learner.h
+    synonym_learner.cpp
 )
 
 target_include_directories(jarvis_intelligence PUBLIC
@@ -68,3 +70,11 @@ target_link_libraries(jarvis_intelligence
     PUBLIC  jarvis_common Qt6::Core Qt6::Concurrent
     PRIVATE jarvis_db jarvis_llm Qt6::Widgets Qt6::Gui Qt6::Sql
 )
+
+# cv::ml (ActionPredictor's local experience classifier) — same OpenCV
+# distribution already used by src/platform, see that CMakeLists.txt for
+# why OpenCV_FOUND must not be checked here.
+if(JARVIS_HAS_OPENCV)
+    target_include_directories(jarvis_intelligence PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_compile_definitions(jarvis_intelligence PRIVATE JARVIS_HAS_OPENCV)
+endif()

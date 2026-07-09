@@ -7,6 +7,7 @@
 #include "session_memory.h"
 #include "semantic_mapper.h"
 #include "content_search.h"
+#include "synonym_learner.h"
 #include "lang.h"
 
 #include <QDir>
@@ -942,13 +943,21 @@ QString SearchRouter::formatResults(const SearchResults& results,
     }
 
     if (results.isEmpty()) {
-        return IS_EN
+        QString msg = IS_EN
             ? QStringLiteral("Nothing found in ") + domain
               + QStringLiteral(" for «") + query + QStringLiteral("».\n"
                 "Try rephrasing or search in a different place.")
             : QStringLiteral("Ничего не нашёл в ") + domain
               + QStringLiteral(" по запросу «") + query + QStringLiteral("».\n"
                 "Попробуй уточнить или поискать в другом месте.");
+
+        // Zero-result search is exactly when a missing synonym mapping
+        // would help most — ask now instead of waiting for an idle slot.
+        if (!query.trimmed().isEmpty()) {
+            msg += QStringLiteral("\n\n")
+                 + SynonymLearner::instance().askForClarification(query.trimmed(), IS_EN);
+        }
+        return msg;
     }
 
     QString out = IS_EN
