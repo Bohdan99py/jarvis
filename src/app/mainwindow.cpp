@@ -2078,6 +2078,61 @@ void MainWindow::buildMenuBar()
             });
             layout->addWidget(toggleBtn);
 
+            // Roles — lets whoever is sitting at THIS PC fix a chat that
+            // isn't Admin (e.g. it wasn't the very first chat to ever
+            // message this PC's bot). Only reachable from the desktop app.
+            auto* rolesBtn = new QPushButton(
+                IS_EN ? QStringLiteral("👑 Manage Roles...")
+                      : QStringLiteral("👑 Роли пользователей..."));
+            connect(rolesBtn, &QPushButton::clicked, dlg, [this, gw]() {
+                auto* accessMgr = gw->accessManager();
+                if (!accessMgr) return;
+
+                auto* rdlg = new QDialog(this);
+                rdlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram Roles")
+                                          : QStringLiteral("Роли Telegram"));
+                rdlg->setAttribute(Qt::WA_DeleteOnClose);
+                rdlg->setMinimumSize(420, 300);
+                auto* rlayout = new QVBoxLayout(rdlg);
+
+                const auto users = accessMgr->allUsers();
+                if (users.isEmpty()) {
+                    rlayout->addWidget(new QLabel(IS_EN
+                        ? QStringLiteral("No chats have messaged this bot yet.")
+                        : QStringLiteral("Пока ни один чат не писал этому боту.")));
+                }
+                for (const auto& u : users) {
+                    auto* row = new QWidget(rdlg);
+                    auto* rowLay = new QHBoxLayout(row);
+                    rowLay->setContentsMargins(0, 0, 0, 0);
+                    const QString name = u.displayName.isEmpty()
+                        ? QString::number(u.chatId) : u.displayName;
+                    auto* lbl = new QLabel(QStringLiteral("%1  —  %2")
+                        .arg(name, telegramRoleToString(u.role)));
+                    lbl->setStyleSheet(QStringLiteral("color:#c0c8d8;"));
+                    rowLay->addWidget(lbl, 1);
+
+                    auto* makeAdminBtn = new QPushButton(
+                        IS_EN ? QStringLiteral("Make Admin") : QStringLiteral("Сделать Admin"));
+                    makeAdminBtn->setEnabled(u.role != TelegramRole::Admin);
+                    const qint64 cid = u.chatId;
+                    connect(makeAdminBtn, &QPushButton::clicked, rdlg,
+                            [this, accessMgr, cid, makeAdminBtn]() {
+                        accessMgr->setRole(cid, TelegramRole::Admin);
+                        makeAdminBtn->setEnabled(false);
+                        appendLog(QStringLiteral("J.A.R.V.I.S."),
+                            IS_EN ? QStringLiteral("👑 Chat %1 promoted to Admin.").arg(cid)
+                                  : QStringLiteral("👑 Чат %1 повышен до Admin.").arg(cid),
+                            QStringLiteral("#66FCF1"));
+                    });
+                    rowLay->addWidget(makeAdminBtn);
+                    rlayout->addWidget(row);
+                }
+                rlayout->addStretch(1);
+                rdlg->show();
+            });
+            layout->addWidget(rolesBtn);
+
             // Bug report notifications
             connect(gw, &J2JTelegramGateway::bugReportFiled, dlg,
                     [this](const QaBugReport& report) {

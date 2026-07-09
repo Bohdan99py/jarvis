@@ -190,6 +190,22 @@ bool TelegramAccessManager::isSessionBoundHere(qint64 chatId) const
     return false;
 }
 
+bool TelegramAccessManager::isSessionBoundElsewhere(qint64 chatId) const
+{
+    QMutexLocker lock(&m_mutex);
+    QSqlQuery q(QSqlDatabase::database());
+    q.prepare(QStringLiteral(
+        "SELECT device_id FROM user_sessions "
+        "WHERE chat_id = :cid AND status = 'active'"));
+    q.bindValue(QStringLiteral(":cid"), chatId);
+
+    if (q.exec() && q.next()) {
+        const QString boundDevice = q.value(0).toString();
+        return !boundDevice.isEmpty() && boundDevice != m_localDeviceId;
+    }
+    return false; // no session record — not bound anywhere, so not "elsewhere"
+}
+
 std::optional<TgUserSession> TelegramAccessManager::resolveSession(qint64 chatId) const
 {
     QMutexLocker lock(&m_mutex);
@@ -442,6 +458,24 @@ bool TelegramAccessManager::setRole(qint64 chatId, TelegramRole role)
 bool TelegramAccessManager::isAdmin(qint64 chatId) const
 {
     return getRole(chatId) == TelegramRole::Admin;
+}
+
+QList<TgUserRecord> TelegramAccessManager::allUsers() const
+{
+    QList<TgUserRecord> result;
+    QMutexLocker lock(&m_mutex);
+    QSqlQuery q(QSqlDatabase::database());
+    q.exec(QStringLiteral(
+        "SELECT chat_id, display_name, role FROM telegram_users "
+        "ORDER BY registered_at ASC"));
+    while (q.next()) {
+        TgUserRecord r;
+        r.chatId      = q.value(0).toLongLong();
+        r.displayName = q.value(1).toString();
+        r.role        = telegramRoleFromString(q.value(2).toString());
+        result.append(r);
+    }
+    return result;
 }
 
 void TelegramAccessManager::ensureRegistered(qint64 chatId,

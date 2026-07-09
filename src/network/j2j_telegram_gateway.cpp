@@ -657,13 +657,15 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
             return;
         }
         if (cmd == QStringLiteral("/browse")) {
-            // Full filesystem access — Admin-only, AND only for a chat
-            // bound to THIS PC (each owner only reaches their own machine).
+            // Full filesystem access — Admin-only, AND (if this chat is
+            // explicitly bound to a different PC via mesh /pc pairing)
+            // not reachable from here. A chat with no binding at all is
+            // fine — that's the normal single-PC setup.
             TgChatSession& session = getOrCreateSession(chatId);
-            if (!m_accessMgr->isSessionBoundHere(chatId)) {
+            if (m_accessMgr->isSessionBoundElsewhere(chatId)) {
                 sendMessage(chatId, session.isEnglish
-                    ? QStringLiteral("❌ This chat isn't bound to this PC. Use /pc first.")
-                    : QStringLiteral("❌ Этот чат не привязан к этому ПК. Сначала используйте /pc."));
+                    ? QStringLiteral("❌ This chat is bound to a different PC. Use /pc to switch.")
+                    : QStringLiteral("❌ Этот чат привязан к другому ПК. Используйте /pc, чтобы переключиться."));
                 return;
             }
             m_accessMgr->logActivity(chatId, QStringLiteral("fs_browse_start"));
@@ -1040,7 +1042,7 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
     // this is re-checked here (defense in depth) rather than trusting
     // that only /browse could have produced this button.
     if (data.startsWith(QStringLiteral("fsnav:"))) {
-        if (!m_accessMgr->isSessionBoundHere(chatId)
+        if (m_accessMgr->isSessionBoundElsewhere(chatId)
             || !m_accessMgr->hasAccess(chatId, QStringLiteral("/browse"))) {
             sendMessage(chatId, en
                 ? QStringLiteral("🔒 Access denied.")
@@ -1224,7 +1226,7 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
     }
 
     if (data == QStringLiteral("action_browse")) {
-        if (!m_accessMgr->isSessionBoundHere(chatId)
+        if (m_accessMgr->isSessionBoundElsewhere(chatId)
             || !m_accessMgr->hasAccess(chatId, QStringLiteral("/browse"))) {
             sendMessage(chatId, en
                 ? QStringLiteral("🔒 Access denied.")

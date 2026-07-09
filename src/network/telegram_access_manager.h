@@ -68,6 +68,13 @@ struct TgActivityEntry {
     QDateTime timestamp;
 };
 
+// ── Registered Telegram user (roster row) ─────────────────────
+struct TgUserRecord {
+    qint64      chatId = 0;
+    QString     displayName;
+    TelegramRole role = TelegramRole::User;
+};
+
 // ── User session — links a Telegram chat to a specific PC ────
 struct TgUserSession {
     qint64    chatId      = 0;
@@ -92,6 +99,14 @@ public:
     // ── Session resolution (called before any command) ────────
     // Returns true if chatId is bound to THIS PC's deviceId.
     bool isSessionBoundHere(qint64 chatId) const;
+
+    // Returns true only if chatId has an explicit, active session bound to
+    // a DIFFERENT PC. A chat with no session record at all is NOT
+    // "elsewhere" — device binding is an opt-in mesh feature (via /pc);
+    // most single-PC setups never create a user_sessions row, and a
+    // directly-polled message is local to this PC by construction. Use
+    // this (not isSessionBoundHere) for local authorization checks.
+    bool isSessionBoundElsewhere(qint64 chatId) const;
 
     // Full session info for a chat, or nullopt if none
     std::optional<TgUserSession> resolveSession(qint64 chatId) const;
@@ -129,6 +144,11 @@ public:
     TelegramRole getRole(qint64 chatId) const;
     bool         setRole(qint64 chatId, TelegramRole role);
     bool         isAdmin(qint64 chatId) const;
+
+    // Full roster (chat_id, display_name, role) — for a PC-side admin UI
+    // to fix a chat that ended up without the Admin role (e.g. the real
+    // owner wasn't the first chat to ever message this PC's bot).
+    QList<TgUserRecord> allUsers() const;
 
     // Absolute admin override — primary owner always has full access
     bool isPrimaryOwner(qint64 chatId) const;
