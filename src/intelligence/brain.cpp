@@ -942,19 +942,27 @@ bool Brain::tryLocalAnswer(const QString& lower, Intent& intent) const
 {
     if (lower.length() < 5) return false;
 
-    const QString cached = LlmCacheManager::instance()
-                               .findLocalLearnedResponse(lower);
-    if (cached.isEmpty()) return false;
+    const auto match = LlmCacheManager::instance().route(lower);
+    if (match.tier == LlmCacheManager::CaseMatch::Tier::None) return false;
 
     intent.action        = Intent::Action::Ask;
     intent.domain        = Intent::Domain::Philosophy_Chitchat;
     intent.query         = lower;
-    intent.confidence    = 0.95f;
-    intent.localResponse = cached;
     intent.fromHistory   = true;
 
-    qDebug() << "[Brain] Local offline match found. Bypassing remote LLM."
-             << lower.left(60);
+    if (match.tier == LlmCacheManager::CaseMatch::Tier::Exact) {
+        intent.confidence    = 0.95f;
+        intent.localResponse = match.response;
+        qDebug() << "[Brain] Exact local match found. Bypassing remote LLM."
+                 << lower.left(60);
+    } else {
+        intent.confidence    = 0.55f;
+        intent.localResponse = match.response
+            + QStringLiteral("\n\n🔎 _Похоже на похожий случай — могу ошибаться._");
+        qDebug() << "[Brain] Similar local match found (overlap="
+                 << match.overlap << "). Bypassing remote LLM."
+                 << lower.left(60);
+    }
 
     return true;
 }

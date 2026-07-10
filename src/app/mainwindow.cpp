@@ -4029,6 +4029,17 @@ void MainWindow::onSend()
         return;
     }
 
+    // ── 5.5 Локальный ответ роутера (Layer 1) — минуем Claude ─
+    if (intent.hasLocalAnswer()) {
+        appendLog(Str::logJarvis(), intent.localResponse, Theme::LogColors::jarvis);
+        if (intent.localResponse.length() <= 300 && m_audioManager->speechAllowed())
+            m_jarvis->speakAsync(intent.localResponse);
+        m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
+        m_jarvis->memory()->addMessage(QStringLiteral("assistant"), intent.localResponse);
+        m_input->setFocus();
+        return;
+    }
+
     // ── 6. Всё остальное → Jarvis/Claude ─────────────────
     m_lastUserInput      = text;  // сохраняем для самообучения
     // НЕ сбрасываем m_lastInputWasVoice здесь — он нужен в onAsyncResponse

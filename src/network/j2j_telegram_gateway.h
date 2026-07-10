@@ -26,7 +26,15 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QImage>
-#include "file_organizer.h"
+#include <memory>
+
+// Forward-declared, not included: OrganizePlan lives in src/intelligence
+// (file_organizer.h). Pulling that header in here would leak an
+// intelligence-module dependency into every consumer of this public
+// network header — including modules (media, modules) that don't
+// otherwise need it and don't have that include path. See
+// TgChatSession::pendingOrganizePlan below (shared_ptr, not by-value).
+struct OrganizePlan;
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -110,7 +118,9 @@ struct TgChatSession {
     QStringList   historySessionIds;
 
     // /organize — plan awaiting confirmation (Apply/Cancel buttons).
-    OrganizePlan  pendingOrganizePlan;
+    // shared_ptr (not by-value) so this header only needs a forward
+    // declaration of OrganizePlan.
+    std::shared_ptr<OrganizePlan> pendingOrganizePlan;
     bool          hasPendingOrganizePlan = false;
 };
 

@@ -24,6 +24,7 @@
 #include "translation_engine.h"
 #include "jarvis_paths.h"
 #include "curiosity_engine.h"
+#include "file_organizer.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -711,7 +712,7 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
                                            : QStringLiteral("Папка пуста."));
                     return;
                 }
-                s.pendingOrganizePlan = plan;
+                s.pendingOrganizePlan = std::make_shared<OrganizePlan>(plan);
                 s.hasPendingOrganizePlan = true;
 
                 QString summary = en
@@ -1103,13 +1104,15 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
         }
         if (data == QStringLiteral("organize_cancel")) {
             session.hasPendingOrganizePlan = false;
+            session.pendingOrganizePlan.reset();
             sendMessage(chatId, en ? QStringLiteral("❌ Cancelled — nothing moved.")
                                    : QStringLiteral("❌ Отменено — ничего не перемещено."));
             return;
         }
-        const QString batchId = m_jarvis
-            ? m_jarvis->organizeApplyPlan(session.pendingOrganizePlan) : QString();
+        const QString batchId = (m_jarvis && session.pendingOrganizePlan)
+            ? m_jarvis->organizeApplyPlan(*session.pendingOrganizePlan) : QString();
         session.hasPendingOrganizePlan = false;
+        session.pendingOrganizePlan.reset();
         sendMessage(chatId, !batchId.isEmpty()
             ? (en ? QStringLiteral("✅ Organized. Use /undo_organize if needed.")
                   : QStringLiteral("✅ Организовано. При необходимости — /undo_organize."))
@@ -1644,6 +1647,23 @@ QString J2JTelegramGateway::bugReportToMarkdown(const QaBugReport& bug)
 //  Free-Dialogue LLM Routing
 // ============================================================
 
+// Tags a Layer-1 router match with a source label so the user can tell
+// an instant local answer from a fresh Claude round-trip — and, for a
+// fuzzy Similar match, that it may not be fully accurate.
+static QString tagLocalCaseMatch(const LlmCacheManager::CaseMatch& match, bool english)
+{
+    using Tier = LlmCacheManager::CaseMatch::Tier;
+    if (match.tier == Tier::Exact) {
+        return match.response + QStringLiteral("\n\n💾 *Served from local cache*");
+    }
+    if (match.tier == Tier::Similar) {
+        return match.response + (english
+            ? QStringLiteral("\n\n🔎 *Similar past case — may not be fully accurate*")
+            : QStringLiteral("\n\n🔎 *Похоже на прошлый случай — могу ошибаться*"));
+    }
+    return QString();
+}
+
 void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                                       bool english)
 {
@@ -1662,20 +1682,19 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         return;
     }
 
-    // ── Step 6a: Local-First Offline Cache — check before any network I/O ──
+    // ── Step 6a: Layer-1 Confidence Router — check before any network I/O ──
     {
-        const QString cached = LlmCacheManager::instance()
-                                   .getValidCachedResponse(text);
-        if (!cached.isEmpty()) {
-            const QString tagged = cached
-                + QStringLiteral("\n\n💾 *Served from local cache*");
+        const auto match = LlmCacheManager::instance().route(text);
+        const QString tagged = tagLocalCaseMatch(match, english);
+        if (!tagged.isEmpty()) {
             sendMessage(chatId, tagged);
             emit conversationResponse(chatId, tagged);
 
-            JarvisResponse dual = JarvisResponse::parse(cached);
+            JarvisResponse dual = JarvisResponse::parse(match.response);
             VoiceSynthesisManager::instance().say(dual.speechText);
 
-            qDebug() << "[TelegramGW] LLM cache HIT for chat" << chatId;
+            qDebug() << "[TelegramGW] Router" << (match.tier == LlmCacheManager::CaseMatch::Tier::Exact ? "EXACT" : "SIMILAR")
+                     << "match for chat" << chatId;
             return;
         }
     }
@@ -1775,18 +1794,16 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                        [this, chatId, cleanup, originalQuery, english](const QString& error) {
         cleanup();
 
-        // ── Step 6c: Network failure — try cache fallback, then static message ──
-        const QString fallback = LlmCacheManager::instance()
-                                     .getValidCachedResponse(originalQuery);
-        if (!fallback.isEmpty()) {
-            const QString tagged = fallback
-                + QStringLiteral("\n\n💾 *Served from local cache*");
+        // ── Step 6c: Network failure — try router fallback, then static message ──
+        const auto fallbackMatch = LlmCacheManager::instance().route(originalQuery);
+        const QString tagged = tagLocalCaseMatch(fallbackMatch, english);
+        if (!tagged.isEmpty()) {
             sendMessage(chatId, tagged);
 
-            JarvisResponse dual = JarvisResponse::parse(fallback);
+            JarvisResponse dual = JarvisResponse::parse(fallbackMatch.response);
             VoiceSynthesisManager::instance().say(dual.speechText);
 
-            qDebug() << "[TelegramGW] Error fallback: cache HIT for chat" << chatId;
+            qDebug() << "[TelegramGW] Error fallback: router HIT for chat" << chatId;
         } else {
             sendMessage(chatId, english
                 ? QStringLiteral("📡 *System Offline:* Network timeout, "
@@ -1810,18 +1827,16 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         if (m_sessions.contains(chatId) && !m_sessions[chatId].awaitingLlm)
             return;  // already cleaned up by a signal
 
-        // ── Timeout fallback: same cache-then-static logic ──
-        const QString fallback = LlmCacheManager::instance()
-                                     .getValidCachedResponse(originalQuery);
-        if (!fallback.isEmpty()) {
-            const QString tagged = fallback
-                + QStringLiteral("\n\n💾 *Served from local cache (timeout fallback)*");
+        // ── Timeout fallback: same router-then-static logic ──
+        const auto fallbackMatch = LlmCacheManager::instance().route(originalQuery);
+        const QString tagged = tagLocalCaseMatch(fallbackMatch, english);
+        if (!tagged.isEmpty()) {
             sendMessage(chatId, tagged);
 
-            JarvisResponse dual = JarvisResponse::parse(fallback);
+            JarvisResponse dual = JarvisResponse::parse(fallbackMatch.response);
             VoiceSynthesisManager::instance().say(dual.speechText);
 
-            qDebug() << "[TelegramGW] Timeout fallback: cache HIT for chat" << chatId;
+            qDebug() << "[TelegramGW] Timeout fallback: router HIT for chat" << chatId;
         } else {
             sendMessage(chatId, english
                 ? QStringLiteral("📡 *System Offline:* Request timed out, "

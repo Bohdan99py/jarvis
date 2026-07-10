@@ -494,6 +494,23 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=13");
         ver = 13;
     }
+    if (ver < 14) {
+        // FTS5 similarity index over llm_cache.original_query — powers the
+        // Layer-1 confidence router (exact/similar/none). If the linked
+        // SQLite build lacks the fts5 module this CREATE VIRTUAL TABLE
+        // fails silently (logged); LlmCacheManager detects the missing
+        // table and falls back to a plain LIKE scan.
+        execQuery(R"(CREATE VIRTUAL TABLE IF NOT EXISTS llm_cache_fts USING fts5(
+            query_hash UNINDEXED,
+            original_query,
+            tokenize = 'unicode61 remove_diacritics 2'
+        ))");
+        execQuery(R"(INSERT INTO llm_cache_fts(query_hash, original_query)
+            SELECT query_hash, original_query FROM llm_cache
+            WHERE query_hash NOT IN (SELECT query_hash FROM llm_cache_fts))");
+        execQuery("UPDATE schema_version SET version=14");
+        ver = 14;
+    }
     return true;
 }
 
