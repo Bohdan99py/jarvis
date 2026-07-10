@@ -942,7 +942,9 @@ bool Brain::tryLocalAnswer(const QString& lower, Intent& intent) const
 {
     if (lower.length() < 5) return false;
 
-    const auto match = LlmCacheManager::instance().route(lower);
+    // Brain is desktop-only (Telegram goes through Jarvis::processCommand /
+    // routeToLlm directly) — always the desktop owner bucket.
+    const auto match = LlmCacheManager::instance().route(LlmCacheManager::kDesktopOwnerId, lower);
     if (match.tier == LlmCacheManager::CaseMatch::Tier::None) return false;
 
     intent.action        = Intent::Action::Ask;

@@ -40,6 +40,7 @@ class PersonalityEngine;
 class ReflectionEngine;
 class LocalTrainer;
 class BackgroundLearner;
+class CaseDistiller;
 class QTimer;
 struct OrganizePlan;
 
@@ -256,6 +257,7 @@ private:
     LocalTrainer*       m_localTrainer = nullptr;  // self-tuning: bakes liked replies into an Ollama Modelfile
     QTimer*             m_autoTrainTimer = nullptr;
     BackgroundLearner*  m_backgroundLearner = nullptr; // behavior-pattern learning (was dead code — now wired in)
+    CaseDistiller*      m_caseDistiller     = nullptr; // Layer 2: nightly case -> heuristic distillation
     J2JMeshConnector*   m_mesh             = nullptr;  // P2P mesh network
     TranslationEngine*  m_translator       = nullptr;  // multilingual translation + audio pipeline
     PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation
@@ -265,6 +267,12 @@ private:
 
     bool              m_multiAgentMode    = false;
     bool              m_telegramOrigin    = false;
+    // Layer-1/2 owner scoping for the in-flight command: 0 = desktop,
+    // otherwise the Telegram chat_id. Set at the top of processCommand()
+    // and read later in the async completion handler (same "member set
+    // before the call, read during async callback" idiom as m_telegramOrigin
+    // above — processCommand doesn't run reentrantly, so this is safe).
+    qint64            m_currentChatId     = 0;
     bool              m_uiEnglish         = false;  // synced from MainWindow; default RU until setUiLanguage() runs
     bool              m_ideOpenedThisSession = false; // CLion открыт авто-режимом в этой сессии
     std::atomic<bool> m_speaking{false};

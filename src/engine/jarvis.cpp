@@ -19,6 +19,7 @@
 #include "file_organizer.h"
 #include "local_trainer.h"
 #include "background_learner.h"
+#include "case_distiller.h"
 #include "synonym_learner.h"
 #include <QTimer>
 #include <QSettings>
@@ -150,6 +151,12 @@ Jarvis::Jarvis(QObject* parent)
     if (m_indexer && !m_indexer->projectRoot().isEmpty())
         m_backgroundLearner->setWatchPaths({m_indexer->projectRoot()});
     m_backgroundLearner->start();
+
+    // Layer 2: distills repeated llm_cache cases into per-owner heuristics
+    // roughly nightly (see CaseDistiller — real elapsed-time gate, not tied
+    // to app uptime).
+    m_caseDistiller = new CaseDistiller(m_claudeApi, this);
+    m_caseDistiller->start();
 
     // J2J Mesh: peer-to-peer network for multi-instance knowledge sync
     m_mesh = new J2JMeshConnector(this);
@@ -357,6 +364,7 @@ Jarvis::~Jarvis()
     m_mesh->stop();
     m_trainingPipeline->stop();
     if (m_backgroundLearner) m_backgroundLearner->stop();
+    if (m_caseDistiller) m_caseDistiller->stop();
     m_predictor->savePatterns();
     m_memory->savePersistent();
     m_indexer->saveIndex();
@@ -1102,6 +1110,8 @@ void Jarvis::speakAsync(const QString& text)
 
 QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction, qint64 chatId)
 {
+    m_currentChatId = chatId;
+
     QString s = input.trimmed();
     if (s.isEmpty()) return QString();
 
@@ -2164,7 +2174,7 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         && displayResponse.length() > 20
         && displayResponse.length() < 3000)
     {
-        LlmCacheManager::instance().saveResponse(userInput, displayResponse);
+        LlmCacheManager::instance().saveResponse(m_currentChatId, userInput, displayResponse);
         qDebug() << "[Jarvis] Auto-cached response for offline learning:"
                  << userInput.left(60);
     }

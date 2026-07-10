@@ -6,6 +6,7 @@
 #include "face_registry.h"
 #include "mobile_pairing_manager.h"
 #include "j2j_telegram_gateway.h"
+#include "telegram_access_manager.h"
 #include "media_routing_manager.h"
 #include "database_manager.h"
 #include "system_manifest.h"
@@ -312,9 +313,12 @@ void J2JMeshConnector::handleHandshake(QTcpSocket* socket, const QJsonObject& da
 {
     const QString peerId   = data[QStringLiteral("nodeId")].toString();
     const QString peerName = data[QStringLiteral("name")].toString();
+    const qint64  peerOwnerChatId = data[QStringLiteral("ownerChatId")].toVariant().toLongLong();
 
-    if (m_peers.contains(peerId))
-        m_peers[peerId].authorized = true;
+    if (m_peers.contains(peerId)) {
+        m_peers[peerId].authorized   = true;
+        m_peers[peerId].ownerChatId  = peerOwnerChatId;
+    }
 
     // Build capabilities response
     const auto caps = SystemManifest::activeCapabilities();
@@ -331,6 +335,7 @@ void J2JMeshConnector::handleHandshake(QTcpSocket* socket, const QJsonObject& da
     reply[QStringLiteral("name")]         = m_nodeName;
     reply[QStringLiteral("version")]      = QStringLiteral(JARVIS_VERSION);
     reply[QStringLiteral("role")]         = m_nodeRole;
+    reply[QStringLiteral("ownerChatId")]  = QString::number(localOwnerChatId());
     reply[QStringLiteral("capabilities")] = capsArr;
 
     sendReply(socket, QStringLiteral("Handshake"), reply);
@@ -345,9 +350,18 @@ void J2JMeshConnector::handleHandshake(QTcpSocket* socket, const QJsonObject& da
 
 void J2JMeshConnector::handleSyncKnowledge(QTcpSocket* socket, const QJsonObject& data)
 {
-    const QString fromNode  = data[QStringLiteral("fromNode")].toString();
-    const QString fromRole  = data[QStringLiteral("originRole")].toString(QStringLiteral("Developer"));
-    const QJsonArray facts  = data[QStringLiteral("facts")].toArray();
+    const QString fromNode   = data[QStringLiteral("fromNode")].toString();
+    const QString fromNodeId = data[QStringLiteral("fromNodeId")].toString();
+    const QString fromRole   = data[QStringLiteral("originRole")].toString(QStringLiteral("Developer"));
+    const QJsonArray facts   = data[QStringLiteral("facts")].toArray();
+
+    if (!isSameOwner(fromNodeId)) {
+        sendReply(socket, QStringLiteral("SyncKnowledge"),
+                  QJsonObject{{QStringLiteral("message"),
+                               QStringLiteral("Different owner — knowledge sync refused")}}, false);
+        qDebug() << "[J2J] Refused SyncKnowledge from" << fromNode << "(different owner)";
+        return;
+    }
 
     int imported = 0, linked = 0;
 
@@ -472,16 +486,18 @@ void J2JMeshConnector::broadcastKnowledge(const QJsonArray& facts)
         const J2JPeer& peer = it.value();
         auto* sock = new QTcpSocket(this);
         const QString token = authToken();
-        const QString fromNode = m_nodeName;
+        const QString fromNode   = m_nodeName;
+        const QString fromNodeId = m_nodeId;
         const QString fromRole = m_nodeRole;
 
         connect(sock, &QTcpSocket::connected, this,
-                [sock, token, fromNode, fromRole, facts]() {
+                [sock, token, fromNode, fromNodeId, fromRole, facts]() {
             QJsonObject packet;
             packet[QStringLiteral("token")] = token;
             packet[QStringLiteral("type")]  = QStringLiteral("SyncKnowledge");
             QJsonObject data;
             data[QStringLiteral("fromNode")]   = fromNode;
+            data[QStringLiteral("fromNodeId")] = fromNodeId;
             data[QStringLiteral("originRole")] = fromRole;
             data[QStringLiteral("facts")]      = facts;
             packet[QStringLiteral("data")]     = data;
@@ -640,6 +656,11 @@ void J2JMeshConnector::handleFaceSync(QTcpSocket* socket, const QJsonObject& dat
     const QJsonArray faces  = data[QStringLiteral("faces")].toArray();
     if (faces.isEmpty()) return;
 
+    if (!isSameOwner(fromNode)) {
+        qDebug() << "[J2J] Refused FaceSync from" << fromNode << "(different owner)";
+        return;
+    }
+
     const int imported = FaceRegistry::instance().importFromJson(faces, fromNode);
     if (imported > 0)
         emit faceProfilesReceived(fromNode, imported);
@@ -733,6 +754,20 @@ QString J2JMeshConnector::authToken() const
 bool J2JMeshConnector::verifyToken(const QJsonObject& packet) const
 {
     return packet[QStringLiteral("token")].toString() == authToken();
+}
+
+qint64 J2JMeshConnector::localOwnerChatId() const
+{
+    if (!m_telegramGw || !m_telegramGw->accessManager()) return 0;
+    return m_telegramGw->accessManager()->primaryOwnerChatId();
+}
+
+bool J2JMeshConnector::isSameOwner(const QString& peerId) const
+{
+    if (!m_peers.contains(peerId)) return false;
+    const qint64 mine = localOwnerChatId();
+    const qint64 theirs = m_peers[peerId].ownerChatId;
+    return mine != 0 && theirs != 0 && mine == theirs;
 }
 
 void J2JMeshConnector::sendReply(QTcpSocket* socket, const QString& type,
@@ -853,16 +888,18 @@ void J2JMeshConnector::requestDistilledCache(const QString& peerId)
     const J2JPeer& peer = m_peers[peerId];
 
     auto* sock = new QTcpSocket(this);
-    const QString token = authToken();
-    const QString from  = m_nodeName;
+    const QString token  = authToken();
+    const QString from   = m_nodeName;
+    const QString fromId = m_nodeId;
 
     connect(sock, &QTcpSocket::connected, this,
-            [sock, token, from]() {
+            [sock, token, from, fromId]() {
         QJsonObject packet;
         packet[QStringLiteral("token")] = token;
         packet[QStringLiteral("type")]  = QStringLiteral("RequestCache");
         QJsonObject d;
-        d[QStringLiteral("fromNode")] = from;
+        d[QStringLiteral("fromNode")]   = from;
+        d[QStringLiteral("fromNodeId")] = fromId;
         packet[QStringLiteral("data")] = d;
         sock->write(QJsonDocument(packet).toJson(QJsonDocument::Compact));
         sock->flush();
@@ -902,7 +939,17 @@ void J2JMeshConnector::requestDistilledCache(const QString& peerId)
 void J2JMeshConnector::handleRequestCache(QTcpSocket* socket,
                                             const QJsonObject& data)
 {
-    Q_UNUSED(data)
+    const QString fromNodeId = data[QStringLiteral("fromNodeId")].toString();
+    if (!isSameOwner(fromNodeId)) {
+        QJsonObject reply;
+        reply[QStringLiteral("fromNode")] = m_nodeName;
+        reply[QStringLiteral("success")]  = false;
+        reply[QStringLiteral("message")]  = QStringLiteral("Different owner — cache sync refused");
+        socket->write(QJsonDocument(reply).toJson(QJsonDocument::Compact));
+        socket->flush();
+        qDebug() << "[J2J] Refused RequestCache from" << fromNodeId << "(different owner)";
+        return;
+    }
 
     // Send our recent consolidated entries as lightweight Tier 2 cache
     auto& mc = MemoryConsolidation::instance();
@@ -939,17 +986,19 @@ void J2JMeshConnector::syncUserProfile(const QString& peerId)
     const QJsonObject profileData = profile.toJson(profile.currentUserId());
 
     auto* sock = new QTcpSocket(this);
-    const QString token = authToken();
-    const QString from  = m_nodeName;
-    const QString uid   = profile.currentUserId();
+    const QString token  = authToken();
+    const QString from   = m_nodeName;
+    const QString fromId = m_nodeId;
+    const QString uid    = profile.currentUserId();
 
     connect(sock, &QTcpSocket::connected, this,
-            [sock, token, from, uid, profileData]() {
+            [sock, token, from, fromId, uid, profileData]() {
         QJsonObject packet;
         packet[QStringLiteral("token")] = token;
         packet[QStringLiteral("type")]  = QStringLiteral("ProfileSync");
         QJsonObject d;
-        d[QStringLiteral("fromNode")] = from;
+        d[QStringLiteral("fromNode")]   = from;
+        d[QStringLiteral("fromNodeId")] = fromId;
         d[QStringLiteral("userId")]   = uid;
         d[QStringLiteral("profile")]  = profileData;
         packet[QStringLiteral("data")] = d;
@@ -967,9 +1016,18 @@ void J2JMeshConnector::syncUserProfile(const QString& peerId)
 void J2JMeshConnector::handleProfileSync(QTcpSocket* socket,
                                            const QJsonObject& data)
 {
-    const QString fromNode = data[QStringLiteral("fromNode")].toString();
+    const QString fromNode   = data[QStringLiteral("fromNode")].toString();
+    const QString fromNodeId = data[QStringLiteral("fromNodeId")].toString();
     const QString userId   = data[QStringLiteral("userId")].toString();
     const QJsonObject prof = data[QStringLiteral("profile")].toObject();
+
+    if (!isSameOwner(fromNodeId)) {
+        sendReply(socket, QStringLiteral("ProfileSync"),
+                  QJsonObject{{QStringLiteral("message"),
+                               QStringLiteral("Different owner — profile sync refused")}}, false);
+        qDebug() << "[J2J] Refused ProfileSync from" << fromNode << "(different owner)";
+        return;
+    }
 
     if (userId.isEmpty() || prof.isEmpty()) {
         sendReply(socket, QStringLiteral("ProfileSync"),

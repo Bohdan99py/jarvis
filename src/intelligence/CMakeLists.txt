@@ -55,6 +55,8 @@ add_library(jarvis_intelligence OBJECT
     file_organizer.cpp
     synonym_learner.h
     synonym_learner.cpp
+    case_distiller.h
+    case_distiller.cpp
 )
 
 target_include_directories(jarvis_intelligence PUBLIC

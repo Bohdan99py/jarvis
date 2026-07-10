@@ -33,10 +33,11 @@ QString LlmCacheManager::normalizeQuery(const QString& raw)
     return raw.trimmed().toLower().simplified();
 }
 
-QString LlmCacheManager::hashQuery(const QString& normalized)
+QString LlmCacheManager::hashQuery(qint64 ownerId, const QString& normalized)
 {
+    const QString salted = QString::number(ownerId) + QLatin1Char('|') + normalized;
     return QString::fromLatin1(
-        QCryptographicHash::hash(normalized.toUtf8(),
+        QCryptographicHash::hash(salted.toUtf8(),
                                  QCryptographicHash::Sha256).toHex());
 }
 
@@ -48,6 +49,21 @@ QStringList LlmCacheManager::significantKeywords(const QString& normalized)
             keywords.append(w);
     }
     return keywords;
+}
+
+float LlmCacheManager::keywordOverlap(const QString& a, const QString& b)
+{
+    const QStringList aKeywords = significantKeywords(normalizeQuery(a));
+    if (aKeywords.isEmpty()) return 0.0f;
+    const QSet<QString> aSet(aKeywords.begin(), aKeywords.end());
+
+    const QStringList bKeywords = significantKeywords(normalizeQuery(b));
+    const QSet<QString> bSet(bKeywords.begin(), bKeywords.end());
+
+    int hits = 0;
+    for (const QString& kw : aSet)
+        if (bSet.contains(kw)) ++hits;
+    return static_cast<float>(hits) / aSet.size();
 }
 
 // ============================================================
@@ -82,12 +98,12 @@ void LlmCacheManager::ensureTable()
 //  Lookup
 // ============================================================
 
-QString LlmCacheManager::getValidCachedResponse(const QString& query)
+QString LlmCacheManager::getValidCachedResponse(qint64 ownerId, const QString& query)
 {
     const QString norm = normalizeQuery(query);
     if (norm.isEmpty()) return {};
 
-    const QString hash = hashQuery(norm);
+    const QString hash = hashQuery(ownerId, norm);
 
     auto db = DatabaseManager::instance().isOpen()
             ? QSqlDatabase::database(QStringLiteral("jarvis_main"))
@@ -109,12 +125,12 @@ QString LlmCacheManager::getValidCachedResponse(const QString& query)
 //  Save / update
 // ============================================================
 
-void LlmCacheManager::saveResponse(const QString& query, const QString& response)
+void LlmCacheManager::saveResponse(qint64 ownerId, const QString& query, const QString& response)
 {
     const QString norm = normalizeQuery(query);
     if (norm.isEmpty() || response.isEmpty()) return;
 
-    const QString hash = hashQuery(norm);
+    const QString hash = hashQuery(ownerId, norm);
 
     auto db = DatabaseManager::instance().isOpen()
             ? QSqlDatabase::database(QStringLiteral("jarvis_main"))
@@ -123,20 +139,21 @@ void LlmCacheManager::saveResponse(const QString& query, const QString& response
 
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "INSERT INTO llm_cache (query_hash, original_query, response_text, timestamp) "
-        "VALUES (:h, :oq, :rt, datetime('now')) "
+        "INSERT INTO llm_cache (query_hash, owner_id, original_query, response_text, timestamp) "
+        "VALUES (:h, :oid, :oq, :rt, datetime('now')) "
         "ON CONFLICT(query_hash) DO UPDATE SET "
         "  response_text = excluded.response_text, "
         "  timestamp     = excluded.timestamp"));
-    q.bindValue(QStringLiteral(":h"),  hash);
-    q.bindValue(QStringLiteral(":oq"), norm.left(500));
-    q.bindValue(QStringLiteral(":rt"), response);
+    q.bindValue(QStringLiteral(":h"),   hash);
+    q.bindValue(QStringLiteral(":oid"), ownerId);
+    q.bindValue(QStringLiteral(":oq"),  norm.left(500));
+    q.bindValue(QStringLiteral(":rt"),  response);
 
     if (!q.exec()) {
         qWarning() << "[LlmCache] save error:" << q.lastError().text();
         return;
     }
-    qDebug() << "[LlmCache] Saved response for" << norm.left(60);
+    qDebug() << "[LlmCache] Saved response for owner" << ownerId << ":" << norm.left(60);
 
     // Keep the FTS5 similarity index in sync (delete+reinsert covers the
     // upsert-update case too). No-op if the fts5 module isn't available.
@@ -148,9 +165,10 @@ void LlmCacheManager::saveResponse(const QString& query, const QString& response
 
         QSqlQuery ins(db);
         ins.prepare(QStringLiteral(
-            "INSERT INTO llm_cache_fts (query_hash, original_query) VALUES (:h, :oq)"));
-        ins.bindValue(QStringLiteral(":h"),  hash);
-        ins.bindValue(QStringLiteral(":oq"), norm.left(500));
+            "INSERT INTO llm_cache_fts (query_hash, owner_id, original_query) VALUES (:h, :oid, :oq)"));
+        ins.bindValue(QStringLiteral(":h"),   hash);
+        ins.bindValue(QStringLiteral(":oid"), ownerId);
+        ins.bindValue(QStringLiteral(":oq"),  norm.left(500));
         if (!ins.exec())
             qWarning() << "[LlmCache] FTS sync error:" << ins.lastError().text();
     }
@@ -180,7 +198,7 @@ bool LlmCacheManager::ftsAvailable()
     return cached == 1;
 }
 
-QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaFts(const QStringList& keywords)
+QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaFts(qint64 ownerId, const QStringList& keywords)
 {
     QList<CaseMatch> out;
     auto db = QSqlDatabase::database(QStringLiteral("jarvis_main"));
@@ -198,8 +216,9 @@ QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaFts(const QStrin
     q.prepare(QStringLiteral(
         "SELECT c.original_query, c.response_text FROM llm_cache_fts f "
         "JOIN llm_cache c ON c.query_hash = f.query_hash "
-        "WHERE llm_cache_fts MATCH :mq ORDER BY rank LIMIT 5"));
-    q.bindValue(QStringLiteral(":mq"), ftsQuery);
+        "WHERE llm_cache_fts MATCH :mq AND f.owner_id = :oid ORDER BY rank LIMIT 5"));
+    q.bindValue(QStringLiteral(":mq"),  ftsQuery);
+    q.bindValue(QStringLiteral(":oid"), ownerId);
 
     if (!q.exec()) {
         qWarning() << "[LlmCache] FTS query error:" << q.lastError().text();
@@ -214,7 +233,7 @@ QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaFts(const QStrin
     return out;
 }
 
-QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaLike(const QStringList& keywords)
+QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaLike(qint64 ownerId, const QStringList& keywords)
 {
     QList<CaseMatch> out;
     auto db = QSqlDatabase::database(QStringLiteral("jarvis_main"));
@@ -234,8 +253,9 @@ QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaLike(const QStri
 
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT original_query, response_text FROM llm_cache WHERE %1 "
+        "SELECT original_query, response_text FROM llm_cache WHERE owner_id = :oid AND (%1) "
         "ORDER BY timestamp DESC LIMIT 5").arg(whereClause));
+    q.bindValue(QStringLiteral(":oid"), ownerId);
     for (int i = 0; i < keywords.size(); ++i)
         q.bindValue(bindKeys[i], QStringLiteral("%%1%").arg(keywords[i]));
 
@@ -249,7 +269,7 @@ QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaLike(const QStri
     return out;
 }
 
-LlmCacheManager::CaseMatch LlmCacheManager::route(const QString& query)
+LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString& query)
 {
     static constexpr float kSimilarThreshold = 0.6f;
 
@@ -258,7 +278,7 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(const QString& query)
     if (norm.length() < 5) return result;
 
     // 1. Exact hash match — fastest path, highest confidence.
-    const QString exact = getValidCachedResponse(query);
+    const QString exact = getValidCachedResponse(ownerId, query);
     if (!exact.isEmpty()) {
         result.tier         = CaseMatch::Tier::Exact;
         result.response     = exact;
@@ -267,28 +287,18 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(const QString& query)
         return result;
     }
 
-    // 2. Similarity candidates, ranked by keyword overlap against the query.
+    // 2. Similarity candidates (same owner only), ranked by keyword overlap.
     const QStringList queryKeywords = significantKeywords(norm);
     if (queryKeywords.isEmpty()) return result;
 
     const QList<CaseMatch> candidates = ftsAvailable()
-        ? candidatesViaFts(queryKeywords)
-        : candidatesViaLike(queryKeywords);
+        ? candidatesViaFts(ownerId, queryKeywords)
+        : candidatesViaLike(ownerId, queryKeywords);
     if (candidates.isEmpty()) return result;
-
-    const QSet<QString> queryKeywordSet(queryKeywords.begin(), queryKeywords.end());
 
     CaseMatch best;
     for (const CaseMatch& c : candidates) {
-        const QStringList candKeywords = significantKeywords(c.matchedQuery);
-        const QSet<QString> candKeywordSet(candKeywords.begin(), candKeywords.end());
-
-        int hits = 0;
-        for (const QString& kw : queryKeywordSet)
-            if (candKeywordSet.contains(kw)) ++hits;
-        const float overlap = queryKeywordSet.isEmpty()
-            ? 0.0f : static_cast<float>(hits) / queryKeywordSet.size();
-
+        const float overlap = keywordOverlap(norm, c.matchedQuery);
         if (overlap > best.overlap) {
             best = c;
             best.overlap = overlap;

@@ -1684,7 +1684,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
 
     // ── Step 6a: Layer-1 Confidence Router — check before any network I/O ──
     {
-        const auto match = LlmCacheManager::instance().route(text);
+        const auto match = LlmCacheManager::instance().route(chatId, text);
         const QString tagged = tagLocalCaseMatch(match, english);
         if (!tagged.isEmpty()) {
             sendMessage(chatId, tagged);
@@ -1784,7 +1784,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         deliverLlmResponse(chatId, response);
 
         // ── Step 6b: Cache the successful LLM response asynchronously ──
-        LlmCacheManager::instance().saveResponse(originalQuery, response);
+        LlmCacheManager::instance().saveResponse(chatId, originalQuery, response);
 
         qDebug() << "[TelegramGW] LLM response delivered to chat" << chatId
                  << "(" << response.length() << "chars)";
@@ -1795,7 +1795,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         cleanup();
 
         // ── Step 6c: Network failure — try router fallback, then static message ──
-        const auto fallbackMatch = LlmCacheManager::instance().route(originalQuery);
+        const auto fallbackMatch = LlmCacheManager::instance().route(chatId, originalQuery);
         const QString tagged = tagLocalCaseMatch(fallbackMatch, english);
         if (!tagged.isEmpty()) {
             sendMessage(chatId, tagged);
@@ -1828,7 +1828,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
             return;  // already cleaned up by a signal
 
         // ── Timeout fallback: same router-then-static logic ──
-        const auto fallbackMatch = LlmCacheManager::instance().route(originalQuery);
+        const auto fallbackMatch = LlmCacheManager::instance().route(chatId, originalQuery);
         const QString tagged = tagLocalCaseMatch(fallbackMatch, english);
         if (!tagged.isEmpty()) {
             sendMessage(chatId, tagged);

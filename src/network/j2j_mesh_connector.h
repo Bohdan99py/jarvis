@@ -29,6 +29,11 @@ struct J2JPeer {
     quint16   tcpPort    = 0;
     QDateTime lastSeen;
     bool      authorized = false;
+    // Peer's Telegram primary-owner chat_id, exchanged during Handshake.
+    // 0 = peer has no verified owner identity. Used to gate personal-data
+    // sync (knowledge, faces, cache, profile) to peers that are genuinely
+    // the same person's other PC — see J2JMeshConnector::isSameOwner().
+    qint64    ownerChatId = 0;
 };
 
 class J2JMeshConnector : public QObject
@@ -134,6 +139,13 @@ private:
     bool verifyToken(const QJsonObject& packet) const;
     QString authToken() const;
     QString nodeId() const { return m_nodeId; }
+
+    // This PC's own Telegram primary-owner chat_id, or 0 if unset/unavailable.
+    qint64 localOwnerChatId() const;
+    // True only if peerId has a verified ownerChatId that matches ours —
+    // both non-zero and equal. 0 on either side always means "different"
+    // (no verified identity to compare, so refuse rather than assume).
+    bool isSameOwner(const QString& peerId) const;
 
     QTcpServer*  m_tcpServer  = nullptr;
     QUdpSocket*  m_udpSocket  = nullptr;

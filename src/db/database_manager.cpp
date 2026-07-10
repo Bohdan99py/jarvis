@@ -511,6 +511,116 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=14");
         ver = 14;
     }
+    if (ver < 15) {
+        // Per-person scoping for the Layer-1 router: owner_id=0 means the
+        // desktop install, owner_id=<chat_id> means a specific Telegram
+        // user. Existing rows predate scoping and land in the desktop
+        // bucket (0) — can't be retroactively attributed.
+        execQuery("ALTER TABLE llm_cache ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 0");
+
+        // Rebuilt rather than ALTERed — avoids relying on FTS5's
+        // ALTER TABLE ADD COLUMN support, which may not exist in every
+        // SQLite build this links against.
+        execQuery("DROP TABLE IF EXISTS llm_cache_fts");
+        execQuery(R"(CREATE VIRTUAL TABLE IF NOT EXISTS llm_cache_fts USING fts5(
+            query_hash UNINDEXED,
+            owner_id UNINDEXED,
+            original_query,
+            tokenize = 'unicode61 remove_diacritics 2'
+        ))");
+        execQuery(R"(INSERT INTO llm_cache_fts(query_hash, owner_id, original_query)
+            SELECT query_hash, owner_id, original_query FROM llm_cache)");
+        execQuery("UPDATE schema_version SET version=15");
+        ver = 15;
+    }
+
+    // Self-healing check, run on every startup regardless of schema_version:
+    // rebuilding an FTS5 virtual table (DROP + CREATE) inside the v15 block
+    // above was observed to occasionally leave the OLD (pre-owner_id) table
+    // in place even though the migration recorded itself as complete —
+    // likely a transient lock from another statement on the same
+    // connection at startup. A plain ALTER TABLE ADD COLUMN can't target an
+    // FTS5 table, so instead of trusting the version bookkeeping, verify
+    // the column is actually queryable and repair it if not.
+    if (ver >= 15) {
+        bool needsRebuild = false;
+        {
+            // Scoped so this QSqlQuery's statement handle is finalized
+            // (destructor runs) before any DDL touches the same table on
+            // this connection — SQLite raises "database table is locked"
+            // if a DROP runs while another statement on the SAME
+            // connection still references that table, even a failed one.
+            QSqlQuery probe(m_db);
+            probe.exec(QStringLiteral("SELECT owner_id FROM llm_cache_fts LIMIT 1"));
+            needsRebuild = probe.lastError().isValid();
+        }
+        if (needsRebuild) {
+            // A DROP on this table via the long-lived m_db connection was
+            // observed to fail with "database table is locked" even with
+            // no other statement in scope — some retained statement/schema
+            // cache on that connection. A short-lived second connection to
+            // the same file sidesteps whatever that is; WAL mode allows it
+            // concurrently, and it's closed immediately after.
+            qWarning() << "[DB] llm_cache_fts missing owner_id column — rebuilding via temp connection";
+            const QString tempName = QStringLiteral("jarvis_fts_repair");
+            {
+                QSqlDatabase tempDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), tempName);
+                tempDb.setDatabaseName(m_dbPath);
+                tempDb.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
+                if (tempDb.open()) {
+                    QSqlQuery tq(tempDb);
+                    tq.exec(QStringLiteral("DROP TABLE IF EXISTS llm_cache_fts"));
+                    if (tq.lastError().isValid())
+                        qWarning() << "[DB] temp DROP error:" << tq.lastError().text();
+                    tq.exec(QStringLiteral(R"(CREATE VIRTUAL TABLE IF NOT EXISTS llm_cache_fts USING fts5(
+                        query_hash UNINDEXED,
+                        owner_id UNINDEXED,
+                        original_query,
+                        tokenize = 'unicode61 remove_diacritics 2'
+                    ))"));
+                    if (tq.lastError().isValid())
+                        qWarning() << "[DB] temp CREATE error:" << tq.lastError().text();
+                    tq.exec(QStringLiteral(R"(INSERT INTO llm_cache_fts(query_hash, owner_id, original_query)
+                        SELECT query_hash, owner_id, original_query FROM llm_cache)"));
+                    if (tq.lastError().isValid())
+                        qWarning() << "[DB] temp INSERT error:" << tq.lastError().text();
+                    tempDb.close();
+                } else {
+                    qWarning() << "[DB] temp repair connection failed to open:" << tempDb.lastError().text();
+                }
+            }
+            QSqlDatabase::removeDatabase(tempName);
+
+            QSqlQuery reprobe(m_db);
+            reprobe.exec(QStringLiteral("SELECT owner_id FROM llm_cache_fts LIMIT 1"));
+            if (reprobe.lastError().isValid())
+                qWarning() << "[DB] llm_cache_fts repair FAILED:" << reprobe.lastError().text();
+            else
+                qWarning() << "[DB] llm_cache_fts repaired successfully.";
+        }
+    }
+
+    if (ver < 16) {
+        // Layer 2: distilled heuristics — a cluster of similar cases for one
+        // owner gets folded into a single general principle (see
+        // CaseDistiller). heuristic_id links the source llm_cache rows to
+        // the heuristic they were folded into, so future distillation
+        // cycles only look at not-yet-clustered cases.
+        execQuery("ALTER TABLE llm_cache ADD COLUMN heuristic_id INTEGER DEFAULT NULL");
+        execQuery(R"(CREATE TABLE IF NOT EXISTS heuristics (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id   INTEGER NOT NULL,
+            topic      TEXT NOT NULL,
+            principle  TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.6,
+            case_count INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_heuristics_owner ON heuristics(owner_id)");
+        execQuery("UPDATE schema_version SET version=16");
+        ver = 16;
+    }
     return true;
 }
 
