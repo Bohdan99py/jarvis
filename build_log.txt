@@ -2,9 +2,11 @@
 C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis>call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"  1>nul 
 'vswhere.exe' is not recognized as an internal or external command,
 operable program or batch file.
-[1/5] Automatic MOC and UIC for target jarvis_db
-[2/4] Building CXX object src\db\CMakeFiles\jarvis_db.dir\database_manager.cpp.obj
-Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\db\database_manager.h
+[1/11] Automatic MOC and UIC for target jarvis_modules
+[2/10] Automatic MOC and UIC for target jarvis_platform
+[3/9] Automatic MOC and UIC for target jarvis_media
+[4/8] Building CXX object src\media\CMakeFiles\jarvis_media.dir\media_analyzer_module.cpp.obj
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\media\media_analyzer_module.h
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
 Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobject.h
 Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobjectdefs.h
@@ -288,6 +290,1396 @@ operable program or batch file.
 Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xcall_once.h
 Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xerrc.h
 Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfilesystem_abi.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\media\..\engine\jarvis.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtGui\QImage
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtGui/qimage.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtguiglobal.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtgui-config.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtguiexports.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qcolor.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qrgb.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qrgba64.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpaintdevice.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qwindowdefs.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtGui/qwindowdefs_win.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qrect.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcheckedint_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmargins.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q23utility.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20utility.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsize.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qpoint.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpixelformat.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtransform.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpolygon.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qregion.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qspan.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cassert
+Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20iterator.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qline.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMutex
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmutex.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdeadlinetimer.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtsan_impl.h
+Примечание: включение файла:   C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\windows.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winapifamily.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winpackagefamily.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\sdkddkver.h
+Примечание: включение файла:    C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\excpt.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\windef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\minwindef.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings_strict.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings_undef.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\driverspecs.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\sdv_driverspecs.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnt.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\kernelspecs.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\basetsd.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\guiddef.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack8.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack1.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack1.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\apiset.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\ktmtypes.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\apisetcconv.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\minwinbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\apiquery2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processenv.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fileapifromapp.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fileapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\debugapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\utilapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\handleapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\errhandlingapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fibersapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\namedpipeapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\profileapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\heapapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\ioapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\synchapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\interlockedapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processthreadsapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\sysinfoapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\memoryapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\enclaveapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\threadpoollegacyapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\threadpoolapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\jobapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\jobapi2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wow64apiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\libloaderapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\securitybaseapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\namespaceapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\systemtopologyapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processtopologyapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\securityappcontainer.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\realtimeapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winerror.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\timezoneapi.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wingdi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack1.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winuser.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\tvout.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnls.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\datetimeapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\stringapiset.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnls.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wincon.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wincontypes.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi3.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winver.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\verrsrc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winreg.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\reason.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnetwk.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wnnc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\stralign.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winsvc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\mcx.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\imm.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\ime_cmodes.h
+Примечание: включение файла:   C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\objbase.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpc.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcdce.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcdcep.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\rpcnsi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcnterr.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcasync.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcndr.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\rpcnsip.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcsal.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\combaseapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wtypesbase.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\guiddef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\unknwnbase.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\ole2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oleauto.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oaidl.h
+Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\objidl.h
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\unknwn.h
+Примечание: включение файла:           C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wtypes.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\coml2api.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\propidlbase.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oleidl.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\objidlbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\guiddef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\cguid.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\urlmon.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\servprov.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\msxml.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\propidl.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:   C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\engine\command_registry.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QVector
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvector.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:   C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\common\applauncher.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMap
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmap.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata_impl.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QFileInfo
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfileinfo.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfile.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfiledevice.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiodevice.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\filesystem
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iomanip
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\istream
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ios
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocnum
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\streambuf
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xiosbase
+Примечание: включение файла:                C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h
+Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocale
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfacet
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocinfo
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_xlocinfo_types.hpp
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\clocale
+Примечание: включение файла:                   C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\locale.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmon
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xloctime
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\locale
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocbuf
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmes
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdatetime.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcalendar.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlocale.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvariant.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdebug.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtextstream.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontiguouscache.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer_impl.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\set
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\unordered_set
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qset.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qhash.h
+Примечание: включение файла:             C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvarlengtharray.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qalloc.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearraylist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtimezone.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDir
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdir.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdirlisting.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QProcess
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocess.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QSettings
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsettings.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\shellapi.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QRegularExpression
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/qregularexpression.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDebug
+[5/8] Building CXX object src\platform\CMakeFiles\jarvis_platform.dir\clipboard_watcher.cpp.obj
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\platform\clipboard_watcher.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobject.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobjectdefs.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qnamespace.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qglobal.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\type_traits
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\yvals_core.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\sal.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\concurrencysal.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vadefs.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xkeycheck.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstddef
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\stddef.h
+Примечание: включение файла:           C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xtr1common
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstdint
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdint.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\utility
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\initializer_list
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdbool.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtcoreglobal.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtversionchecks.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtconfiginclude.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\version
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qconfig.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtcore-config.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtconfigmacros.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtdeprecationdefinitions.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtcoreexports.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtdeprecationmarkers.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtclasshelpermacros.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtpreprocessorsupport.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qassert.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtnoop.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtypes.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtversion.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtypeinfo.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainerfwd.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\limits
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cfloat
+Примечание: включение файла:            C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\float.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\climits
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\limits.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cwchar
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstdio
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\stdio.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wstdio.h
+Примечание: включение файла:               C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_stdio_config.h
+Примечание: включение файла:            C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\wchar.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_memcpy_s.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\errno.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_string.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wconio.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wctype.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wdirect.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wio.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_share.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wprocess.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wstdlib.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wstring.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wtime.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\sys/stat.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\sys/types.h
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\intrin.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\intrin0.inl.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\setjmp.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\immintrin.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\wmmintrin.h
+Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\nmmintrin.h
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\smmintrin.h
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\tmmintrin.h
+Примечание: включение файла:                   C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\pmmintrin.h
+Примечание: включение файла:                    C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\emmintrin.h
+Примечание: включение файла:                     C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xmmintrin.h
+Примечание: включение файла:                      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\mmintrin.h
+Примечание: включение файла:                      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\malloc.h
+Примечание: включение файла:                       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_malloc.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\zmmintrin.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ammintrin.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\intrin0.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsysinfo.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlogging.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qflags.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompare_impl.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\algorithm
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_heap_algorithms.hpp
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xutility
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\yvals.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\crtdbg.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_new_debug.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_new.h
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\crtdefs.h
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\use_ansi.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_iter_core.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstdlib
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_math.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\stdlib.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_search.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstring
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\string.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_memory.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_minmax.hpp
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xmemory
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\new
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\exception
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_exception.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\eh.h
+Примечание: включение файла:               C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_terminate.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xatomic.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qatomic.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbasicatomic.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qatomic_cxx11.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qgenericatomic.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qyieldcpu.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\atomic
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xthreads.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_threads_core.hpp
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xtimec.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ctime
+Примечание: включение файла:                C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\time.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qconstructormacros.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdarwinhelpers.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qexceptionhandling.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qforeach.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qttypetraits.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\optional
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xsmf_control.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\tuple
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\variant
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfunctionpointer.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qglobalstatic.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmalloc.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qminmax.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qnumeric.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cmath
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20type_traits.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qoverload.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qswap.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtenvironmentvariables.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtresource.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qttranslation.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qversiontagging.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompare.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstdlibdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcomparehelpers.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\functional
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\typeinfo
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_typeinfo.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\unordered_map
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xhash
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\list
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xpolymorphic_allocator.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vector
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_bit_utils.hpp
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_sanitizer_annotate_container.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xbit_ops.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xnode_handle.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtmetamacros.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobjectdefs_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfunctionaltools_impl.h
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iosfwd
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringview.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringview.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearray.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qrefcount.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qarraydata.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qpair.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qarraydatapointer.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qarraydataops.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qxptype_traits.h
+Примечание: включение файла:             C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:             C:\Qt\6.11.1\msvc2022_64\include\QtCore/q23type_traits.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iterator
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20functional.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20memory.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/q17memory.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearrayalgorithms.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdarg.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearrayview.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\string
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xstring
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_string_view.hpp
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cctype
+Примечание: включение файла:            C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\ctype.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\string_view
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringalgorithms.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlatin1stringview.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qanystringview.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qutf8stringview.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringtokenizer.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringbuilder.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringconverter.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringconverter_base.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringbuilder.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qhashfunctions.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\numeric
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiterator.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearraylist.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlist.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qalgorithms.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20bit.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsimd.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringmatcher.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qscopedpointer.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmetatype.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdatastream.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiodevicebase.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfloat16.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmath.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtformat_impl.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiterable.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtaggedpointer.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmetacontainer.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainerinfo.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qscopeguard.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\array
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\map
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xtree
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobject_impl.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbindingstorage.h
+Примечание: включение файла:     C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\chrono
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_chrono.hpp
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ratio
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\system_error
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_system_error_abi.hpp
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cerrno
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdexcept
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xcall_once.h
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xerrc.h
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfilesystem_abi.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDateTime
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdatetime.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcalendar.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlocale.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvariant.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdebug.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtextstream.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontiguouscache.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer_impl.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\set
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\unordered_set
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmap.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata_impl.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qset.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qhash.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvarlengtharray.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qalloc.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q23utility.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20utility.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearraylist.h
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\platform\..\engine\jarvis.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtGui\QImage
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtGui/qimage.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtguiglobal.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtgui-config.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtguiexports.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qcolor.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qrgb.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qrgba64.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpaintdevice.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qwindowdefs.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtGui/qwindowdefs_win.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qrect.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcheckedint_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmargins.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsize.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qpoint.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpixelformat.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtransform.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpolygon.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qregion.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qspan.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cassert
+Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20iterator.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qline.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMutex
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmutex.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdeadlinetimer.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtsan_impl.h
+Примечание: включение файла:   C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\windows.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winapifamily.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winpackagefamily.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\sdkddkver.h
+Примечание: включение файла:    C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\excpt.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\windef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\minwindef.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings_strict.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings_undef.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\driverspecs.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\sdv_driverspecs.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnt.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\kernelspecs.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\basetsd.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\guiddef.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack8.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack1.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack1.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\apiset.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\ktmtypes.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\apisetcconv.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\minwinbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\apiquery2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processenv.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fileapifromapp.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fileapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\debugapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\utilapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\handleapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\errhandlingapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fibersapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\namedpipeapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\profileapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\heapapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\ioapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\synchapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\interlockedapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processthreadsapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\sysinfoapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\memoryapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\enclaveapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\threadpoollegacyapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\threadpoolapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\jobapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\jobapi2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wow64apiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\libloaderapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\securitybaseapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\namespaceapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\systemtopologyapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processtopologyapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\securityappcontainer.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\realtimeapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winerror.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\timezoneapi.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wingdi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack1.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winuser.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\tvout.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnls.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\datetimeapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\stringapiset.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnls.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wincon.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wincontypes.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi3.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winver.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\verrsrc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winreg.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\reason.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnetwk.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wnnc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\stralign.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winsvc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\mcx.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\imm.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\ime_cmodes.h
+Примечание: включение файла:   C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\objbase.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpc.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcdce.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcdcep.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\rpcnsi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcnterr.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcasync.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcndr.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\rpcnsip.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcsal.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\combaseapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wtypesbase.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\guiddef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\unknwnbase.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\ole2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oleauto.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oaidl.h
+Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\objidl.h
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\unknwn.h
+Примечание: включение файла:           C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wtypes.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\coml2api.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\propidlbase.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oleidl.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\objidlbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\guiddef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\cguid.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\urlmon.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\servprov.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\msxml.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\propidl.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:   C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\engine\command_registry.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QVector
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvector.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:   C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\common\applauncher.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMap
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QFileInfo
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfileinfo.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfile.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfiledevice.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiodevice.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\filesystem
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iomanip
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\istream
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ios
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocnum
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\streambuf
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xiosbase
+Примечание: включение файла:                C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h
+Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocale
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfacet
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocinfo
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_xlocinfo_types.hpp
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\clocale
+Примечание: включение файла:                   C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\locale.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmon
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xloctime
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\locale
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocbuf
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmes
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtimezone.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDir
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdir.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdirlisting.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QProcess
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocess.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QSettings
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsettings.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\shellapi.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtGui\QGuiApplication
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtGui/qguiapplication.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcoreapplication.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcoreevent.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbasictimer.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qabstracteventdispatcher.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qeventloop.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qnativeinterface.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcoreapplication_platform.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcoreapplication.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtGui/qinputmethod.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtGui/qguiapplication_platform.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qguiapplication.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtGui\QClipboard
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtGui/qclipboard.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QCryptographicHash
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcryptographichash.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QRegularExpression
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/qregularexpression.h
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDebug
+[6/8] Building CXX object src\modules\CMakeFiles\jarvis_modules.dir\gourmet_module.cpp.obj
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\modules\gourmet_module.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobject.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobjectdefs.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qnamespace.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qglobal.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\type_traits
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\yvals_core.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\sal.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\concurrencysal.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vadefs.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xkeycheck.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstddef
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\stddef.h
+Примечание: включение файла:           C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xtr1common
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstdint
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdint.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\utility
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\initializer_list
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdbool.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtcoreglobal.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtversionchecks.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtconfiginclude.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\version
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qconfig.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtcore-config.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtconfigmacros.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtdeprecationdefinitions.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtcoreexports.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtdeprecationmarkers.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtclasshelpermacros.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtpreprocessorsupport.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qassert.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtnoop.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtypes.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtversion.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtypeinfo.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainerfwd.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\limits
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cfloat
+Примечание: включение файла:            C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\float.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\climits
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\limits.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cwchar
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstdio
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\stdio.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wstdio.h
+Примечание: включение файла:               C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_stdio_config.h
+Примечание: включение файла:            C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\wchar.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_memcpy_s.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\errno.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_string.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wconio.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wctype.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wdirect.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wio.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_share.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wprocess.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wstdlib.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wstring.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_wtime.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\sys/stat.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\sys/types.h
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\intrin.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\intrin0.inl.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\setjmp.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\immintrin.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\wmmintrin.h
+Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\nmmintrin.h
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\smmintrin.h
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\tmmintrin.h
+Примечание: включение файла:                   C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\pmmintrin.h
+Примечание: включение файла:                    C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\emmintrin.h
+Примечание: включение файла:                     C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xmmintrin.h
+Примечание: включение файла:                      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\mmintrin.h
+Примечание: включение файла:                      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\malloc.h
+Примечание: включение файла:                       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_malloc.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\zmmintrin.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ammintrin.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\intrin0.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsysinfo.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlogging.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qflags.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompare_impl.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\algorithm
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_heap_algorithms.hpp
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xutility
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\yvals.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\crtdbg.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_new_debug.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_new.h
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\crtdefs.h
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\use_ansi.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_iter_core.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstdlib
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_math.h
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\stdlib.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_search.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cstring
+Примечание: включение файла:             C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\string.h
+Примечание: включение файла:              C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_memory.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_minmax.hpp
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xmemory
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\new
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\exception
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_exception.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\eh.h
+Примечание: включение файла:               C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_terminate.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xatomic.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qatomic.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbasicatomic.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qatomic_cxx11.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qgenericatomic.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qyieldcpu.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\atomic
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xthreads.h
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_threads_core.hpp
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xtimec.h
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ctime
+Примечание: включение файла:                C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\time.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qconstructormacros.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdarwinhelpers.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qexceptionhandling.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qforeach.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qttypetraits.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\optional
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xsmf_control.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\tuple
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\variant
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfunctionpointer.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qglobalstatic.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmalloc.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qminmax.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qnumeric.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cmath
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20type_traits.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qoverload.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qswap.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtenvironmentvariables.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtresource.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qttranslation.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qversiontagging.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompare.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstdlibdetection.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcomparehelpers.h
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\functional
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\typeinfo
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_typeinfo.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\unordered_map
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xhash
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\list
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xpolymorphic_allocator.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vector
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_bit_utils.hpp
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_sanitizer_annotate_container.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xbit_ops.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xnode_handle.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtmetamacros.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobjectdefs_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfunctionaltools_impl.h
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iosfwd
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringview.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringview.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearray.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qrefcount.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qarraydata.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qpair.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qarraydatapointer.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qarraydataops.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qxptype_traits.h
+Примечание: включение файла:             C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:             C:\Qt\6.11.1\msvc2022_64\include\QtCore/q23type_traits.h
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iterator
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20functional.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20memory.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/q17memory.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearrayalgorithms.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdarg.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearrayview.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\string
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xstring
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_string_view.hpp
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cctype
+Примечание: включение файла:            C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\ctype.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\string_view
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringalgorithms.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlatin1stringview.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qanystringview.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qutf8stringview.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringtokenizer.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringbuilder.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringconverter.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringconverter_base.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringbuilder.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstring.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qhashfunctions.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringfwd.h
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\numeric
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiterator.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearraylist.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlist.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qalgorithms.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20bit.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsimd.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringmatcher.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qscopedpointer.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmetatype.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdatastream.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiodevicebase.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfloat16.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmath.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtformat_impl.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiterable.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtaggedpointer.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmetacontainer.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainerinfo.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qscopeguard.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\array
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\map
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xtree
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qobject_impl.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbindingstorage.h
+Примечание: включение файла:     C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\chrono
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_chrono.hpp
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ratio
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\system_error
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_system_error_abi.hpp
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cerrno
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\stdexcept
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xcall_once.h
+Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xerrc.h
+Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfilesystem_abi.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\modules\..\engine\jarvis.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtGui\QImage
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtGui/qimage.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtguiglobal.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtgui-config.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtguiexports.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qcolor.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qrgb.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qrgba64.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocessordetection.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpaintdevice.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qwindowdefs.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtGui/qwindowdefs_win.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qrect.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcheckedint_impl.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmargins.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q23utility.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20utility.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsize.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qpoint.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpixelformat.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtGui/qtransform.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qpolygon.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtGui/qregion.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qspan.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cassert
+Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20iterator.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qline.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMutex
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmutex.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdeadlinetimer.h
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtsan_impl.h
+Примечание: включение файла:   C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\windows.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winapifamily.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winpackagefamily.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\sdkddkver.h
+Примечание: включение файла:    C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\excpt.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\windef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\minwindef.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings_strict.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\specstrings_undef.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\driverspecs.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\sdv_driverspecs.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnt.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\kernelspecs.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\basetsd.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\guiddef.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack4.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack8.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack1.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\pshpack1.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\apiset.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\ktmtypes.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\apisetcconv.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\minwinbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\apiquery2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processenv.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fileapifromapp.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fileapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\debugapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\utilapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\handleapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\errhandlingapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\fibersapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\namedpipeapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\profileapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\heapapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\ioapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\synchapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\interlockedapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processthreadsapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\sysinfoapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\memoryapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\enclaveapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\threadpoollegacyapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\threadpoolapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\jobapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\jobapi2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wow64apiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\libloaderapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\securitybaseapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\namespaceapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\systemtopologyapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\processtopologyapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\securityappcontainer.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\realtimeapiset.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\winerror.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\timezoneapi.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wingdi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack1.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack4.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winuser.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\tvout.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnls.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\datetimeapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\stringapiset.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnls.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wincon.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\wincontypes.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi2.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\consoleapi3.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winver.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\verrsrc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winreg.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\reason.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winnetwk.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wnnc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\stralign.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\winsvc.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\mcx.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\imm.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\ime_cmodes.h
+Примечание: включение файла:   C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\objbase.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpc.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcdce.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcdcep.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\rpcnsi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcnterr.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcasync.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcndr.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\rpcnsip.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\rpcsal.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\combaseapi.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wtypesbase.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\guiddef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\unknwnbase.h
+Примечание: включение файла:      C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\ole2.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oleauto.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\pshpack8.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oaidl.h
+Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\objidl.h
+Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\unknwn.h
+Примечание: включение файла:           C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\wtypes.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\coml2api.h
+Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\propidlbase.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\oleidl.h
+Примечание: включение файла:       C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\objidlbase.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\guiddef.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\cguid.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\urlmon.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\servprov.h
+Примечание: включение файла:     C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\msxml.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\propidl.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\shared\poppack.h
+Примечание: включение файла:   C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\engine\command_registry.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QVector
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvector.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:   C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\common\applauncher.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMap
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmap.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata_impl.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QFileInfo
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfileinfo.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfile.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfiledevice.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiodevice.h
+Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\filesystem
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iomanip
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\istream
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp
+Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ios
+Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocnum
+Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\streambuf
+Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xiosbase
+Примечание: включение файла:                C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h
+Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocale
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfacet
+Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocinfo
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_xlocinfo_types.hpp
+Примечание: включение файла:                  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\clocale
+Примечание: включение файла:                   C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\locale.h
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmon
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xloctime
+Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\locale
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocbuf
+Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmes
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdatetime.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcalendar.h
+Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlocale.h
+Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvariant.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdebug.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtextstream.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontiguouscache.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer_impl.h
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\set
+Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\unordered_set
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qset.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qhash.h
+Примечание: включение файла:             C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:           C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvarlengtharray.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qalloc.h
+Примечание: включение файла:            C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearraylist.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtimezone.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDir
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdir.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdirlisting.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QProcess
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qprocess.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
+Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore\QSettings
+Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsettings.h
+Примечание: включение файла:    C:\Program Files (x86)\Windows Kits\10\\include\10.0.26100.0\\um\shellapi.h
+Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\db\database_manager.h
+Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlDatabase
 Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtSql/qsqldatabase.h
 Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtSql/qtsqlglobal.h
@@ -295,29 +1687,6 @@ operable program or batch file.
 Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtSql/qtsqlexports.h
 Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
 Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmetaobject.h
-Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvariant.h
-Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdebug.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtextstream.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qchar.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontiguouscache.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsharedpointer_impl.h
-Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\set
-Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\unordered_set
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmap.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qshareddata_impl.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qset.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qhash.h
-Примечание: включение файла:          C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qvarlengtharray.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qalloc.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcontainertools_impl.h
-Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/q23utility.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20utility.h
-Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
-Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qbytearraylist.h
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlQuery
 Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtSql/qsqlquery.h
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlError
@@ -325,89 +1694,13 @@ operable program or batch file.
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QVariant
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDateTime
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdatetime.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcalendar.h
-Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qlocale.h
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QList
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMap
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QMutex
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qmutex.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdeadlinetimer.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtsan_impl.h
-Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\db\llm_cache_manager.h
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QObject
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStringList
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QList
-Примечание: включение файла:  C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\common\jarvis_paths.h
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStandardPaths
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstandardpaths.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDir
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdir.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qdirlisting.h
-Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfiledevice.h
-Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qiodevice.h
-Примечание: включение файла:        C:\Qt\6.11.1\msvc2022_64\include\QtCore/qspan.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcompilerdetection.h
-Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\cassert
-Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\assert.h
-Примечание: включение файла:         C:\Qt\6.11.1\msvc2022_64\include\QtCore/q20iterator.h
-Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\filesystem
-Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\iomanip
-Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\istream
-Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp
-Примечание: включение файла:           C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ios
-Примечание: включение файла:            C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocnum
-Примечание: включение файла:             C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\streambuf
-Примечание: включение файла:              C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xiosbase
-Примечание: включение файла:               C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h
-Примечание: включение файла:               C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocale
-Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xfacet
-Примечание: включение файла:                C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocinfo
-Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\__msvc_xlocinfo_types.hpp
-Примечание: включение файла:                 C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\clocale
-Примечание: включение файла:                  C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\locale.h
-Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmon
-Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xloctime
-Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\locale
-Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocbuf
-Примечание: включение файла:         C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xlocmes
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfile.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qfileinfo.h
-Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qtimezone.h
-Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qstringlist.h
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QFileInfo
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore\QString
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlQuery
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlError
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlRecord
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtSql/qsqlrecord.h
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QStandardPaths
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDir
 Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QDebug
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QUuid
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/quuid.h
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qendian.h
-Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QThread
-Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/qthread.h
-Примечание: включение файла:    C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\future
-Примечание: включение файла:     C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\condition_variable
-Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\mutex
-Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\thread
-Примечание: включение файла:        C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\process.h
-Примечание: включение файла:         C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h
-Примечание: включение файла:          C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h
-Примечание: включение файла:          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\vcruntime_startup.h
-Примечание: включение файла:     C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ppltasks.h
-Примечание: включение файла:      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\pplwin.h
-Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\pplinterface.h
-Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\ppltaskscheduler.h
-Примечание: включение файла:        C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\crtdefs.h
-Примечание: включение файла:       C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\pplcancellation_token.h
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QFileInfo
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlQuery
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlDatabase
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtSql\QSqlError
 Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QJsonObject
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/qjsonobject.h
 Примечание: включение файла:    C:\Qt\6.11.1\msvc2022_64\include\QtCore/qjsonvalue.h
@@ -415,15 +1708,16 @@ operable program or batch file.
 Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qcborcommon.h
 Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qregularexpression.h
 Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qurl.h
+Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/quuid.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qendian.h
+Примечание: включение файла:       C:\Qt\6.11.1\msvc2022_64\include\QtCore/qsystemdetection.h
 Примечание: включение файла:     C:\Qt\6.11.1\msvc2022_64\include\QtCore/qjsondocument.h
 Примечание: включение файла:      C:\Qt\6.11.1\msvc2022_64\include\QtCore/qjsonparseerror.h
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QJsonDocument
 Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QJsonArray
 Примечание: включение файла:   C:\Qt\6.11.1\msvc2022_64\include\QtCore/qjsonarray.h
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QTextStream
-Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QFile
-[3/4] Linking CXX static library bin\JarvisCore.lib
-[4/4] Linking CXX executable bin\jarvis.exe
+Примечание: включение файла:  C:\Qt\6.11.1\msvc2022_64\include\QtCore\QRegularExpression
+[7/8] Linking CXX static library bin\JarvisCore.lib
+[8/8] Linking CXX executable bin\jarvis.exe
 Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libvosk.dll
 Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/opencv_world4100.dll
 Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libwinpthread-1.dll

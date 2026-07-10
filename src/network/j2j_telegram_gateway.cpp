@@ -205,8 +205,17 @@ QString J2JTelegramGateway::localized(TgStringId id, bool en)
                   : QStringLiteral("⏰ Сессия истекла. Пожалуйста, переподключите устройство.");
 
     case TgStringId::PairSuccess:
-        return en ? QStringLiteral("🔗 Device paired successfully! Role: *%1*")
-                  : QStringLiteral("🔗 Устройство подключено! Роль: *%1*");
+        // This binds THIS chat to a local device role (Developer/QA_Tester/
+        // etc), not Telegram bot admin rights — worth spelling out, since
+        // "Admin" isn't even a role this flow can grant, and users have
+        // reasonably assumed entering this code makes them bot Admin.
+        return en ? QStringLiteral("🔗 Device paired! Local role: *%1*\n"
+                                    "(This sets your device role, not Telegram bot admin rights — "
+                                    "for that, see the desktop app's \"Telegram QA Gateway → Manage Roles\".)")
+                  : QStringLiteral("🔗 Устройство подключено! Локальная роль: *%1*\n"
+                                    "(Это устанавливает роль устройства, а не права администратора "
+                                    "бота — для этого см. в десктоп-приложении «Telegram QA Gateway → "
+                                    "Роли пользователей».)");
     }
 
     return QStringLiteral("[???]");
@@ -497,8 +506,17 @@ void J2JTelegramGateway::processUpdate(const QJsonObject& update)
 
         // Text message
         QString text = msg[QStringLiteral("text")].toString().trimmed();
-        if (!text.isEmpty())
-            handleMessage(chatId, text, firstName);
+        if (!text.isEmpty()) {
+            // 0 if the user didn't use Telegram's "Reply" on a specific
+            // message — see CuriosityEngine::consumeAnswer.
+            qint64 replyToMessageId = 0;
+            if (msg.contains(QStringLiteral("reply_to_message"))) {
+                replyToMessageId = static_cast<qint64>(
+                    msg[QStringLiteral("reply_to_message")].toObject()
+                       [QStringLiteral("message_id")].toDouble());
+            }
+            handleMessage(chatId, text, firstName, /*fromRelay=*/false, replyToMessageId);
+        }
     }
 
     // Handle inline keyboard callbacks
@@ -523,7 +541,8 @@ void J2JTelegramGateway::processUpdate(const QJsonObject& update)
 // ============================================================
 
 void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
-                                        const QString& firstName, bool fromRelay)
+                                        const QString& firstName, bool fromRelay,
+                                        qint64 replyToMessageId)
 {
     emit messageReceived(chatId, text);
 
@@ -923,7 +942,7 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
 
     // ── 4. Free-dialogue LLM routing (lowest priority) ──────
     m_accessMgr->logActivity(chatId, QStringLiteral("message"), text.left(50));
-    routeToLlm(chatId, text, session.isEnglish);
+    routeToLlm(chatId, text, session.isEnglish, replyToMessageId);
 }
 
 // ============================================================
@@ -1665,7 +1684,7 @@ static QString tagLocalCaseMatch(const LlmCacheManager::CaseMatch& match, bool e
 }
 
 void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
-                                      bool english)
+                                      bool english, qint64 replyToMessageId)
 {
     if (!m_jarvis) {
         sendMessage(chatId, english
@@ -1682,6 +1701,12 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
         return;
     }
 
+    // A pending CuriosityEngine question takes priority over the Layer-1
+    // router — otherwise a short reply like "да"/"yes" could coincidentally
+    // Exact/Similar-match a cached case and get answered from cache,
+    // skipping Jarvis::processCommand entirely (where consumeAnswer() would
+    // have recognized it as the answer to that specific question).
+    if (!CuriosityEngine::instance().hasPendingQuestion()) {
     // ── Step 6a: Layer-1 Confidence Router — check before any network I/O ──
     {
         const auto match = LlmCacheManager::instance().route(chatId, text);
@@ -1698,6 +1723,7 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
             return;
         }
     }
+    } // !hasPendingQuestion()
 
     session.awaitingLlm = true;
     startTypingIndicator(chatId);
@@ -1747,7 +1773,8 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
     // Mood + diagram instructions are now injected globally in Jarvis::processCommand()
 
     m_jarvis->setTelegramOrigin(true);
-    QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction, chatId);
+    QString syncResponse = m_jarvis->processCommand(text, QString(), langInstruction, chatId,
+                                                      replyToMessageId);
 
     if (!syncResponse.isEmpty() && syncResponse != QStringLiteral("...")) {
         m_jarvis->setTelegramOrigin(false);
@@ -2319,9 +2346,17 @@ void J2JTelegramGateway::sendOutboundWithButtons(qint64 chatId, const QString& t
 
 void J2JTelegramGateway::sendProactiveQuestion(qint64 chatId, const QString& text, bool english)
 {
-    sendMessage(chatId, text,
+    // Capture the message_id Telegram assigns so a later reply_to_message
+    // can be matched back to THIS specific question — see
+    // CuriosityEngine::m_pendingMessageId. No time limit on that match,
+    // unlike the timestamp-window fallback for free-text answers.
+    sendMessageRaw(chatId, text,
         buildConfirmButtons(QStringLiteral("curiosity_yes"),
-                            QStringLiteral("curiosity_no"), english));
+                            QStringLiteral("curiosity_no"), english),
+        /*allowMarkdown=*/true,
+        [](qint64 messageId) {
+            CuriosityEngine::instance().setPendingMessageId(messageId);
+        });
 }
 
 void J2JTelegramGateway::markAwaitingCompanionAnswer(qint64 chatId)
@@ -2723,13 +2758,22 @@ void J2JTelegramGateway::sendPhotoFromBuffer(qint64 chatId,
 void J2JTelegramGateway::sendMessage(qint64 chatId, const QString& text,
                                       const QJsonObject& replyMarkup)
 {
+    sendMessageRaw(chatId, text, replyMarkup, /*allowMarkdown=*/true, nullptr);
+}
+
+void J2JTelegramGateway::sendMessageRaw(qint64 chatId, const QString& text,
+                                         const QJsonObject& replyMarkup,
+                                         bool allowMarkdown,
+                                         std::function<void(qint64)> onSent)
+{
     if (m_botToken.isEmpty()) return;
 
     QUrl url(kTgApiBase + m_botToken + QStringLiteral("/sendMessage"));
     QJsonObject body;
-    body[QStringLiteral("chat_id")]    = chatId;
-    body[QStringLiteral("text")]       = text;
-    body[QStringLiteral("parse_mode")] = QStringLiteral("Markdown");
+    body[QStringLiteral("chat_id")] = chatId;
+    body[QStringLiteral("text")]    = text;
+    if (allowMarkdown)
+        body[QStringLiteral("parse_mode")] = QStringLiteral("Markdown");
 
     if (!replyMarkup.isEmpty())
         body[QStringLiteral("reply_markup")] = replyMarkup;
@@ -2741,7 +2785,43 @@ void J2JTelegramGateway::sendMessage(qint64 chatId, const QString& text,
 
     QNetworkReply* reply = m_network->post(
         req, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, chatId, text, replyMarkup, allowMarkdown, onSent]() {
+        reply->deleteLater();
+
+        bool failed = reply->error() != QNetworkReply::NoError;
+        QJsonObject resp;
+        QByteArray respBody;
+        if (!failed) {
+            respBody = reply->readAll();
+            resp = QJsonDocument::fromJson(respBody).object();
+            failed = !resp[QStringLiteral("ok")].toBool();
+        }
+
+        if (!failed) {
+            if (onSent) {
+                const qint64 messageId = static_cast<qint64>(
+                    resp[QStringLiteral("result")].toObject()
+                        [QStringLiteral("message_id")].toDouble());
+                onSent(messageId);
+            }
+            return;
+        }
+
+        if (allowMarkdown) {
+            // Most likely a Markdown parse error (unescaped _/*/`/[ from
+            // LLM output) — Telegram rejects the whole message and we'd
+            // otherwise silently drop the reply. Retry once as plain text.
+            qWarning() << "[TelegramGW] sendMessage (Markdown) failed:"
+                       << reply->errorString() << respBody
+                       << "— retrying as plain text";
+            sendMessageRaw(chatId, text, replyMarkup, false, onSent);
+        } else {
+            qWarning() << "[TelegramGW] sendMessage (plain text) failed:"
+                       << reply->errorString() << respBody;
+        }
+    });
 }
 
 void J2JTelegramGateway::sendMainMenu(qint64 chatId, bool english)

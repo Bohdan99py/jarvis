@@ -49,6 +49,17 @@ private:
         QStringList queries;
         QStringList responses;
     };
+    // A new case that may confirm or contradict an existing opinion —
+    // the single best-overlapping not-yet-considered case found for that
+    // opinion's topic since it was last updated.
+    struct OpinionCheck {
+        qint64  opinionId = 0;
+        qint64  ownerId   = 0;
+        QString topic;
+        QString position;
+        QString caseQuery;
+        QString caseResponse;
+    };
 
     void onTimerTick();
     void runCycle();
@@ -58,12 +69,26 @@ private:
     static QString buildPrompt(const Cluster& c);
     void storeHeuristic(const Cluster& c, const QString& claudeResponse);
 
+    // Layer 3: contradiction checking, runs after the clustering pass above
+    // finishes each cycle.
+    void startOpinionCheckPhase();
+    QList<OpinionCheck> buildOpinionChecks();
+    void processNextOpinionCheck();
+    static QString buildOpinionCheckPrompt(const OpinionCheck& check);
+    void applyOpinionCheckResult(const OpinionCheck& check, const QString& claudeResponse);
+
     ClaudeApi*    m_claudeApi = nullptr;
     QTimer*       m_timer     = nullptr;
     QList<Cluster> m_pendingClusters;
+    QList<OpinionCheck> m_pendingOpinionChecks;
     int            m_createdThisCycle = 0;
 
     static constexpr float kClusterOverlapThreshold = 0.5f;
     static constexpr int   kMinClusterSize           = 3;
     static constexpr qint64 kMinHoursBetweenRuns      = 20;
+    // A contradicted opinion isn't silently overwritten below this
+    // confidence, or after this many contradictions — instead the owner is
+    // asked (see CuriosityEngine::postOpinionRevisionQuestion).
+    static constexpr float kOpinionRevisionConfidenceFloor = 0.3f;
+    static constexpr int   kOpinionRevisionContradictionThreshold = 2;
 };

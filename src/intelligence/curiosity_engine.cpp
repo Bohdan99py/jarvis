@@ -662,6 +662,13 @@ void CuriosityEngine::postContextAwareQuestion()
     case ProactiveCategory::VisualContextual: prefix = QStringLiteral("👁️ "); break;
     case ProactiveCategory::DoubtVerification: prefix = QStringLiteral("🤔 "); break;
     case ProactiveCategory::PersonalProfiling: prefix = QStringLiteral("📋 "); break;
+    case ProactiveCategory::OpinionRevision:
+        // Never reached here — OpinionRevision is posted on demand by
+        // postOpinionRevisionQuestion(), not selected by selectCategory()'s
+        // idle-timer rotation. Case present only so this switch stays
+        // exhaustive over ProactiveCategory.
+        prefix = QStringLiteral("🤔 ");
+        break;
     }
 
     const QString msg = prefix + question;
@@ -674,6 +681,8 @@ void CuriosityEngine::postContextAwareQuestion()
     m_pendingTimestamp = QDateTime::currentDateTime();
     m_pendingCategory  = category;
     m_pendingDoubtId   = 0;
+    m_pendingMessageId = 0; // set asynchronously once sendMessageRaw's onSent fires
+    m_pendingOpinionId = 0;
     if (category == ProactiveCategory::DoubtVerification) {
         const auto doubts = SelfJournal::instance().topDoubtsForVerification(1);
         if (!doubts.isEmpty()) m_pendingDoubtId = doubts.first().id;
@@ -694,6 +703,27 @@ void CuriosityEngine::postContextAwareQuestion()
     qDebug() << "[CuriosityEngine] Proactive question ("
              << static_cast<int>(category) << ") to chat" << m_targetChatId
              << ":" << question.left(60);
+}
+
+void CuriosityEngine::postOpinionRevisionQuestion(qint64 ownerId, qint64 opinionId,
+                                                   const QString& question)
+{
+    if (!m_gateway || ownerId == 0) return;
+
+    const QString msg = QStringLiteral("🤔 ") + question;
+
+    m_pendingQuestion  = question;
+    m_pendingChatId    = ownerId;
+    m_pendingTimestamp = QDateTime::currentDateTime();
+    m_pendingCategory  = ProactiveCategory::OpinionRevision;
+    m_pendingDoubtId   = 0;
+    m_pendingMessageId = 0; // set asynchronously once sendMessageRaw's onSent fires
+    m_pendingOpinionId = opinionId;
+
+    m_gateway->sendProactiveQuestion(ownerId, msg, m_uiEnglish);
+
+    qDebug() << "[CuriosityEngine] Opinion revision question to owner" << ownerId
+             << "(opinion" << opinionId << "):" << question.left(60);
 }
 
 // ============================================================
@@ -757,6 +787,7 @@ void CuriosityEngine::expirePendingIfStale()
         > PENDING_ANSWER_WINDOW_MINUTES * 60) {
         m_pendingQuestion.clear();
         m_pendingChatId = 0;
+        m_pendingMessageId = 0;
     }
 }
 
@@ -766,9 +797,17 @@ bool CuriosityEngine::hasPendingQuestion() const
     return !m_pendingQuestion.isEmpty();
 }
 
-bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText)
+bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText,
+                                     qint64 replyToMessageId)
 {
-    expirePendingIfStale();
+    // An explicit Telegram reply to the question we posted is authoritative
+    // regardless of elapsed time — only fall back to the timestamp-window
+    // expiry (for free-text, non-reply answers) when there's no such match.
+    const bool explicitReplyMatch = replyToMessageId != 0
+        && m_pendingMessageId != 0
+        && replyToMessageId == m_pendingMessageId;
+
+    if (!explicitReplyMatch) expirePendingIfStale();
     if (m_pendingQuestion.isEmpty()) return false;
     if (m_pendingChatId != 0 && chatId != 0 && m_pendingChatId != chatId) return false;
 
@@ -791,8 +830,42 @@ bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText)
         }
     }
 
+    // Layer 3: owner's answer to "did my opinion change?" (posted by
+    // CaseDistiller via postOpinionRevisionQuestion). "Yes" means the
+    // position itself is stale — soft-reset confidence/contradictions so
+    // the next distillation cycle re-derives it from fresh evidence rather
+    // than staying anchored to the old (possibly wrong) position text,
+    // which this simple yes/no answer can't rewrite on its own. "No" means
+    // the contradicting case was a one-off — restore some confidence and
+    // clear the contradiction count so it doesn't keep nagging.
+    if (m_pendingCategory == ProactiveCategory::OpinionRevision && m_pendingOpinionId != 0) {
+        const QString lower = answerText.trimmed().toLower();
+        const bool wantsUpdate = lower.startsWith(QStringLiteral("да"))
+                               || lower.startsWith(QStringLiteral("yes"));
+
+        auto db = DatabaseManager::instance().connection();
+        if (db.isOpen()) {
+            QSqlQuery upd(db);
+            if (wantsUpdate) {
+                upd.prepare(QStringLiteral(
+                    "UPDATE opinions SET confidence = 0.5, contradictions = 0, "
+                    "updated_at = datetime('now') WHERE id = :id"));
+            } else {
+                upd.prepare(QStringLiteral(
+                    "UPDATE opinions SET confidence = MIN(1.0, confidence + 0.2), "
+                    "contradictions = 0, updated_at = datetime('now') WHERE id = :id"));
+            }
+            upd.bindValue(QStringLiteral(":id"), m_pendingOpinionId);
+            upd.exec();
+        }
+        qDebug() << "[CuriosityEngine] Opinion" << m_pendingOpinionId
+                 << (wantsUpdate ? "flagged for re-derivation" : "reaffirmed by owner");
+    }
+
     m_pendingQuestion.clear();
-    m_pendingChatId  = 0;
-    m_pendingDoubtId = 0;
+    m_pendingChatId    = 0;
+    m_pendingDoubtId   = 0;
+    m_pendingMessageId = 0;
+    m_pendingOpinionId = 0;
     return true;
 }

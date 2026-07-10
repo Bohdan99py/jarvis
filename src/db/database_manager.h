@@ -29,7 +29,15 @@ struct DbChatMessage {
     qint64    userId      = 1;        // FK → users.id
     QString   role;                   // "user" | "assistant" | "system"
     QString   content;
-    QString   model;                  // "claude" | "gemini" | "groq" | "local"
+    QString   model = QStringLiteral("claude"); // "claude"|"gemini"|"groq"|"local" —
+                                       // must not stay a null QString: that
+                                       // binds as SQL NULL and violates
+                                       // chat_history.model's NOT NULL,
+                                       // silently failing the whole INSERT.
+                                       // Was dropping every message logged
+                                       // via SessionMemory::addMessage
+                                       // (role, content), which never set
+                                       // this field.
     QString   sessionId;              // UUID группирует разговор
     QDateTime createdAt;
     int       tokensUsed  = 0;

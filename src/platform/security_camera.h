@@ -178,6 +178,14 @@ private:
     bool           m_companionSuppressed = false;
     int            m_ownerAbsentTicks = 0;
 
+    // True while a clip is recording and for a cooldown window after it
+    // finishes — prevents onSentinelTick/onLockCheckTick's independent
+    // motion checks from re-triggering recordMotionClip() again seconds
+    // after the first clip, which previously produced a second, mostly
+    // motion-less video for the same real-world event.
+    bool           m_clipCooldownActive = false;
+    static constexpr int CLIP_COOLDOWN_SEC = 60;
+
     // Идентичность владельца (для FaceRegistry при обучении)
     QString m_ownerName;
     int     m_ownerAge = 0;

@@ -27,6 +27,7 @@
 #include <QDateTime>
 #include <QImage>
 #include <memory>
+#include <functional>
 
 // Forward-declared, not included: OrganizePlan lives in src/intelligence
 // (file_organizer.h). Pulling that header in here would leak an
@@ -230,8 +231,13 @@ private:
     // fromRelay=true — сообщение пришло по мешу с другого ПК-поллера;
     // в этом случае оно выполняется здесь безусловно (без повторной
     // пересылки), т.к. отправитель уже определил владельца.
+    // replyToMessageId: the incoming message's reply_to_message.message_id
+    // (0 if the user didn't use Telegram's "Reply" on a specific message) —
+    // lets a delayed reply to a proactive question be recognized no matter
+    // how much time passed. See CuriosityEngine::consumeAnswer.
     void handleMessage(qint64 chatId, const QString& text,
-                       const QString& firstName, bool fromRelay = false);
+                       const QString& firstName, bool fromRelay = false,
+                       qint64 replyToMessageId = 0);
 
     // Multi-PC: клавиатура выбора "какой ПК ваш" + привязка
     void sendPcSelectionKeyboard(qint64 chatId, bool english);
@@ -246,7 +252,8 @@ private:
                        const QString& firstName);
 
     // Free-dialogue LLM routing
-    void routeToLlm(qint64 chatId, const QString& text, bool english);
+    void routeToLlm(qint64 chatId, const QString& text, bool english,
+                    qint64 replyToMessageId = 0);
     void deliverLlmResponse(qint64 chatId, const QString& response);
     void finishLlmRequest(qint64 chatId);
     void sendChatAction(qint64 chatId, const QString& action);
@@ -272,6 +279,18 @@ private:
     // Telegram Bot API helpers
     void sendMessage(qint64 chatId, const QString& text,
                      const QJsonObject& replyMarkup = QJsonObject());
+    // Actual HTTP call behind sendMessage(). allowMarkdown=true tries
+    // parse_mode=Markdown first; on a Telegram-side parse failure (unescaped
+    // _/*/`/[ in LLM output routinely trips this) it retries itself once
+    // with allowMarkdown=false (plain text, always accepted) instead of
+    // silently dropping the reply.
+    // onSent (optional) is invoked with the Telegram-assigned message_id on
+    // successful delivery — used by sendProactiveQuestion so a later
+    // reply_to_message can be matched back to this specific message,
+    // regardless of how much time has passed.
+    void sendMessageRaw(qint64 chatId, const QString& text,
+                        const QJsonObject& replyMarkup, bool allowMarkdown,
+                        std::function<void(qint64 messageId)> onSent);
     void sendMainMenu(qint64 chatId, bool english);
     void answerCallbackQuery(const QString& callbackId,
                              const QString& text = QString());

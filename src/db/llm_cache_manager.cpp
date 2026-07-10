@@ -269,9 +269,34 @@ QList<LlmCacheManager::CaseMatch> LlmCacheManager::candidatesViaLike(qint64 owne
     return out;
 }
 
+void LlmCacheManager::logRouterDecision(qint64 ownerId, CaseMatch::Tier tier)
+{
+    auto db = DatabaseManager::instance().connection();
+    if (!db.isOpen()) return;
+
+    const char* tierStr = tier == CaseMatch::Tier::Exact   ? "Exact"
+                        : tier == CaseMatch::Tier::Similar ? "Similar"
+                                                            : "None";
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "INSERT INTO router_log (owner_id, tier) VALUES (:oid, :tier)"));
+    q.bindValue(QStringLiteral(":oid"),  ownerId);
+    q.bindValue(QStringLiteral(":tier"), QString::fromLatin1(tierStr));
+    q.exec();  // best-effort — a missed log row isn't worth surfacing an error for
+}
+
 LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString& query)
 {
     static constexpr float kSimilarThreshold = 0.6f;
+
+    // Every real call is logged (Layer-4 independence metric) — the only
+    // path that skips it is the "too short to be a real query" guard below,
+    // which callers (e.g. Brain::tryLocalAnswer) already filter out before
+    // ever reaching route(), so it's not a meaningful routing decision.
+    auto finish = [this, ownerId](CaseMatch r) {
+        logRouterDecision(ownerId, r.tier);
+        return r;
+    };
 
     CaseMatch result;
     const QString norm = normalizeQuery(query);
@@ -284,17 +309,17 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString&
         result.response     = exact;
         result.matchedQuery = norm;
         result.overlap      = 1.0f;
-        return result;
+        return finish(result);
     }
 
     // 2. Similarity candidates (same owner only), ranked by keyword overlap.
     const QStringList queryKeywords = significantKeywords(norm);
-    if (queryKeywords.isEmpty()) return result;
+    if (queryKeywords.isEmpty()) return finish(result);
 
     const QList<CaseMatch> candidates = ftsAvailable()
         ? candidatesViaFts(ownerId, queryKeywords)
         : candidatesViaLike(ownerId, queryKeywords);
-    if (candidates.isEmpty()) return result;
+    if (candidates.isEmpty()) return finish(result);
 
     CaseMatch best;
     for (const CaseMatch& c : candidates) {
@@ -307,9 +332,30 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString&
 
     if (best.overlap >= kSimilarThreshold) {
         best.tier = CaseMatch::Tier::Similar;
-        return best;
+        return finish(best);
     }
-    return result;  // Tier::None — nothing close enough, escalate
+    return finish(result);  // Tier::None — nothing close enough, escalate
+}
+
+LlmCacheManager::IndependenceStats LlmCacheManager::independenceStats(qint64 ownerId, int days)
+{
+    IndependenceStats stats;
+    auto db = DatabaseManager::instance().connection();
+    if (!db.isOpen()) return stats;
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT COUNT(*), COUNT(CASE WHEN tier != 'None' THEN 1 END) "
+        "FROM router_log WHERE owner_id = :oid "
+        "AND created_at >= datetime('now', :window)"));
+    q.bindValue(QStringLiteral(":oid"), ownerId);
+    q.bindValue(QStringLiteral(":window"), QStringLiteral("-%1 days").arg(days));
+
+    if (q.exec() && q.next()) {
+        stats.total = q.value(0).toInt();
+        stats.local = q.value(1).toInt();
+    }
+    return stats;
 }
 
 // ============================================================

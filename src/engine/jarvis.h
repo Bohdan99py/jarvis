@@ -41,6 +41,7 @@ class ReflectionEngine;
 class LocalTrainer;
 class BackgroundLearner;
 class CaseDistiller;
+class SecurityCamera;
 class QTimer;
 struct OrganizePlan;
 
@@ -70,10 +71,15 @@ public:
     // Обработка пользовательского ввода.
     // Brain в MainWindow уже определил намерение.
     // attachmentBlock — готовый блок из AttachmentsManager::buildAttachmentBlock().
+    // replyToMessageId: incoming Telegram message's reply_to_message.
+    // message_id (0 if none) — passed to CuriosityEngine::consumeAnswer so
+    // an explicit reply to a proactive question is recognized regardless
+    // of elapsed time.
     QString processCommand(const QString& input,
                            const QString& attachmentBlock = QString(),
                            const QString& langInstruction = QString(),
-                           qint64 chatId = 0);
+                           qint64 chatId = 0,
+                           qint64 replyToMessageId = 0);
 
     void speakAsync(const QString& text);
     bool isSpeaking() const { return m_speaking.load(); }
@@ -99,6 +105,11 @@ public:
     KeyEmulator*        keyEmulator()        const { return m_keyEmulator; }
     SessionMemory*      memory()             const { return m_memory; }
     ClaudeApi*          claudeApi()          const { return m_claudeApi; }
+    // Single shared instance — desktop UI (Guard menu) and the Telegram
+    // /security command both arm/wire THIS object rather than each
+    // constructing their own, so one real motion event can't produce two
+    // independent alerts from two cameras watching the same webcam.
+    SecurityCamera*     securityCamera()     const { return m_securityCamera; }
     OllamaApi*          ollamaApi()          const { return m_geminiApi; }  // m_geminiApi хранит OllamaApi
     GeminiApi*          geminiBackup()       const { return m_geminiBackup; }
     ActionPredictor*    actionPredictor()    const { return m_predictor; }
@@ -258,6 +269,7 @@ private:
     QTimer*             m_autoTrainTimer = nullptr;
     BackgroundLearner*  m_backgroundLearner = nullptr; // behavior-pattern learning (was dead code — now wired in)
     CaseDistiller*      m_caseDistiller     = nullptr; // Layer 2: nightly case -> heuristic distillation
+    SecurityCamera*     m_securityCamera    = nullptr; // shared by desktop Guard menu + Telegram /security
     J2JMeshConnector*   m_mesh             = nullptr;  // P2P mesh network
     TranslationEngine*  m_translator       = nullptr;  // multilingual translation + audio pipeline
     PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation

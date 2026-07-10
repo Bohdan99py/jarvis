@@ -7,6 +7,7 @@
 #include "telegram_access_manager.h"
 #include "camera_agent.h"
 #include "security_camera.h"
+#include "jarvis.h"
 #include "database_manager.h"
 #include "llm_cache_manager.h"
 #include "voice_synthesis_manager.h"
@@ -46,7 +47,6 @@ CommandDispatcherTg::CommandDispatcherTg(J2JTelegramGateway* gateway,
     , m_gourmet(new GourmetModule(this))
     , m_mediaAnalyzer(new MediaAnalyzerModule(this))
     , m_camera(new CameraAgent(this))
-    , m_security(new SecurityCamera(this))
     , m_startTime(QDateTime::currentDateTime())
 {
     qDebug() << "[CommandDispatcher] Initialized with"
@@ -59,6 +59,12 @@ void CommandDispatcherTg::setJarvisCore(Jarvis* jarvis)
     // processIngredients() всегда падал в ветку "no Jarvis core attached"
     // и отвечал "Гурмэ-модуль не подключён к ядру" на любой /fridge.
     if (m_gourmet) m_gourmet->setJarvisCore(jarvis);
+
+    // m_security used to be its own SecurityCamera instance, independent
+    // from the desktop Guard menu's — one real motion event could produce
+    // two independent alerts (one video, one photo) from two cameras
+    // watching the same webcam. Now shares Jarvis's single instance.
+    if (jarvis) m_security = jarvis->securityCamera();
 }
 
 // ============================================================
@@ -100,7 +106,7 @@ DispatchResult CommandDispatcherTg::dispatch(qint64 chatId,
         return cmdStopVoice(english);
 
     if (cmd == QStringLiteral("/cache_stats"))
-        return cmdCacheStats(english);
+        return cmdCacheStats(chatId, english);
 
     if (cmd == QStringLiteral("/fridge"))
         return cmdFridge(chatId, args, english);
@@ -494,13 +500,14 @@ DispatchResult CommandDispatcherTg::cmdStopVoice(bool english)
 //  /cache_stats — User+, LLM cache statistics
 // ============================================================
 
-DispatchResult CommandDispatcherTg::cmdCacheStats(bool english)
+DispatchResult CommandDispatcherTg::cmdCacheStats(qint64 chatId, bool english)
 {
     DispatchResult r;
     r.handled = true;
 
     const int cacheCount  = LlmCacheManager::instance().cacheEntryCount();
     const int offlineCount = DatabaseManager::instance().responseCacheCount();
+    const auto indep = LlmCacheManager::instance().independenceStats(chatId, 7);
 
     if (english) {
         r.response = QStringLiteral(
@@ -508,22 +515,26 @@ DispatchResult CommandDispatcherTg::cmdCacheStats(bool english)
             "```\n"
             "LLM response cache:    %1 entries\n"
             "Offline response pool: %2 entries\n"
+            "Independence (7d):     %3% (%4/%5 answered locally)\n"
             "Schema version:        11\n"
             "```"
-        ).arg(cacheCount).arg(offlineCount);
+        ).arg(cacheCount).arg(offlineCount)
+         .arg(QString::number(indep.pct(), 'f', 0)).arg(indep.local).arg(indep.total);
     } else {
         r.response = QStringLiteral(
             "💾 *Статистика кэша LLM*\n"
             "```\n"
-            "Кэш ответов LLM:         %1 записей\n"
+            "Кэш ответов LLM:          %1 записей\n"
             "Пул офлайн-ответов:       %2 записей\n"
+            "Самостоятельность (7д):   %3% (%4/%5 отвечено локально)\n"
             "Версия схемы БД:          11\n"
             "```"
-        ).arg(cacheCount).arg(offlineCount);
+        ).arg(cacheCount).arg(offlineCount)
+         .arg(QString::number(indep.pct(), 'f', 0)).arg(indep.local).arg(indep.total);
     }
 
     qDebug() << "[CommandDispatcher] /cache_stats — LLM:" << cacheCount
-             << "offline:" << offlineCount;
+             << "offline:" << offlineCount << "independence:" << indep.pct();
     return r;
 }
 

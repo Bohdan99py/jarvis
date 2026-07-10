@@ -8,6 +8,7 @@
 #include "j2j_telegram_gateway.h"
 #include "telegram_access_manager.h"
 #include "media_routing_manager.h"
+#include "proactive_reminder_manager.h"
 #include "database_manager.h"
 #include "system_manifest.h"
 #include "activity_tracker.h"
@@ -805,6 +806,7 @@ void J2JMeshConnector::initTelegramGateway()
     m_telegramGw = new J2JTelegramGateway(this);
     m_telegramGw->setMeshConnector(this);
     MediaRoutingManager::instance().setTelegramGateway(m_telegramGw);
+    ProactiveReminderManager::instance().setTelegramGateway(m_telegramGw);
     qDebug() << "[J2J] Telegram gateway initialized";
 }
 

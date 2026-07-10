@@ -55,6 +55,18 @@ public:
     // keywords (len>=3) that also appear in `b`, 0..1.
     static float keywordOverlap(const QString& a, const QString& b);
 
+    // ── Layer-4 independence metric ─────────────────────────
+    struct IndependenceStats {
+        int total = 0;  // all route() decisions in the window
+        int local = 0;  // Exact + Similar (resolved without Claude)
+        float pct() const { return total > 0 ? 100.0f * local / total : 0.0f; }
+    };
+
+    // % of route() decisions resolved locally (Exact/Similar, not None) for
+    // ownerId over the last `days` days. Backed by router_log, populated by
+    // route() itself on every call.
+    IndependenceStats independenceStats(qint64 ownerId, int days);
+
 private:
     explicit LlmCacheManager(QObject* parent = nullptr);
     ~LlmCacheManager() override = default;
@@ -66,4 +78,5 @@ private:
     bool ftsAvailable();
     QList<CaseMatch> candidatesViaFts(qint64 ownerId, const QStringList& keywords);
     QList<CaseMatch> candidatesViaLike(qint64 ownerId, const QStringList& keywords);
+    void logRouterDecision(qint64 ownerId, CaseMatch::Tier tier);
 };

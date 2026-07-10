@@ -175,7 +175,8 @@ private:
     LanguageDetector        m_langDetector;
     LearnedCommands*        m_learnedCmds  = nullptr;  // самообучение
     ScreenAgent*            m_screenAgent  = nullptr;  // зрение + клики
-    class SecurityCamera*   m_securityCam  = nullptr;  // security camera instance
+    class SecurityCamera*   m_securityCam  = nullptr;  // shared instance, owned by Jarvis
+    bool                    m_guardUiWired = false;    // desktop Guard signal connections wired once
     QWidget*                m_lockOverlay  = nullptr;  // fullscreen lock overlay
     ScreenshotLearner*      m_appLearner   = nullptr;  // паттерны использования ПК
     QString                 m_lastUserInput;               // для самообучения

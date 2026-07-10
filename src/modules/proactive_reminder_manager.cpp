@@ -7,6 +7,7 @@
 
 #include <QRegularExpression>
 #include <QDebug>
+#include <QTime>
 
 // ============================================================
 //  Singleton
@@ -65,6 +66,27 @@ bool ProactiveReminderManager::tryDetectAndSchedule(qint64 chatId,
 
 int ProactiveReminderManager::detectDelayMinutes(const QString& text)
 {
+    // Absolute clock time ("в 17:00", "в 9 часов", "at 5pm" not handled —
+    // just "at 17:00"/"at 17") checked first so it takes priority over the
+    // relative patterns below, which use different trigger words
+    // (через/in) and can't accidentally match this.
+    static const QRegularExpression reClockTime(
+        QStringLiteral("(?:в|at)\\s*(\\d{1,2})(?::(\\d{2}))?\\s*(?:час(?:а|ов)?)?"),
+        QRegularExpression::CaseInsensitiveOption);
+    auto cm = reClockTime.match(text);
+    if (cm.hasMatch()) {
+        const int hour   = cm.captured(1).toInt();
+        const int minute = cm.captured(2).isEmpty() ? 0 : cm.captured(2).toInt();
+        if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+            const QDateTime now = QDateTime::currentDateTime();
+            QDateTime target(now.date(), QTime(hour, minute));
+            if (target <= now)
+                target = target.addDays(1);
+            const int mins = static_cast<int>(now.secsTo(target) / 60);
+            if (mins > 0) return mins;
+        }
+    }
+
     static const QRegularExpression reMinutes(
         QStringLiteral("(?:через|in)\\s*(\\d+)\\s*(?:мин|min)"),
         QRegularExpression::CaseInsensitiveOption);

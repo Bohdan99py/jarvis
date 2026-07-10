@@ -2385,6 +2385,11 @@ void MainWindow::buildMenuBar()
     // --- Помощь ---
     // ── Camera & Security ──────────────────────────────────
     {
+        // Shared instance owned by Jarvis — the Telegram /security command
+        // arms the SAME object, so a real motion event can't produce two
+        // independent alerts from two cameras watching the same webcam.
+        m_securityCam = m_jarvis->securityCamera();
+
         auto* camMenu = menuBar->addMenu(
             IS_EN ? QStringLiteral("📷 Camera") : QStringLiteral("📷 Камера"));
 
@@ -2727,8 +2732,16 @@ void MainWindow::buildMenuBar()
         // ── Start guard ────────────────────────────────────
         connect(actGuardOn, &QAction::triggered, this,
                 [this, actGuardOn, actGuardOff, actLockNow, actUnlockNow, actCheckNow]() {
-            if (m_securityCam) return;
-            m_securityCam = new SecurityCamera(this);
+            if (m_securityCam->isMonitoring()) return;
+
+            // m_securityCam is a persistent shared instance (owned by
+            // Jarvis, also armable via Telegram's /security) — wire these
+            // desktop-only UI connections only once, ever, so re-arming
+            // via Guard On doesn't stack duplicate signal connections
+            // (which previously caused e.g. the motion-clip video being
+            // sent to Telegram twice per event).
+            if (!m_guardUiWired) {
+            m_guardUiWired = true;
 
             connect(m_securityCam, &SecurityCamera::requestLockOverlay, this, [this]() {
                 static_cast<LockOverlayWidget*>(m_lockOverlay)->activate();
@@ -2781,6 +2794,7 @@ void MainWindow::buildMenuBar()
                     QStringLiteral("📤 Video sent to Telegram"),
                     Theme::LogColors::jarvis);
             });
+            } // !m_guardUiWired
 
             m_securityCam->startMonitoring(60);
 
@@ -2801,10 +2815,11 @@ void MainWindow::buildMenuBar()
         // ── Stop guard ─────────────────────────────────────
         connect(actGuardOff, &QAction::triggered, this,
                 [this, actGuardOn, actGuardOff, actLockNow, actUnlockNow, actCheckNow]() {
-            if (!m_securityCam) return;
+            if (!m_securityCam->isMonitoring()) return;
+            // Stop, but don't destroy — m_securityCam is the shared
+            // instance owned by Jarvis; Telegram's /security may still
+            // need it, and Guard On re-arms the same object next time.
             m_securityCam->stopMonitoring();
-            m_securityCam->deleteLater();
-            m_securityCam = nullptr;
             static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
 
             actGuardOn->setEnabled(true);
@@ -5552,6 +5567,26 @@ QString MainWindow::buildWelcomeHtml() const
     else
         dbLine = QStringLiteral("<span style='color:#ff4444;'>&#9679;</span> Database OFFLINE");
 
+    // ── Independence metric (Layer 4) ─────────────────────
+    const auto indep = LlmCacheManager::instance()
+        .independenceStats(LlmCacheManager::kDesktopOwnerId, 7);
+    QString indepLine;
+    if (indep.total > 0) {
+        const QString text = IS_EN
+            ? QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> "
+                             "Independence (7d): %1% (%2/%3 answered locally)")
+                  .arg(QString::number(indep.pct(), 'f', 0))
+                  .arg(indep.local).arg(indep.total)
+            : QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> "
+                             "Самостоятельность (7д): %1% (%2/%3 локально)")
+                  .arg(QString::number(indep.pct(), 'f', 0))
+                  .arg(indep.local).arg(indep.total);
+        indepLine = QStringLiteral("<div style='color:%1; font-size:12px; "
+                                   "padding:3px 0; font-family:Consolas,monospace;'>"
+                                   "%2</div>")
+                        .arg(QLatin1String(tc.user), text);
+    }
+
     // ── Project status ────────────────────────────────────
     QString projLine;
     if (m_jarvis->projectIndexer()->fileCount() > 0) {
@@ -5627,6 +5662,9 @@ QString MainWindow::buildWelcomeHtml() const
         "<div style='color:%9; font-size:12px; padding:3px 0; "
         "font-family:Consolas,monospace;'>%12</div>"
 
+        // Row: Independence (if any router activity yet)
+        "%17"
+
         // Row: Project (if any)
         "%13"
 
@@ -5666,7 +5704,8 @@ QString MainWindow::buildWelcomeHtml() const
                                                projLine),
         /* %14 label color */   QStringLiteral("#66FCF1"),
         /* %15 doubt badge */   doubtBadge,
-        /* %16 thought */       thoughtLine
+        /* %16 thought */       thoughtLine,
+        /* %17 independence */  indepLine
     );
 }
 

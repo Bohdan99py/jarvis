@@ -621,6 +621,39 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=16");
         ver = 16;
     }
+    if (ver < 17) {
+        // Layer 4: independence metric — one row per LlmCacheManager::route()
+        // decision (every tier, including None), so "% resolved locally"
+        // can be computed per owner over a time window.
+        execQuery(R"(CREATE TABLE IF NOT EXISTS router_log (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id   INTEGER NOT NULL,
+            tier       TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_router_log_owner ON router_log(owner_id, created_at)");
+
+        // Layer 3: opinions — a heuristic that CaseDistiller judged to be a
+        // stance/preference rather than a purely mechanical rule.
+        // based_on_heuristic_id links back to the heuristics row it was
+        // formed from; confirmations/contradictions accumulate as later
+        // cases on the same topic agree or conflict with the position.
+        execQuery(R"(CREATE TABLE IF NOT EXISTS opinions (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id               INTEGER NOT NULL,
+            topic                  TEXT NOT NULL,
+            position               TEXT NOT NULL,
+            confidence             REAL NOT NULL DEFAULT 0.6,
+            confirmations          INTEGER NOT NULL DEFAULT 0,
+            contradictions         INTEGER NOT NULL DEFAULT 0,
+            based_on_heuristic_id  INTEGER,
+            created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_opinions_owner ON opinions(owner_id)");
+        execQuery("UPDATE schema_version SET version=17");
+        ver = 17;
+    }
     return true;
 }
 

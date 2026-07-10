@@ -1275,8 +1275,11 @@ void SecurityCamera::onLockCheckTick()
 void SecurityCamera::recordMotionClip()
 {
 #ifdef JARVIS_HAS_OPENCV
-    if (!isOpenCvAvailable() || m_recording) return;
+    if (!isOpenCvAvailable() || m_recording || m_clipCooldownActive) return;
     m_recording = true;
+    m_clipCooldownActive = true;
+    QTimer::singleShot((MOTION_CLIP_DURATION_SEC + CLIP_COOLDOWN_SEC) * 1000, this,
+                       [this]() { m_clipCooldownActive = false; });
 
     const QString dir = JarvisPaths::subPath(QStringLiteral("security/clips"));
     QDir().mkpath(dir);

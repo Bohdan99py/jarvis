@@ -74,7 +74,7 @@ private:
     DispatchResult cmdNotes(qint64 chatId, bool english);
     DispatchResult cmdScreenAnalyze(qint64 chatId, bool english);
     DispatchResult cmdStopVoice(bool english);
-    DispatchResult cmdCacheStats(bool english);
+    DispatchResult cmdCacheStats(qint64 chatId, bool english);
     DispatchResult cmdFridge(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdSummarize(qint64 chatId, const QString& args, bool english);
     DispatchResult cmdRemind(qint64 chatId, const QString& args, bool english);

@@ -20,6 +20,7 @@
 #include "local_trainer.h"
 #include "background_learner.h"
 #include "case_distiller.h"
+#include "security_camera.h"
 #include "synonym_learner.h"
 #include <QTimer>
 #include <QSettings>
@@ -158,6 +159,12 @@ Jarvis::Jarvis(QObject* parent)
     m_caseDistiller = new CaseDistiller(m_claudeApi, this);
     m_caseDistiller->start();
 
+    // Shared SecurityCamera — constructed here (not by whichever surface
+    // happens to arm it first) so the desktop Guard menu and the Telegram
+    // /security command always talk to the same instance. Stays OFF
+    // (Sentinel/FullAlert not started) until one of them arms it.
+    m_securityCamera = new SecurityCamera(this);
+
     // J2J Mesh: peer-to-peer network for multi-instance knowledge sync
     m_mesh = new J2JMeshConnector(this);
     m_activity->setMeshConnector(m_mesh);
@@ -259,22 +266,14 @@ Jarvis::Jarvis(QObject* parent)
         syncProjectInfoToMemory();
     }
 
-    // System Manifest: inject capabilities into LLM context + version check
+    // System Manifest: inject capabilities into LLM context
     m_memory->setCapabilitiesContext(SystemManifest::buildCapabilitiesContext());
-    {
-        auto vr = SystemManifest::checkAndUpdateVersion(
-            QStringLiteral(JARVIS_VERSION));
-        if (vr.isUpgrade) {
-            const QString note = SystemManifest::buildUpgradeNotification(
-                vr, m_uiEnglish);
-            if (!note.isEmpty()) {
-                m_memory->addMessage(QStringLiteral("assistant"), note);
-                QMetaObject::invokeMethod(this, [this, note]() {
-                    emit asyncResponseReady(note);
-                }, Qt::QueuedConnection);
-            }
-        }
-    }
+    // (Removed: an "upgrade notification" used to post here on every version
+    // bump, but its text was a hardcoded blurb about one specific past
+    // release — only the version numbers actually varied, so it claimed
+    // the same "what's new" regardless of what changed. SystemManifest::
+    // buildUpgradeNotification()/checkAndUpdateVersion() are left in place
+    // unused in case a real per-version changelog replaces this later.)
 
     // Proactive Curiosity Engine — context-aware idle dialogue
     {
@@ -1108,7 +1107,7 @@ void Jarvis::speakAsync(const QString& text)
 // Обработка команд (гибридный режим)
 // ============================================================
 
-QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction, qint64 chatId)
+QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction, qint64 chatId, qint64 replyToMessageId)
 {
     m_currentChatId = chatId;
 
@@ -1120,7 +1119,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // chat/LLM handling. chatId==0 (desktop) always matches the target chat,
     // since PC and Telegram are the same person.
     if (CuriosityEngine::instance().hasPendingQuestion()) {
-        if (CuriosityEngine::instance().consumeAnswer(chatId, s)) {
+        if (CuriosityEngine::instance().consumeAnswer(chatId, s, replyToMessageId)) {
             m_memory->addMessage(QStringLiteral("user"), s);
             const QString ack = m_uiEnglish
                 ? QStringLiteral("Got it, thanks! 👍")
