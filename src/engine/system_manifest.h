@@ -147,6 +147,23 @@ inline QVector<Capability> activeCapabilities()
                          "is built from git commit history on each new version. The manual "
                          "is compiled from active module introspection at runtime — zero "
                          "hardcoded documentation strings.") },
+
+        { QStringLiteral("kicad_schematic"),
+          QStringLiteral("KiCad Schematic Generation"),
+          QStringLiteral("You can generate real KiCad schematics directly — not by clicking "
+                         "around the KiCad UI, by emitting a structured block that gets turned "
+                         "into a genuinely valid .kicad_sch file (real symbol definitions "
+                         "extracted from KiCad's own bundled libraries, pin-accurate wiring — "
+                         "verified end-to-end against a real KiCad install's ERC checker). "
+                         "Emit: [KICAD_SCH:name.kicad_sch]\\n{json}\\n[/KICAD_SCH] where json is "
+                         "{\"components\":[{\"type\":\"resistor|capacitor|led|diode|gnd|vcc\","
+                         "\"ref\":\"R1\",\"value\":\"10k\",\"x\":100,\"y\":50,\"rotation\":0}],"
+                         "\"wires\":[{\"from\":{\"ref\":\"R1\",\"pin\":\"1\"},"
+                         "\"to\":{\"ref\":\"R2\",\"pin\":\"1\"}}]}. Never hand-write the "
+                         ".kicad_sch S-expression content yourself — always use this block; "
+                         "wires connect by component reference + pin number, never guess raw "
+                         "coordinates for a pin. Coordinates are in mm; component types are "
+                         "currently limited to that fixed set (more can be added later).") },
     };
 }
 

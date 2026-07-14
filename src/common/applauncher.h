@@ -136,6 +136,20 @@ public:
     // Список всех доступных алиасов (для команды "что умеешь открыть")
     QStringList knownAliases() const { return m_aliases.keys(); }
 
+    // KiCad's install root (e.g. "C:/Program Files/KiCad/10.0"), derived
+    // from the resolved "kicad" alias path (.../bin/kicad.exe) by stripping
+    // the trailing "/bin/kicad.exe". Used by KiCadSymbolCache to find
+    // bundled symbol libraries (share/kicad/symbols/) and by the schematic
+    // ERC validation step to find kicad-cli.exe (also in bin/). Empty if
+    // KiCad isn't installed/found.
+    QString kicadInstallRoot() const {
+        const QString exe = resolve(QStringLiteral("kicad"));
+        if (exe.isEmpty()) return {};
+        QDir binDir = QFileInfo(exe).dir();       // .../KiCad/10.0/bin
+        if (!binDir.cdUp()) return {};             // .../KiCad/10.0
+        return binDir.absolutePath();
+    }
+
 private:
     QMap<QString, QString> m_aliases; // ключ — нижний регистр
 
@@ -277,6 +291,12 @@ private:
         }));
         add("davinci",      findFirst({
             "C:/Program Files/Blackmagic Design/DaVinci Resolve/Resolve.exe",
+        }));
+        add("kicad",        findFirst({
+            "C:/Program Files/KiCad/10.0/bin/kicad.exe",
+            "C:/Program Files/KiCad/9.0/bin/kicad.exe",
+            "C:/Program Files/KiCad/8.0/bin/kicad.exe",
+            "C:/Program Files/KiCad/7.0/bin/kicad.exe",
         }));
 
         // --- Прочее ---

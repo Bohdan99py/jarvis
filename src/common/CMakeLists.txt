@@ -18,6 +18,10 @@ add_library(jarvis_common OBJECT
     layout_fixer.cpp
     mermaid_renderer.h
     mermaid_renderer.cpp
+    kicad_symbol_cache.h
+    kicad_symbol_cache.cpp
+    kicad_schematic_builder.h
+    kicad_schematic_builder.cpp
 )
 
 target_include_directories(jarvis_common PUBLIC

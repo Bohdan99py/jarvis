@@ -3,12 +3,25 @@
 // -------------------------------------------------------
 
 #include "code_actions.h"
+#include "kicad_schematic_builder.h"
+#include "applauncher.h"
+// applauncher.h drags in <windows.h>/<shellapi.h> without WIN32_LEAN_AND_MEAN,
+// which #defines CreateFile/DeleteFile to CreateFileW/DeleteFileW — colliding
+// with the pre-existing CodeAction::CreateFile/DeleteFile enum members used
+// throughout this file. Undo the macro pollution right after the include.
+#undef CreateFile
+#undef DeleteFile
 
 #include <QFile>
 #include <QDir>
 #include <QFileInfo>
 #include <QTextStream>
 #include <QRegularExpression>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QProcess>
+#include <QDebug>
 
 CodeActions::CodeActions(QObject* parent)
     : QObject(parent)
@@ -115,6 +128,24 @@ QVector<CodeAction> CodeActions::parseResponse(const QString& response) const
         }
     }
 
+    // 6. Парсим [KICAD_SCH:path.kicad_sch]{json}[/KICAD_SCH]
+    {
+        static const QRegularExpression reKicad(
+            QStringLiteral(R"(\[KICAD_SCH:(.+?)\]\s*\n([\s\S]*?)\[/KICAD_SCH\])"),
+            QRegularExpression::MultilineOption);
+
+        auto it = reKicad.globalMatch(response);
+        while (it.hasNext()) {
+            auto match = it.next();
+            CodeAction a;
+            a.type = CodeAction::KiCadSchematic;
+            a.filePath = match.captured(1).trimmed();
+            a.content = match.captured(2).trimmed();
+            a.description = QStringLiteral("Создать схему KiCad: ") + a.filePath;
+            actions.append(a);
+        }
+    }
+
     return actions;
 }
 
@@ -125,10 +156,11 @@ QVector<CodeAction> CodeActions::parseResponse(const QString& response) const
 CodeAction CodeActions::executeAction(CodeAction action) const
 {
     switch (action.type) {
-    case CodeAction::CreateFile:  return doCreateFile(action);
-    case CodeAction::DiffReplace: return doDiffReplace(action);
-    case CodeAction::MakeDir:     return doMakeDir(action);
-    case CodeAction::DeleteFile:  return doDeleteFile(action);
+    case CodeAction::CreateFile:     return doCreateFile(action);
+    case CodeAction::DiffReplace:    return doDiffReplace(action);
+    case CodeAction::MakeDir:        return doMakeDir(action);
+    case CodeAction::DeleteFile:     return doDeleteFile(action);
+    case CodeAction::KiCadSchematic: return doCreateKiCadSchematic(action);
     case CodeAction::SystemCmd:
         // Системные команды выполняются через Jarvis::processCommand
         action.success = true;
@@ -263,6 +295,12 @@ QString CodeActions::cleanResponseForDisplay(const QString& response) const
         QStringLiteral(R"(\[(MKDIR|DELETE|CMD):.+?\])"));
     clean.replace(reSingle, QString());
 
+    // Убираем [KICAD_SCH:...]...[/KICAD_SCH] блоки
+    static const QRegularExpression reKicadDisplay(
+        QStringLiteral(R"(\[KICAD_SCH:.+?\][\s\S]*?\[/KICAD_SCH\])"),
+        QRegularExpression::MultilineOption);
+    clean.replace(reKicadDisplay, QString());
+
     // Убираем лишние пустые строки
     static const QRegularExpression reEmptyLines(
         QStringLiteral(R"(\n{3,})"));
@@ -391,6 +429,110 @@ CodeAction CodeActions::doDeleteFile(CodeAction action) const
     action.resultMessage = action.success
         ? QStringLiteral("Удалено")
         : QStringLiteral("Не удалось удалить");
+    return action;
+}
+
+CodeAction CodeActions::doCreateKiCadSchematic(CodeAction action) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(action.content.toUtf8());
+    if (!doc.isObject()) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Некорректный JSON в блоке KICAD_SCH");
+        return action;
+    }
+    const QJsonObject root = doc.object();
+
+    QList<KiCadPlacement> placements;
+    for (const QJsonValue& v : root.value(QStringLiteral("components")).toArray()) {
+        const QJsonObject c = v.toObject();
+        KiCadPlacement p;
+        p.componentType = c.value(QStringLiteral("type")).toString();
+        p.reference     = c.value(QStringLiteral("ref")).toString();
+        p.value         = c.value(QStringLiteral("value")).toString();
+        p.x             = c.value(QStringLiteral("x")).toDouble();
+        p.y             = c.value(QStringLiteral("y")).toDouble();
+        p.rotationDeg   = c.value(QStringLiteral("rotation")).toInt(0);
+        placements.append(p);
+    }
+
+    QList<KiCadWire> wires;
+    for (const QJsonValue& v : root.value(QStringLiteral("wires")).toArray()) {
+        const QJsonObject w = v.toObject();
+        const QJsonObject from = w.value(QStringLiteral("from")).toObject();
+        const QJsonObject to   = w.value(QStringLiteral("to")).toObject();
+        KiCadWire wire;
+        wire.from.componentRef = from.value(QStringLiteral("ref")).toString();
+        wire.from.pin          = from.value(QStringLiteral("pin")).toString();
+        wire.to.componentRef   = to.value(QStringLiteral("ref")).toString();
+        wire.to.pin            = to.value(QStringLiteral("pin")).toString();
+        wires.append(wire);
+    }
+
+    AppLauncher launcher;
+    const QString kicadRoot = launcher.kicadInstallRoot();
+    KiCadSchematicBuilder builder(kicadRoot);
+    const KiCadBuildResult built = builder.build(placements, wires);
+
+    if (!built.success) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Схема не собрана: ") + built.errorMessage;
+        return action;
+    }
+
+    const QString path = fullPath(action.filePath);
+    QFileInfo fi(path);
+    QDir().mkpath(fi.absolutePath());
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Не удалось создать файл: ") + file.errorString();
+        return action;
+    }
+    QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);
+    out << built.content;
+    file.close();
+
+    action.success = true;
+    action.resultMessage = QStringLiteral("Схема KiCad создана: ") + action.filePath;
+
+    // Validate with kicad-cli's electrical rules check when available —
+    // catches genuine electrical-connectivity issues (not file-format
+    // ones, those can't happen: the builder only emits real symbol
+    // definitions and pin-accurate wiring) and reports them rather than
+    // silently leaving the user to discover them by opening KiCad.
+    if (!kicadRoot.isEmpty()) {
+        const QString cli = QDir(kicadRoot).filePath(QStringLiteral("bin/kicad-cli.exe"));
+        if (QFileInfo::exists(cli)) {
+            const QString reportPath = path + QStringLiteral(".erc.json");
+            QProcess proc;
+            proc.start(cli, {QStringLiteral("sch"), QStringLiteral("erc"), path,
+                             QStringLiteral("--output"), reportPath,
+                             QStringLiteral("--format"), QStringLiteral("json"),
+                             QStringLiteral("--severity-error")});
+            if (proc.waitForFinished(20000)) {
+                QFile report(reportPath);
+                if (report.open(QIODevice::ReadOnly)) {
+                    const QJsonDocument ercDoc = QJsonDocument::fromJson(report.readAll());
+                    report.close();
+                    QFile::remove(reportPath);
+                    int errorCount = 0;
+                    for (const QJsonValue& sheet : ercDoc.object().value(QStringLiteral("sheets")).toArray())
+                        errorCount += sheet.toObject().value(QStringLiteral("violations")).toArray().size();
+                    action.resultMessage += errorCount > 0
+                        ? QStringLiteral(" (ERC: %1 замечани%2 — открой в KiCad, чтобы проверить)")
+                              .arg(errorCount).arg(errorCount == 1 ? QStringLiteral("е") : QStringLiteral("й"))
+                        : QStringLiteral(" (ERC: без ошибок)");
+                }
+            }
+        }
+    }
+
+    // Report line 192 (processResponse) echoes description on success —
+    // mirror the ERC pass/fail info into it so the user actually sees it.
+    action.description = action.resultMessage;
+
     return action;
 }
 

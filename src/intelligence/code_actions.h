@@ -8,6 +8,13 @@
 //   [MKDIR:path/to/directory]
 //   [DELETE:path/to/file.cpp]
 //   [CMD:системная команда]
+//   [KICAD_SCH:path/to/file.kicad_sch]{json}[/KICAD_SCH]
+//     — deep KiCad integration: Claude describes WHAT to place
+//     (component types/references/positions) and WHAT to wire
+//     (by component+pin, not raw coordinates); KiCadSchematicBuilder
+//     guarantees a structurally valid .kicad_sch using real symbol
+//     definitions extracted from KiCad's own bundled libraries — Claude
+//     never hand-writes S-expressions. See kicad_schematic_builder.h.
 // -------------------------------------------------------
 
 #include <QObject>
@@ -25,6 +32,7 @@ struct CodeAction
         MakeDir,
         DeleteFile,
         SystemCmd,
+        KiCadSchematic,
         Unknown
     };
 
@@ -79,6 +87,7 @@ private:
     CodeAction doDiffReplace(CodeAction action) const;
     CodeAction doMakeDir(CodeAction action) const;
     CodeAction doDeleteFile(CodeAction action) const;
+    CodeAction doCreateKiCadSchematic(CodeAction action) const;
     QString fullPath(const QString& relativePath) const;
 
     QString m_projectRoot;

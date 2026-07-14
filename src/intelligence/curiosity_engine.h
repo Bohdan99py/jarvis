@@ -189,12 +189,22 @@ private:
     static constexpr int MAX_QUESTIONS_PER_SESSION = 5;
     static constexpr int COOLDOWN_MINUTES = 45;
     // Fallback window for free-text answers with no explicit Telegram
-    // reply_to_message match (see consumeAnswer) — generous because
-    // proactive questions fire specifically when the user has been idle,
-    // so a realistic reply often arrives well after a few minutes. An
-    // explicit reply-to-this-message match (m_pendingMessageId) has no
-    // time limit at all.
-    static constexpr int PENDING_ANSWER_WINDOW_MINUTES = 240;
+    // reply_to_message match (see consumeAnswer). Deliberately modest: an
+    // explicit reply-to-this-message match (m_pendingMessageId) has no time
+    // limit and is the robust path — this window only covers "typed a
+    // normal follow-up without using Reply." Making it too generous (this
+    // used to be 240) backfires: ANY message from the same chat sent
+    // within the window — even something unrelated typed before the user
+    // gets around to actually answering — gets swallowed as "the answer,"
+    // silently eating the pending state so the real answer later isn't
+    // recognized. See also the short-answer-only heuristic in
+    // consumeAnswer() for the same reason.
+    static constexpr int PENDING_ANSWER_WINDOW_MINUTES = 15;
+    // Non-explicit-reply answers longer than this are treated as a fresh,
+    // unrelated message rather than auto-consumed — a real answer to a
+    // yes/no or short question is normally short; a long message is more
+    // likely the user asking Jarvis something else entirely.
+    static constexpr int MAX_FREE_TEXT_ANSWER_LENGTH = 120;
 
     static const QStringList& philosophyPool(bool english);
     static const QStringList& wellBeingPool(bool english);

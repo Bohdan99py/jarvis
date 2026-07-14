@@ -807,7 +807,18 @@ bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText,
         && m_pendingMessageId != 0
         && replyToMessageId == m_pendingMessageId;
 
-    if (!explicitReplyMatch) expirePendingIfStale();
+    if (!explicitReplyMatch) {
+        expirePendingIfStale();
+        // Without an explicit reply, only auto-consume short answers — a
+        // long message is more likely the user asking Jarvis something
+        // else entirely than replying to a question they may not have
+        // even reached yet. Prevents an unrelated message sent while the
+        // question is still pending from silently eating the pending
+        // state before the user gets around to actually answering it.
+        if (!m_pendingQuestion.isEmpty()
+            && answerText.trimmed().length() > MAX_FREE_TEXT_ANSWER_LENGTH)
+            return false;
+    }
     if (m_pendingQuestion.isEmpty()) return false;
     if (m_pendingChatId != 0 && chatId != 0 && m_pendingChatId != chatId) return false;
 
