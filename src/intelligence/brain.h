@@ -50,6 +50,7 @@ struct Intent
         Memory,              // память о пользователе
         Code,                // работа с кодом
         System,              // системные функции ОС (open app, lock, etc.)
+        Electronics,         // схемы, PCB, embedded-электроника (KiCad, Arduino, etc.)
         Philosophy_Chitchat, // философия, мораль, открытые вопросы, болталка
         None                 // не применимо
     };

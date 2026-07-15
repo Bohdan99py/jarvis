@@ -170,6 +170,7 @@ QString ActivityTracker::buildActivityContext() const
     // Time distribution in recent activity
     QMap<QString, int> catTime;
     for (const auto& e : m_recentActivity) {
+        if (e.category == QStringLiteral("idle")) continue;
         catTime[e.category] += e.durationSec;
     }
     if (!catTime.isEmpty()) {
@@ -196,6 +197,7 @@ QString ActivityTracker::recentActivitySummary(int minutes) const
 
     for (const auto& e : m_recentActivity) {
         if (e.timestamp < cutoff) continue;
+        if (e.category == QStringLiteral("idle")) continue;
         appTime[e.app] += e.durationSec;
         appLastTitle[e.app] = e.title;
     }
@@ -239,10 +241,23 @@ QString ActivityTracker::categorizeApp(const QString& processName, const QString
     const QString p = processName.toLower();
     const QString t = windowTitle.toLower();
 
-    // Coding / IDEs
+    // OS shell chrome / JARVIS itself — not a signal about what the user is
+    // actually doing, so keep it out of the weighting entirely (see
+    // detectUserRole/buildActivityContext, both skip this category). Without
+    // this, a few minutes of "LockApp"/"SearchHost" while nothing else ran
+    // long enough could win as the "dominant" category and mask real signal.
+    static const QStringList shellNoise = {
+        "lockapp", "searchhost", "shellexperiencehost", "startmenuexperiencehost",
+        "textinputhost", "applicationframehost", "jarvis"
+    };
+    for (const auto& s : shellNoise)
+        if (p.contains(s)) return QStringLiteral("idle");
+
+    // Coding / IDEs (incl. AI pair-programming tools and dev workflow apps)
     static const QStringList codeApps = {
         "clion", "rider", "devenv", "code", "pycharm", "webstorm",
-        "intellij", "goland", "rustrover", "notepad++", "sublime"
+        "intellij", "goland", "rustrover", "notepad++", "sublime",
+        "claude", "githubdesktop", "github desktop"
     };
     for (const auto& a : codeApps)
         if (p.contains(a)) return QStringLiteral("coding");
@@ -250,6 +265,22 @@ QString ActivityTracker::categorizeApp(const QString& processName, const QString
         || t.contains(QStringLiteral(".js")) || t.contains(QStringLiteral(".h"))
         || t.contains(QStringLiteral(".cs")))
         return QStringLiteral("coding");
+
+    // Electronics / EE — schematic capture, PCB layout, embedded firmware
+    static const QStringList electronicsApps = {
+        "kicad", "eeschema", "pcbnew", "arduino", "platformio",
+        "eagle", "altium", "easyeda", "ltspice", "proteus",
+        "stm32cubeide", "keiluv", "iar embedded"
+    };
+    for (const auto& a : electronicsApps)
+        if (p.contains(a)) return QStringLiteral("electronics");
+
+    // Mechanical / CAD engineering
+    static const QStringList cadApps = {
+        "freecad", "solidworks", "fusion360", "autocad", "inventor", "catia"
+    };
+    for (const auto& a : cadApps)
+        if (p.contains(a)) return QStringLiteral("engineering");
 
     // Game engines
     if (p.contains("unrealed") || p.contains("ue5") || p.contains("unity")
@@ -337,6 +368,11 @@ QString ActivityTracker::detectUserRole() const
     if (!m_currentCategory.isEmpty())
         catWeight[m_currentCategory] += currentActivityDuration();
 
+    // "idle" (OS shell chrome, JARVIS itself) carries no occupational signal —
+    // drop it so a few idle minutes can't outweigh real activity and win by
+    // default (see categorizeApp's shellNoise list).
+    catWeight.remove(QStringLiteral("idle"));
+
     if (catWeight.isEmpty()) return QStringLiteral("general user");
 
     // Find dominant category
@@ -357,6 +393,8 @@ QString ActivityTracker::detectUserRole() const
     if (dominant == QStringLiteral("office"))        return QStringLiteral("analyst");
     if (dominant == QStringLiteral("terminal"))      return QStringLiteral("sysadmin / devops");
     if (dominant == QStringLiteral("gaming"))        return QStringLiteral("gamer");
+    if (dominant == QStringLiteral("electronics"))   return QStringLiteral("electronics engineer / hardware developer");
+    if (dominant == QStringLiteral("engineering"))   return QStringLiteral("engineer / CAD designer");
 
     return QStringLiteral("general user");
 }

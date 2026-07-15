@@ -77,6 +77,26 @@ struct ContextSnapshot
             || runningApps.filter(QStringLiteral("UnrealEditor"), Qt::CaseInsensitive).size() > 0;
     }
 
+    // Есть ли признак что пользователь работает с электроникой
+    // (KiCad schematic/PCB, embedded firmware IDEs)
+    bool isInElectronicsContext() const
+    {
+        const QString proc = activeWindowProcess.toLower();
+        const QString title = activeWindowTitle.toLower();
+        static const QStringList markers = {
+            QStringLiteral("kicad"),    QStringLiteral("eeschema"),
+            QStringLiteral("pcbnew"),   QStringLiteral("arduino"),
+            QStringLiteral("platformio"), QStringLiteral("eagle"),
+            QStringLiteral("altium"),   QStringLiteral("easyeda"),
+            QStringLiteral("ltspice"),  QStringLiteral("proteus"),
+        };
+        for (const auto& m : markers) {
+            if (proc.contains(m) || title.contains(m)) return true;
+            if (runningApps.filter(m, Qt::CaseInsensitive).size() > 0) return true;
+        }
+        return false;
+    }
+
     // Есть ли признак что пользователь в браузере
     bool isInBrowserContext() const
     {

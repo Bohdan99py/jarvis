@@ -93,7 +93,10 @@ ContextSnapshot Brain::captureSnapshot(
         QStringLiteral("blender"), QStringLiteral("krita"),
         QStringLiteral("photoshop"),
         QStringLiteral("discord"), QStringLiteral("obs"),
-        QStringLiteral("steam")
+        QStringLiteral("steam"),
+        QStringLiteral("kicad"), QStringLiteral("eeschema"),
+        QStringLiteral("pcbnew"), QStringLiteral("arduino"),
+        QStringLiteral("platformio")
     };
 
     HANDLE snap32 = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -329,6 +332,25 @@ Intent::Domain Brain::detectDomainByKeywords(const QString& lower) const
         QStringLiteral("clipboard"),     QStringLiteral("скопированное"),
     })) return Intent::Domain::Clipboard;
 
+    if (containsAny(lower, {
+        QStringLiteral("кикад"),         QStringLiteral("kicad"),
+        QStringLiteral("схем"),          QStringLiteral("схематик"),
+        QStringLiteral("плата"),         QStringLiteral("плату"),
+        QStringLiteral("pcb"),           QStringLiteral("печатная плата"),
+        QStringLiteral("резистор"),      QStringLiteral("транзистор"),
+        QStringLiteral("конденсатор"),   QStringLiteral("диод"),
+        QStringLiteral("микроконтроллер"),QStringLiteral("ардуино"),
+        QStringLiteral("arduino"),       QStringLiteral("esp32"),
+        QStringLiteral("stm32"),         QStringLiteral("датчик"),
+        QStringLiteral("напряжение"),    QStringLiteral("сила тока"),
+        QStringLiteral("короткое замыкание"), QStringLiteral("пайк"),
+        QStringLiteral("паять"),         QStringLiteral("распиновка"),
+        QStringLiteral("footprint"),     QStringLiteral("даташит"),
+        QStringLiteral("datasheet"),     QStringLiteral("circuit"),
+        QStringLiteral("schematic"),     QStringLiteral("breadboard"),
+        QStringLiteral("multimeter"),    QStringLiteral("мультиметр"),
+    })) return Intent::Domain::Electronics;
+
     // Philosophy, chitchat, moral/ethical questions, open-ended discussion
     if (containsAny(lower, {
         QStringLiteral("философ"),       QStringLiteral("морал"),
@@ -433,6 +455,11 @@ Intent::Domain Brain::refineDomainByContext(
         }
     }
 
+    // KiCad/Arduino/embedded IDE запущен → электроника
+    if (ctx.isInElectronicsContext()) {
+        return Intent::Domain::Electronics;
+    }
+
     // UE5 запущен → логи
     if (ctx.isInUE5Context()) {
         if (containsAny(lower, {
@@ -513,6 +540,9 @@ float Brain::boostConfidenceByContext(
     }
     if (intent.domain == Intent::Domain::Code && ctx.isInCodingContext()) {
         boost += 0.15f;
+    }
+    if (intent.domain == Intent::Domain::Electronics && ctx.isInElectronicsContext()) {
+        boost += 0.20f;
     }
 
     // Предыдущая команда была в том же домене → контекст диалога
