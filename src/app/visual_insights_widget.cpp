@@ -1,5 +1,5 @@
 // ============================================================
-// visual_insights_widget.cpp — Interactive Diagram Side Panel
+// visual_insights_widget.cpp — Interactive Attachments Side Panel
 // ============================================================
 
 #include "visual_insights_widget.h"
@@ -10,7 +10,10 @@
 #include <QFileDialog>
 #include <QDateTime>
 #include <QFile>
+#include <QFileInfo>
 #include <QBuffer>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QDebug>
 
 #ifdef JARVIS_HAS_WEBENGINE
@@ -31,7 +34,15 @@ static const QString kBtnStyle = QStringLiteral(
     "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
     "border: 1px solid rgba(102,252,241,0.2); border-radius: 4px; "
     "font-size: 13px; padding: 2px 8px; } "
-    "QPushButton:hover { background: rgba(102,252,241,0.22); }");
+    "QPushButton:hover { background: rgba(102,252,241,0.22); }"
+    "QPushButton:disabled { color: rgba(102,252,241,0.2); border-color: rgba(102,252,241,0.08); }");
+
+static const QString kNavBtnStyle = QStringLiteral(
+    "QPushButton { background: rgba(102,252,241,0.08); color: #66FCF1; "
+    "border: 1px solid rgba(102,252,241,0.2); border-radius: 4px; "
+    "font-size: 12px; padding: 2px 6px; } "
+    "QPushButton:hover { background: rgba(102,252,241,0.22); } "
+    "QPushButton:disabled { color: rgba(102,252,241,0.15); border-color: rgba(102,252,241,0.06); }");
 
 VisualInsightsWidget::VisualInsightsWidget(QWidget* parent)
     : QWidget(parent)
@@ -66,6 +77,39 @@ VisualInsightsWidget::VisualInsightsWidget(QWidget* parent)
         "color: #00d4ff; font-size: 13px; font-weight: bold; "
         "letter-spacing: 1px; background: transparent;"));
     header->addWidget(m_titleLabel, 1);
+
+    m_prevBtn = new QPushButton(QStringLiteral("\342\227\200"), this); // ◀
+    m_prevBtn->setFixedHeight(26);
+    m_prevBtn->setStyleSheet(kNavBtnStyle);
+    m_prevBtn->setToolTip(QStringLiteral("Previous attachment"));
+    connect(m_prevBtn, &QPushButton::clicked, this, [this]() {
+        if (m_historyIndex > 0) { --m_historyIndex; renderCurrent(); }
+    });
+    header->addWidget(m_prevBtn);
+
+    m_nextBtn = new QPushButton(QStringLiteral("\342\226\266"), this); // ▶
+    m_nextBtn->setFixedHeight(26);
+    m_nextBtn->setStyleSheet(kNavBtnStyle);
+    m_nextBtn->setToolTip(QStringLiteral("Next attachment"));
+    connect(m_nextBtn, &QPushButton::clicked, this, [this]() {
+        if (m_historyIndex >= 0 && m_historyIndex < m_history.size() - 1) {
+            ++m_historyIndex; renderCurrent();
+        }
+    });
+    header->addWidget(m_nextBtn);
+
+    m_folderBtn = new QPushButton(QStringLiteral("\U0001F4C1"), this); // 📁
+    m_folderBtn->setFixedHeight(26);
+    m_folderBtn->setStyleSheet(kBtnStyle);
+    m_folderBtn->setToolTip(QStringLiteral("Show in folder"));
+    m_folderBtn->setVisible(false);
+    connect(m_folderBtn, &QPushButton::clicked, this, [this]() {
+        if (m_historyIndex < 0 || m_historyIndex >= m_history.size()) return;
+        const QString fp = m_history[m_historyIndex].filePath;
+        if (fp.isEmpty()) return;
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(fp).absolutePath()));
+    });
+    header->addWidget(m_folderBtn);
 
     m_saveBtn = new QPushButton(QStringLiteral("Save"), this);
     m_saveBtn->setFixedHeight(28);
@@ -103,7 +147,7 @@ VisualInsightsWidget::VisualInsightsWidget(QWidget* parent)
 
     m_imageLabel = new QLabel(this);
     m_imageLabel->setAlignment(Qt::AlignCenter);
-    m_imageLabel->setStyleSheet(QStringLiteral("background: transparent;"));
+    m_imageLabel->setStyleSheet(QStringLiteral("background: transparent; color: #66FCF1;"));
     m_imageLabel->setVisible(false);
 
     m_scrollArea->setWidget(m_svgWidget);
@@ -114,58 +158,153 @@ VisualInsightsWidget::VisualInsightsWidget(QWidget* parent)
     m_slideAnim = new QPropertyAnimation(this, "panelWidth", this);
     m_slideAnim->setDuration(250);
     m_slideAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    updateNavControls();
 }
 
 int  VisualInsightsWidget::panelWidth() const   { return width(); }
 void VisualInsightsWidget::setPanelWidth(int w) { setFixedWidth(w); }
 
 // ============================================================
-//  showMermaid — primary entry point
+//  History plumbing
+// ============================================================
+
+void VisualInsightsWidget::pushAndRender(HistoryEntry entry)
+{
+    m_history.append(std::move(entry));
+    m_historyIndex = m_history.size() - 1;
+    renderCurrent();
+    slideOpen();
+}
+
+void VisualInsightsWidget::renderCurrent()
+{
+    if (m_historyIndex < 0 || m_historyIndex >= m_history.size()) return;
+    const HistoryEntry& e = m_history[m_historyIndex];
+
+    m_titleLabel->setText(QStringLiteral("%1  (%2/%3)")
+        .arg(e.title).arg(m_historyIndex + 1).arg(m_history.size()));
+
+    switch (e.kind) {
+    case Kind::Mermaid:
+#ifdef JARVIS_HAS_WEBENGINE
+        m_webView->setHtml(buildMermaidHtml(e.mermaidSource));
+#else
+    {
+        m_svgData.clear();
+        m_imageLabel->setVisible(false);
+        m_svgWidget->setVisible(true);
+        m_scrollArea->setWidget(m_svgWidget);
+        QProcess mmdc;
+        QTemporaryFile tmp;
+        tmp.setAutoRemove(true);
+        tmp.setFileTemplate(QDir::tempPath() + QStringLiteral("/jarvis_mmd_XXXXXX.mmd"));
+        if (tmp.open()) {
+            tmp.write(e.mermaidSource.toUtf8());
+            tmp.flush();
+            const QString outSvg = QDir::tempPath() + QStringLiteral("/jarvis_panel.svg");
+            mmdc.start(QStringLiteral("mmdc"), {
+                QStringLiteral("-i"), tmp.fileName(),
+                QStringLiteral("-o"), outSvg,
+                QStringLiteral("-b"), QStringLiteral("transparent"),
+                QStringLiteral("-t"), QStringLiteral("dark")});
+            if (mmdc.waitForStarted(3000) && mmdc.waitForFinished(15000)
+                && mmdc.exitCode() == 0) {
+                QFile f(outSvg);
+                if (f.open(QIODevice::ReadOnly)) {
+                    m_svgData = f.readAll();
+                    f.close();
+                }
+                QFile::remove(outSvg);
+            }
+        }
+        updateSvgDisplay();
+    }
+#endif
+        break;
+
+    case Kind::Svg:
+#ifdef JARVIS_HAS_WEBENGINE
+    {
+        QString html = QStringLiteral(
+            "<!DOCTYPE html><html><head>"
+            "<style>body{margin:0;background:#080a12;display:flex;"
+            "justify-content:center;align-items:center;min-height:100vh;}"
+            "svg{max-width:100%;height:auto;}</style></head><body>");
+        html += QString::fromUtf8(e.svgData);
+        html += QStringLiteral("</body></html>");
+        m_webView->setHtml(html);
+    }
+#else
+        m_svgData = e.svgData;
+        m_imageLabel->setVisible(false);
+        m_svgWidget->setVisible(true);
+        m_scrollArea->setWidget(m_svgWidget);
+        updateSvgDisplay();
+#endif
+        break;
+
+    case Kind::Image:
+#ifdef JARVIS_HAS_WEBENGINE
+        m_webView->setHtml(buildImageHtml(e.image));
+#else
+    {
+        m_svgData.clear();
+        m_svgWidget->setVisible(false);
+        m_imageLabel->setVisible(true);
+        m_scrollArea->setWidget(m_imageLabel);
+        const int availW = qMax(200, m_scrollArea->viewport()->width() - 8);
+        QPixmap pm = QPixmap::fromImage(e.image);
+        if (pm.width() > availW)
+            pm = pm.scaledToWidth(availW, Qt::SmoothTransformation);
+        m_imageLabel->setPixmap(pm);
+        m_imageLabel->resize(pm.size());
+    }
+#endif
+        break;
+
+    case Kind::FileRef:
+#ifdef JARVIS_HAS_WEBENGINE
+        m_webView->setHtml(buildFileCardHtml(e.filePath, e.title));
+#else
+    {
+        m_svgData.clear();
+        m_svgWidget->setVisible(false);
+        m_imageLabel->setVisible(true);
+        m_scrollArea->setWidget(m_imageLabel);
+        m_imageLabel->setPixmap(QPixmap());
+        m_imageLabel->setText(QStringLiteral("\U0001F4C4  %1\n\n%2")
+            .arg(QFileInfo(e.filePath).fileName(), e.filePath));
+        m_imageLabel->resize(m_imageLabel->sizeHint());
+    }
+#endif
+        break;
+    }
+
+    updateNavControls();
+}
+
+void VisualInsightsWidget::updateNavControls()
+{
+    const bool hasHistory = !m_history.isEmpty();
+    m_prevBtn->setEnabled(hasHistory && m_historyIndex > 0);
+    m_nextBtn->setEnabled(hasHistory && m_historyIndex < m_history.size() - 1);
+    const bool hasFile = hasHistory && m_historyIndex >= 0
+                       && !m_history[m_historyIndex].filePath.isEmpty();
+    m_folderBtn->setVisible(hasFile);
+}
+
+// ============================================================
+//  Public entry points — each adds a NEW history entry
 // ============================================================
 
 void VisualInsightsWidget::showMermaid(const QString& mermaidSource)
 {
-    m_currentMermaidSource = mermaidSource;
-    m_currentRasterImage   = QImage();
-    m_diagramCount++;
-    m_titleLabel->setText(QStringLiteral("Diagram #%1").arg(m_diagramCount));
-
-#ifdef JARVIS_HAS_WEBENGINE
-    m_webView->setHtml(buildMermaidHtml(mermaidSource));
-#else
-    // Fallback: try to render via mmdc CLI to SVG
-    m_svgData.clear();
-    // Show the mermaid source as text placeholder in the SVG widget
-    m_imageLabel->setVisible(false);
-    m_svgWidget->setVisible(true);
-    m_scrollArea->setWidget(m_svgWidget);
-    // Attempt mmdc render (sync — ok because it's user-triggered)
-    QProcess mmdc;
-    QTemporaryFile tmp;
-    tmp.setAutoRemove(true);
-    tmp.setFileTemplate(QDir::tempPath() + QStringLiteral("/jarvis_mmd_XXXXXX.mmd"));
-    if (tmp.open()) {
-        tmp.write(mermaidSource.toUtf8());
-        tmp.flush();
-        const QString outSvg = QDir::tempPath() + QStringLiteral("/jarvis_panel.svg");
-        mmdc.start(QStringLiteral("mmdc"), {
-            QStringLiteral("-i"), tmp.fileName(),
-            QStringLiteral("-o"), outSvg,
-            QStringLiteral("-b"), QStringLiteral("transparent"),
-            QStringLiteral("-t"), QStringLiteral("dark")});
-        if (mmdc.waitForStarted(3000) && mmdc.waitForFinished(15000)
-            && mmdc.exitCode() == 0) {
-            QFile f(outSvg);
-            if (f.open(QIODevice::ReadOnly)) {
-                m_svgData = f.readAll();
-                f.close();
-            }
-            QFile::remove(outSvg);
-        }
-    }
-    updateSvgDisplay();
-#endif
-    slideOpen();
+    HistoryEntry e;
+    e.kind = Kind::Mermaid;
+    e.title = QStringLiteral("Diagram");
+    e.mermaidSource = mermaidSource;
+    pushAndRender(std::move(e));
 }
 
 void VisualInsightsWidget::showSvg(const QByteArray& svgData,
@@ -175,51 +314,63 @@ void VisualInsightsWidget::showSvg(const QByteArray& svgData,
         showMermaid(mermaidSource);
         return;
     }
-    m_currentMermaidSource.clear();
-    m_currentRasterImage = QImage();
-    m_diagramCount++;
-    m_titleLabel->setText(QStringLiteral("Diagram #%1").arg(m_diagramCount));
-
-#ifdef JARVIS_HAS_WEBENGINE
-    QString html = QStringLiteral(
-        "<!DOCTYPE html><html><head>"
-        "<style>body{margin:0;background:#080a12;display:flex;"
-        "justify-content:center;align-items:center;min-height:100vh;}"
-        "svg{max-width:100%;height:auto;}</style></head><body>");
-    html += QString::fromUtf8(svgData);
-    html += QStringLiteral("</body></html>");
-    m_webView->setHtml(html);
-#else
-    m_svgData = svgData;
-    m_imageLabel->setVisible(false);
-    m_svgWidget->setVisible(true);
-    m_scrollArea->setWidget(m_svgWidget);
-    updateSvgDisplay();
-#endif
-    slideOpen();
+    HistoryEntry e;
+    e.kind = Kind::Svg;
+    e.title = QStringLiteral("Diagram");
+    e.svgData = svgData;
+    pushAndRender(std::move(e));
 }
 
 void VisualInsightsWidget::showDiagram(const QImage& image)
 {
-    m_currentMermaidSource.clear();
-    m_currentRasterImage = image;
-    m_diagramCount++;
-    m_titleLabel->setText(QStringLiteral("Diagram #%1").arg(m_diagramCount));
+    HistoryEntry e;
+    e.kind = Kind::Image;
+    e.title = QStringLiteral("Image");
+    e.image = image;
+    pushAndRender(std::move(e));
+}
 
-#ifdef JARVIS_HAS_WEBENGINE
-    m_webView->setHtml(buildImageHtml(image));
-#else
-    m_svgData.clear();
-    m_svgWidget->setVisible(false);
-    m_imageLabel->setVisible(true);
-    m_scrollArea->setWidget(m_imageLabel);
-    const int availW = qMax(200, m_scrollArea->viewport()->width() - 8);
-    QPixmap pm = QPixmap::fromImage(image);
-    if (pm.width() > availW)
-        pm = pm.scaledToWidth(availW, Qt::SmoothTransformation);
-    m_imageLabel->setPixmap(pm);
-    m_imageLabel->resize(pm.size());
-#endif
+void VisualInsightsWidget::showImageFile(const QString& filePath)
+{
+    QImage img(filePath);
+    if (img.isNull()) {
+        showFileRef(filePath, QFileInfo(filePath).fileName());
+        return;
+    }
+    HistoryEntry e;
+    e.kind = Kind::Image;
+    e.title = QFileInfo(filePath).fileName();
+    e.image = img;
+    e.filePath = filePath;
+    pushAndRender(std::move(e));
+}
+
+void VisualInsightsWidget::showFileRef(const QString& filePath, const QString& title)
+{
+    HistoryEntry e;
+    e.kind = Kind::FileRef;
+    e.title = title.isEmpty() ? QFileInfo(filePath).fileName() : title;
+    e.filePath = filePath;
+    pushAndRender(std::move(e));
+}
+
+// ============================================================
+//  Reopen — bring back the panel without adding a new entry
+// ============================================================
+
+void VisualInsightsWidget::reopen()
+{
+    if (m_history.isEmpty()) return;
+
+    // Already open (mid-slide counts as open too) — toggle it closed,
+    // matching the toolbar button's usual "press again to hide" feel.
+    if (isVisible() && width() > 0) {
+        slideClose();
+        return;
+    }
+
+    if (m_historyIndex < 0) m_historyIndex = m_history.size() - 1;
+    renderCurrent();
     slideOpen();
 }
 
@@ -249,8 +400,6 @@ void VisualInsightsWidget::slideClose()
 
 void VisualInsightsWidget::clear()
 {
-    m_currentMermaidSource.clear();
-    m_currentRasterImage = QImage();
 #ifdef JARVIS_HAS_WEBENGINE
     m_webView->setHtml(
         QStringLiteral("<html><body style='background:#080a12'></body></html>"));
@@ -268,12 +417,23 @@ void VisualInsightsWidget::clear()
 
 void VisualInsightsWidget::onSaveClicked()
 {
+    if (m_historyIndex < 0 || m_historyIndex >= m_history.size()) return;
+    const HistoryEntry& e = m_history[m_historyIndex];
+
+    // Already a real file on disk — saving it again makes no sense, just
+    // reveal where it already lives.
+    if (e.kind == Kind::FileRef) {
+        if (!e.filePath.isEmpty())
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(e.filePath).absolutePath()));
+        return;
+    }
+
     const QString ts = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyyMMdd_HHmmss"));
     const QString base = JarvisPaths::subPath(QStringLiteral("visuals"))
         + QStringLiteral("/diagram_") + ts;
 
-    if (!m_currentMermaidSource.isEmpty()) {
+    if (!e.mermaidSource.isEmpty()) {
         const QString path = QFileDialog::getSaveFileName(
             this, QStringLiteral("Save Diagram"),
             base + QStringLiteral(".mmd"),
@@ -281,16 +441,28 @@ void VisualInsightsWidget::onSaveClicked()
         if (path.isEmpty()) return;
         QFile f(path);
         if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            f.write(m_currentMermaidSource.toUtf8());
+            f.write(e.mermaidSource.toUtf8());
             f.close();
         }
-    } else if (!m_currentRasterImage.isNull()) {
+    } else if (!e.image.isNull()) {
         const QString path = QFileDialog::getSaveFileName(
             this, QStringLiteral("Save Diagram"),
             base + QStringLiteral(".png"),
             QStringLiteral("PNG (*.png);;All (*)"));
         if (!path.isEmpty())
-            m_currentRasterImage.save(path);
+            e.image.save(path);
+    } else if (!e.svgData.isEmpty()) {
+        const QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("Save Diagram"),
+            base + QStringLiteral(".svg"),
+            QStringLiteral("SVG (*.svg);;All (*)"));
+        if (!path.isEmpty()) {
+            QFile f(path);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(e.svgData);
+                f.close();
+            }
+        }
     }
 }
 
@@ -467,6 +639,30 @@ QString VisualInsightsWidget::buildImageHtml(const QImage& image) const
         "img{max-width:100%;height:auto;}</style></head>"
         "<body><img src='data:image/png;base64,")
         + b64 + QStringLiteral("'/></body></html>");
+}
+
+QString VisualInsightsWidget::buildFileCardHtml(const QString& filePath, const QString& title) const
+{
+    const QFileInfo fi(filePath);
+    return QStringLiteral(
+        "<!DOCTYPE html><html><head><style>"
+        "body{margin:0;background:#080a12;color:#c0c8d8;font-family:'Segoe UI',sans-serif;"
+        "display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;}"
+        ".card{background:#0d2137;border:1px solid rgba(0,212,255,0.3);border-radius:14px;"
+        "padding:32px 40px;text-align:center;max-width:80%;}"
+        ".icon{font-size:48px;margin-bottom:12px;}"
+        ".name{color:#66FCF1;font-size:16px;font-weight:bold;word-break:break-all;}"
+        ".path{color:#7a8aa0;font-size:12px;margin-top:8px;word-break:break-all;}"
+        ".hint{color:#4a6070;font-size:11px;margin-top:16px;}"
+        "</style></head><body>"
+        "<div class='card'>"
+        "<div class='icon'>\U0001F4C4</div>"
+        "<div class='name'>%1</div>"
+        "<div class='path'>%2</div>"
+        "<div class='hint'>Use the \U0001F4C1 button above to open its folder</div>"
+        "</div></body></html>")
+        .arg((title.isEmpty() ? fi.fileName() : title).toHtmlEscaped(),
+             filePath.toHtmlEscaped());
 }
 
 #else // SVG fallback

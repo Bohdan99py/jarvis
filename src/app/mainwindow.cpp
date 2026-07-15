@@ -14,6 +14,7 @@
 #include "attachments_manager.h"
 #include "lang.h"
 #include "brain.h"
+#include "code_actions.h"
 #include "search_router.h"
 #include "fileviewer.h"
 #include "ollama_api.h"
@@ -251,6 +252,21 @@ MainWindow::MainWindow(QWidget* parent)
     buildUI();
     buildMenuBar();
     menuBar()->setVisible(false);
+
+    // Generated KiCad schematics join the attachments panel (so they're
+    // reachable again after the chat scrolls past) and get an inline
+    // "Open Folder" line right where they were created, instead of
+    // leaving the user to go hunting for where the file landed.
+    connect(m_jarvis->codeActions(), &CodeActions::kicadSchematicCreated,
+            this, [this](const QString& path) {
+        if (m_visualInsights)
+            m_visualInsights->showFileRef(path, QFileInfo(path).fileName());
+
+        const QString folderLine = IS_EN
+            ? QStringLiteral("📁 Saved to: %1").arg(path)
+            : QStringLiteral("📁 Сохранено: %1").arg(path);
+        appendLog(Str::logSystem(), folderLine, Theme::LogColors::system);
+    });
 
     m_themeIndex = cfg.value(QStringLiteral("ui/theme"), 0).toInt();
     if (m_themeIndex < 0 || m_themeIndex >= ThemeManager::ThemeCount)
@@ -4064,6 +4080,7 @@ void MainWindow::onSend()
             const QStringList filePaths = router->lastFoundFilePaths();
             if (!filePaths.isEmpty()) {
                 FileViewer::showFiles(filePaths, this);
+                previewIfSingleImage(filePaths);
             }
 
             router->deleteLater();
@@ -4090,6 +4107,7 @@ void MainWindow::onSend()
                 const QStringList filePaths = router->lastFoundFilePaths();
                 if (!filePaths.isEmpty()) {
                     FileViewer::showFiles(filePaths, this);
+                    previewIfSingleImage(filePaths);
                 }
                 router->deleteLater();
             } else {
@@ -4899,6 +4917,9 @@ void MainWindow::buildUI()
         IS_EN ? QStringLiteral("Training stats")   : QStringLiteral("Статистика обучения"));
     auto* tbCapture   = makeToolBtn(QStringLiteral("⊡"),
         IS_EN ? QStringLiteral("Screenshot + AI")  : QStringLiteral("Скриншот + AI"));
+    auto* tbAttachments = makeToolBtn(QStringLiteral("📎"),
+        IS_EN ? QStringLiteral("Attachments (diagrams, files, photos)")
+              : QStringLiteral("Вложения (схемы, файлы, фото)"));
     auto* tbClear     = makeToolBtn(QStringLiteral("⌫"),
         IS_EN ? QStringLiteral("Clear chat")       : QStringLiteral("Очистить чат"));
 
@@ -4907,6 +4928,7 @@ void MainWindow::buildUI()
     toolbar->addWidget(tbVoice);
     toolbar->addWidget(tbTrain);
     toolbar->addWidget(tbCapture);
+    toolbar->addWidget(tbAttachments);
     toolbar->addStretch();
     toolbar->addWidget(tbClear);
     vbox->addLayout(toolbar);
@@ -4940,6 +4962,18 @@ void MainWindow::buildUI()
             Theme::LogColors::jarvis);
     });
     connect(tbClear, &QPushButton::clicked, this, [this]() { m_log->clear(); });
+
+    connect(tbAttachments, &QPushButton::clicked, this, [this]() {
+        if (!m_visualInsights) return;
+        if (!m_visualInsights->hasHistory()) {
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("No attachments yet this session.")
+                      : QStringLiteral("Пока нет вложений за эту сессию."),
+                Theme::LogColors::system);
+            return;
+        }
+        m_visualInsights->reopen();
+    });
 
     connect(tbVoice, &QPushButton::clicked, this, [this]() {
         for (auto* action : menuBar()->actions()) {
@@ -5571,6 +5605,20 @@ void MainWindow::buildUI()
 // ============================================================
 // appendLog
 // ============================================================
+
+void MainWindow::previewIfSingleImage(const QStringList& filePaths)
+{
+    if (filePaths.size() != 1 || !m_visualInsights) return;
+
+    static const QStringList imgExts = {
+        QStringLiteral("png"),  QStringLiteral("jpg"), QStringLiteral("jpeg"),
+        QStringLiteral("bmp"),  QStringLiteral("gif"), QStringLiteral("webp"),
+        QStringLiteral("tiff"), QStringLiteral("ico"),
+    };
+    const QString ext = QFileInfo(filePaths.first()).suffix().toLower();
+    if (imgExts.contains(ext))
+        m_visualInsights->showImageFile(filePaths.first());
+}
 
 void MainWindow::appendLog(const QString& who, const QString& text, const QString& color)
 {

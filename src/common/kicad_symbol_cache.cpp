@@ -14,11 +14,14 @@ KiCadSymbolCache::KiCadSymbolCache(const QString& installRoot)
 
 const QMap<QString, KiCadSymbolCache::ComponentInfo>& KiCadSymbolCache::componentTable()
 {
-    // Pin offsets read directly from Device.kicad_sym / power.kicad_sym's
-    // pin declarations (the "(pin ... (at x y angle) ... (number "N"))"
-    // blocks) — not guessed. Vertical two-pin parts (R/C) use (0,+-3.81);
-    // horizontal ones (LED/D) use (+-3.81,0); power symbols connect exactly
-    // at their placement origin (0,0).
+    // Pin offsets read directly from each part's own .kicad_sym pin
+    // declarations (the "(pin ... (at x y angle) ... (number "N"))" blocks)
+    // — not guessed. Device.kicad_sym/power.kicad_sym cover the basic
+    // passives; Motor.kicad_sym, Connector_Generic.kicad_sym and
+    // Driver_Motor.kicad_sym cover motor_dc/connector3/l298n respectively.
+    // Vertical two-pin parts (R/C) use (0,+-3.81); horizontal ones (LED/D)
+    // use (+-3.81,0); power symbols connect exactly at their placement
+    // origin (0,0).
     static const QMap<QString, ComponentInfo> table = {
         {QStringLiteral("resistor"),
             {QStringLiteral("Device"), QStringLiteral("R"), {QStringLiteral("1"), QStringLiteral("2")},
@@ -38,6 +41,51 @@ const QMap<QString, KiCadSymbolCache::ComponentInfo>& KiCadSymbolCache::componen
         {QStringLiteral("vcc"),
             {QStringLiteral("power"), QStringLiteral("VCC"), {QStringLiteral("1")},
              {{QStringLiteral("1"), QPointF(0, 0)}}, true}},
+        {QStringLiteral("battery"),
+            {QStringLiteral("Device"), QStringLiteral("Battery_Cell"), {QStringLiteral("1"), QStringLiteral("2")},
+             {{QStringLiteral("1"), QPointF(0, 5.08)}, {QStringLiteral("2"), QPointF(0, -2.54)}}, false}},
+        {QStringLiteral("motor_dc"),
+            {QStringLiteral("Motor"), QStringLiteral("Motor_DC"), {QStringLiteral("1"), QStringLiteral("2")},
+             {{QStringLiteral("1"), QPointF(0, 5.08)}, {QStringLiteral("2"), QPointF(0, -7.62)}}, false}},
+        // 3-pin header (signal/+/GND) — the standard way an RC receiver
+        // channel or hobby servo connects; there's no dedicated "RC
+        // receiver" symbol in KiCad's stock libraries, but this is what a
+        // real schematic for one looks like (a Conn_01x03 with the pins
+        // labeled by the wiring, not the part itself).
+        {QStringLiteral("connector3"),
+            {QStringLiteral("Connector_Generic"), QStringLiteral("Conn_01x03"),
+             {QStringLiteral("1"), QStringLiteral("2"), QStringLiteral("3")},
+             {{QStringLiteral("1"), QPointF(-5.08, 2.54)}, {QStringLiteral("2"), QPointF(-5.08, 0)},
+              {QStringLiteral("3"), QPointF(-5.08, -2.54)}}, false}},
+        // "L298N" itself (the bare TO-220 part) is a KiCad `extends "L298HN"`
+        // stub — its own S-expression block carries no pins/graphics at all
+        // (those live in L298HN's), so extracting it verbatim the way this
+        // cache extracts everything else would produce an unusable, pinless
+        // symbol. L298HN is the real base part with the full 15-pin
+        // Multiwatt package definition and an identical pinout/footprint
+        // family, so it's used here under the "l298n" nickname instead.
+        {QStringLiteral("l298n"),
+            {QStringLiteral("Driver_Motor"), QStringLiteral("L298HN"),
+             {QStringLiteral("1"), QStringLiteral("2"), QStringLiteral("3"), QStringLiteral("4"),
+              QStringLiteral("5"), QStringLiteral("6"), QStringLiteral("7"), QStringLiteral("8"),
+              QStringLiteral("9"), QStringLiteral("10"), QStringLiteral("11"), QStringLiteral("12"),
+              QStringLiteral("13"), QStringLiteral("14"), QStringLiteral("15")},
+             {{QStringLiteral("1"),  QPointF(-7.62, -17.78)},  // SENSE_A
+              {QStringLiteral("2"),  QPointF(15.24, 5.08)},    // OUT1
+              {QStringLiteral("3"),  QPointF(15.24, 2.54)},    // OUT2
+              {QStringLiteral("4"),  QPointF(2.54, 17.78)},    // Vs
+              {QStringLiteral("5"),  QPointF(-15.24, 12.7)},   // IN1
+              {QStringLiteral("6"),  QPointF(-15.24, 7.62)},   // EnA
+              {QStringLiteral("7"),  QPointF(-15.24, 10.16)},  // IN2
+              {QStringLiteral("8"),  QPointF(0, -17.78)},      // GND
+              {QStringLiteral("9"),  QPointF(0, 17.78)},       // Vss
+              {QStringLiteral("10"), QPointF(-15.24, 2.54)},   // IN3
+              {QStringLiteral("11"), QPointF(-15.24, -2.54)},  // EnB
+              {QStringLiteral("12"), QPointF(-15.24, 0)},      // IN4
+              {QStringLiteral("13"), QPointF(15.24, -2.54)},   // OUT3
+              {QStringLiteral("14"), QPointF(15.24, -5.08)},   // OUT4
+              {QStringLiteral("15"), QPointF(-5.08, -17.78)}}, // SENSE_B
+             false}},
     };
     return table;
 }

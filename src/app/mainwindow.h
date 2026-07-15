@@ -104,6 +104,12 @@ private:
     void setThinkingState(bool thinking);
     void rebuildAttachmentsBar();
 
+    // If a filesystem search turned up exactly one image file, also push it
+    // into the attachments panel (m_visualInsights) so it's actually shown,
+    // not just listed as a filename — and stays reachable via the 📎 button
+    // after the FileViewer dialog is closed.
+    void previewIfSingleImage(const QStringList& filePaths);
+
     void showWelcomeDashboard();
     QString buildWelcomeHtml() const;
 

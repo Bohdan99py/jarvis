@@ -156,14 +156,25 @@ inline QVector<Capability> activeCapabilities()
                          "extracted from KiCad's own bundled libraries, pin-accurate wiring — "
                          "verified end-to-end against a real KiCad install's ERC checker). "
                          "Emit: [KICAD_SCH:name.kicad_sch]\\n{json}\\n[/KICAD_SCH] where json is "
-                         "{\"components\":[{\"type\":\"resistor|capacitor|led|diode|gnd|vcc\","
+                         "{\"components\":[{\"type\":\"resistor|capacitor|led|diode|gnd|vcc|"
+                         "battery|motor_dc|l298n|connector3\","
                          "\"ref\":\"R1\",\"value\":\"10k\",\"x\":100,\"y\":50,\"rotation\":0}],"
                          "\"wires\":[{\"from\":{\"ref\":\"R1\",\"pin\":\"1\"},"
                          "\"to\":{\"ref\":\"R2\",\"pin\":\"1\"}}]}. Never hand-write the "
                          ".kicad_sch S-expression content yourself — always use this block; "
                          "wires connect by component reference + pin number, never guess raw "
                          "coordinates for a pin. Coordinates are in mm; component types are "
-                         "currently limited to that fixed set (more can be added later).") },
+                         "currently limited to that fixed set (more can be added later). Notes: "
+                         "'l298n' is the real L298HN 15-pin symbol (pins: 1=SENSE_A, 2=OUT1, "
+                         "3=OUT2, 4=Vs, 5=IN1, 6=EnA, 7=IN2, 8=GND, 9=Vss, 10=IN3, 11=EnB, "
+                         "12=IN4, 13=OUT3, 14=OUT4, 15=SENSE_B) — KiCad has no standalone "
+                         "'L298N' graphic (it's a bare variant of L298HN with no pins of its "
+                         "own), so this is used under the 'l298n' type name and is pin-identical. "
+                         "'connector3' is a generic 3-pin header (pins 1/2/3, no fixed meaning) — "
+                         "use it for anything that's physically a 3-pin connector: an RC "
+                         "receiver channel (signal/+/GND), a hobby servo lead, a JST-3 battery "
+                         "connector, etc. — say what each pin is via wiring/labels, not the part "
+                         "itself. 'motor_dc' and 'battery' are plain 2-pin symbols.") },
     };
 }
 

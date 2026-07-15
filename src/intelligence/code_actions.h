@@ -80,6 +80,7 @@ signals:
     void fileModified(const QString& path);
     void directoryCreated(const QString& path);
     void fileDeleted(const QString& path);
+    void kicadSchematicCreated(const QString& path);
     void actionError(const QString& path, const QString& error);
 
 private:

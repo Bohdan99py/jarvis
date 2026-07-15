@@ -205,6 +205,9 @@ QString CodeActions::processResponse(const QString& response)
             case CodeAction::DeleteFile:
                 emit fileDeleted(action.filePath);
                 break;
+            case CodeAction::KiCadSchematic:
+                emit kicadSchematicCreated(action.filePath);
+                break;
             default:
                 break;
             }
@@ -496,6 +499,11 @@ CodeAction CodeActions::doCreateKiCadSchematic(CodeAction action) const
 
     action.success = true;
     action.resultMessage = QStringLiteral("Схема KiCad создана: ") + action.filePath;
+    // From here on, filePath carries the resolved absolute path — the
+    // relative form above was only needed for the user-facing message.
+    // kicadSchematicCreated() (emitted by the caller) needs the absolute
+    // path so a "show in folder" action works regardless of project root.
+    action.filePath = path;
 
     // Validate with kicad-cli's electrical rules check when available —
     // catches genuine electrical-connectivity issues (not file-format
