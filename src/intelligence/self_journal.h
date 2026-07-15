@@ -60,10 +60,12 @@ public:
     QString journalPath() const { return m_journalPath; }
 
     // --- Doubt logging ---
-    void logDoubt(const QString& content,
-                  const QString& reason,
-                  double confidence,
-                  const QString& sourceRef = QString());
+    // Returns the new row's id (0 on failure) so callers can hold onto it
+    // and resolve it later via resolveDoubt() once the user gives feedback.
+    qint64 logDoubt(const QString& content,
+                     const QString& reason,
+                     double confidence,
+                     const QString& sourceRef = QString());
 
     void logLearning(const QString& content,
                      double confidence,

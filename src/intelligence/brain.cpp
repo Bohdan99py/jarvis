@@ -4,6 +4,7 @@
 
 #include "brain.h"
 #include "llm_cache_manager.h"
+#include "self_journal.h"
 
 #include <QClipboard>
 #include <QApplication>
@@ -958,9 +959,24 @@ bool Brain::tryLocalAnswer(const QString& lower, Intent& intent) const
         qDebug() << "[Brain] Exact local match found. Bypassing remote LLM."
                  << lower.left(60);
     } else {
-        intent.confidence    = 0.55f;
-        intent.localResponse = match.response
-            + QStringLiteral("\n\n🔎 _Похоже на похожий случай — могу ошибаться._");
+        // Confidence scales with the actual keyword overlap (0.6..1.0 for
+        // Tier::Similar) instead of a flat guess — a near-exact cache hit
+        // reads as confident, only genuinely loose matches read as unsure.
+        intent.confidence = 0.5f + match.overlap * 0.45f;
+
+        if (match.overlap < kUncertainOverlapCeiling) {
+            intent.localResponse = match.response
+                + QStringLiteral("\n\n🔎 _Похоже на похожий случай — могу ошибаться._");
+            intent.doubtId = SelfJournal::instance().logDoubt(
+                lower,
+                QStringLiteral("cached answer matched a similar (not identical) "
+                               "past question — overlap %1%")
+                    .arg(QString::number(match.overlap * 100.0f, 'f', 0)),
+                intent.confidence,
+                match.matchedQuery);
+        } else {
+            intent.localResponse = match.response;
+        }
         qDebug() << "[Brain] Similar local match found (overlap="
                  << match.overlap << "). Bypassing remote LLM."
                  << lower.left(60);

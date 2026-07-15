@@ -20,6 +20,7 @@
 #include <QCloseEvent>
 #include <QSystemTrayIcon>
 #include <QStyle>
+#include <QDateTime>
 
 class Jarvis;
 struct OrganizePlan;
@@ -155,6 +156,14 @@ private:
     QHBoxLayout*            m_clarifyBtnLay  = nullptr;
     QString                 m_pendingInput;
     QStringList              m_pendingOptions; // labels for the active m_clarifyBar buttons
+
+    // Praise/scold feedback for the last uncertain local/cached answer
+    // (see Intent::doubtId). Two redundant paths resolve the same doubt:
+    // a typed confirm/deny phrase (checked in onSend) or the clarify-bar
+    // buttons (see onClarificationChoice, "doubt_feedback:" prefix) —
+    // whichever the user reaches for first.
+    qint64                  m_pendingDoubtId = 0;
+    QDateTime               m_pendingDoubtSetAt;
 
     QWidget*                m_updateBar       = nullptr;
     QLabel*                 m_updateLabel     = nullptr;

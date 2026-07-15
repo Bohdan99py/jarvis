@@ -76,6 +76,11 @@ struct Intent
     bool    fromContext  = false;
     bool    fromKeyword  = false;
 
+    // Id of the SelfJournal doubt logged for this answer, if any (0 = none).
+    // Set when a local/cached answer wasn't confident enough to skip
+    // review — lets the caller offer the user a way to confirm/correct it.
+    qint64  doubtId = 0;
+
     // Удобные проверки
     bool isSearch()    const { return action == Action::Search; }
     bool isOpen()      const { return action == Action::Open; }
@@ -159,4 +164,11 @@ private:
     static constexpr float kClarifyThreshold = 0.55f;
     static constexpr float kHighConfidence   = 0.80f;
     static constexpr int   kShortPhraseWords = 6;
+
+    // Similar-tier cache matches (see tryLocalAnswer) below this keyword
+    // overlap are close enough to guess but not to trust blindly — they get
+    // the "might be wrong" disclaimer and a SelfJournal doubt entry so the
+    // user can confirm/correct them. At or above it, the match is treated
+    // as confidently correct and shown as-is.
+    static constexpr float kUncertainOverlapCeiling = 0.85f;
 };

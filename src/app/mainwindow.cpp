@@ -3759,6 +3759,63 @@ void MainWindow::onSend()
     }
 
     m_input->clear();
+
+    // ── 0.2 Praise/scold: typed confirm/deny for the last uncertain
+    // answer ───────────────────────────────────────────────────────
+    // Safety net alongside the clarify-bar buttons (see
+    // onClarificationChoice, "doubt_feedback:" prefix) for when the
+    // user just talks instead of clicking. Only fires on a short reply
+    // within a few minutes of the doubt being raised, so it can't
+    // swallow an unrelated later message.
+    if (m_pendingDoubtId != 0
+        && m_pendingDoubtSetAt.secsTo(QDateTime::currentDateTime()) <= 15 * 60)
+    {
+        static const QStringList praiseMarkers = {
+            QStringLiteral("да"),        QStringLiteral("верно"),
+            QStringLiteral("точно"),     QStringLiteral("правильно"),
+            QStringLiteral("молодец"),   QStringLiteral("так и есть"),
+            QStringLiteral("именно"),    QStringLiteral("yes"),
+            QStringLiteral("correct"),   QStringLiteral("right"),
+            QStringLiteral("exactly"),
+        };
+        static const QStringList scoldMarkers = {
+            QStringLiteral("нет"),         QStringLiteral("неверно"),
+            QStringLiteral("не верно"),    QStringLiteral("не так"),
+            QStringLiteral("неправильно"), QStringLiteral("ошибся"),
+            QStringLiteral("ошиблась"),    QStringLiteral("мимо"),
+            QStringLiteral("no"),          QStringLiteral("wrong"),
+            QStringLiteral("incorrect"),
+        };
+
+        const QString lo = text.toLower();
+        const int wordCount = lo.split(QRegularExpression(QStringLiteral("\\s+")),
+                                        Qt::SkipEmptyParts).size();
+        if (wordCount <= 4) {
+            bool isPraise = false, isScold = false;
+            for (const auto& m : praiseMarkers)
+                if (lo.startsWith(m)) { isPraise = true; break; }
+            if (!isPraise)
+                for (const auto& m : scoldMarkers)
+                    if (lo.startsWith(m)) { isScold = true; break; }
+
+            if (isPraise || isScold) {
+                SelfJournal::instance().resolveDoubt(m_pendingDoubtId, isPraise);
+                m_pendingDoubtId = 0;
+                appendLog(Str::logSender(), text, Theme::LogColors::user);
+                appendLog(Str::logJarvis(),
+                    isPraise
+                        ? (IS_EN ? QStringLiteral("Good to know — I'll trust that one more next time.")
+                                 : QStringLiteral("Понял, учту — в следующий раз буду увереннее."))
+                        : (IS_EN ? QStringLiteral("Thanks for the correction — I'll be more careful with that one.")
+                                 : QStringLiteral("Спасибо, что поправил — учту это на будущее.")),
+                    Theme::LogColors::jarvis);
+                hideClarification();
+                m_input->setFocus();
+                return;
+            }
+        }
+    }
+
     hideClarification();
 
     // ── 1. Автоопределение языка ──────────────────────────
@@ -4051,6 +4108,24 @@ void MainWindow::onSend()
             m_jarvis->speakAsync(intent.localResponse);
         m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
         m_jarvis->memory()->addMessage(QStringLiteral("assistant"), intent.localResponse);
+
+        // Uncertain cached answer — offer a quick way to confirm/correct it.
+        // (Redundant with the typed confirm/deny phrases checked at the top
+        // of onSend — whichever the user reaches for first wins.)
+        if (intent.doubtId != 0) {
+            m_pendingDoubtId    = intent.doubtId;
+            m_pendingDoubtSetAt = QDateTime::currentDateTime();
+            m_pendingInput      = text;
+            m_pendingSuggestionAction = QStringLiteral("doubt_feedback:")
+                                      + QString::number(intent.doubtId);
+            showClarification(
+                IS_EN ? QStringLiteral("Not fully sure about that one — was I right?")
+                      : QStringLiteral("Не совсем уверен в этом ответе — я прав?"),
+                { IS_EN ? QStringLiteral("\U0001F44D Correct") : QStringLiteral("\U0001F44D Верно"),
+                  IS_EN ? QStringLiteral("\U0001F44E Wrong")   : QStringLiteral("\U0001F44E Неверно") }
+            );
+        }
+
         m_input->setFocus();
         return;
     }
@@ -4246,6 +4321,7 @@ void MainWindow::hideClarification()
     });
     anim->start(QAbstractAnimation::DeleteWhenStopped);
     m_pendingInput.clear();
+    m_pendingDoubtId = 0;
 }
 
 void MainWindow::onCuriosityQuestionPosted(const QString& question, const QStringList& options)
@@ -4262,6 +4338,27 @@ void MainWindow::onCuriosityQuestionPosted(const QString& question, const QStrin
 void MainWindow::onClarificationChoice(int choice)
 {
     if (m_pendingInput.isEmpty()) return;
+
+    // Praise/scold buttons for an uncertain cached answer (see the
+    // "5.5 Локальный ответ роутера" branch in onSend, which sets this up).
+    if (m_pendingSuggestionAction.startsWith(QStringLiteral("doubt_feedback:"))) {
+        const qint64 doubtId = m_pendingSuggestionAction.mid(15).toLongLong();
+        const bool correct = (choice == 1); // button order: [Correct, Wrong]
+        hideClarification();
+        if (doubtId != 0) {
+            SelfJournal::instance().resolveDoubt(doubtId, correct);
+            appendLog(Str::logJarvis(),
+                correct
+                    ? (IS_EN ? QStringLiteral("Good to know — I'll trust that one more next time.")
+                             : QStringLiteral("Понял, учту — в следующий раз буду увереннее."))
+                    : (IS_EN ? QStringLiteral("Thanks for the correction — I'll be more careful with that one.")
+                             : QStringLiteral("Спасибо, что поправил — учту это на будущее.")),
+                Theme::LogColors::jarvis);
+        }
+        m_pendingSuggestionAction.clear();
+        m_pendingInput.clear();
+        return;
+    }
 
     // CuriosityEngine question answered via Да/Нет (or other option) button
     if (m_pendingSuggestionAction == QStringLiteral("curiosity_answer")) {

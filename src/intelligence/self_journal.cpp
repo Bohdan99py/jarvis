@@ -72,15 +72,15 @@ void SelfJournal::ensureTable()
 //  Doubt logging
 // ============================================================
 
-void SelfJournal::logDoubt(const QString& content,
-                            const QString& reason,
-                            double confidence,
-                            const QString& sourceRef)
+qint64 SelfJournal::logDoubt(const QString& content,
+                              const QString& reason,
+                              double confidence,
+                              const QString& sourceRef)
 {
-    if (!DatabaseManager::instance().isOpen()) return;
+    if (!DatabaseManager::instance().isOpen()) return 0;
 
     auto db = QSqlDatabase::database(QStringLiteral("jarvis_main"));
-    if (!db.isOpen()) return;
+    if (!db.isOpen()) return 0;
 
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
@@ -92,10 +92,13 @@ void SelfJournal::logDoubt(const QString& content,
     q.bindValue(QStringLiteral(":src"),  sourceRef.left(500));
 
     if (q.exec()) {
+        const qint64 id = q.lastInsertId().toLongLong();
         emit doubtLogged(content, confidence);
         qDebug() << "[SelfJournal] Doubt logged (conf:"
                  << confidence << "):" << content.left(80);
+        return id;
     }
+    return 0;
 }
 
 void SelfJournal::logLearning(const QString& content,
