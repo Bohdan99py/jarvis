@@ -22,6 +22,9 @@ add_library(jarvis_common OBJECT
     kicad_symbol_cache.cpp
     kicad_schematic_builder.h
     kicad_schematic_builder.cpp
+    notification_manager.h
+    notification_manager.cpp
+    notification_toast.qrc
 )
 
 target_include_directories(jarvis_common PUBLIC
@@ -31,5 +34,9 @@ target_include_directories(jarvis_common PUBLIC
 target_link_libraries(jarvis_common PUBLIC
     Qt6::Core
     Qt6::Gui
+    Qt6::Widgets
     Qt6::Concurrent
+    Qt6::Quick
+    Qt6::QuickWidgets
+    Qt6::QuickEffects
 )

@@ -74,7 +74,7 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets Network Sql Concurrent Multimedia MultimediaWidgets
-    Svg SvgWidgets
+    Svg SvgWidgets Quick QuickWidgets QuickEffects Qml
 )
 
 # WebEngine is optional — CI environments may not have it installed
@@ -265,6 +265,10 @@ target_link_libraries(JarvisCore PUBLIC
     Qt6::MultimediaWidgets
     Qt6::Svg
     Qt6::SvgWidgets
+    Qt6::Quick
+    Qt6::QuickWidgets
+    Qt6::QuickEffects
+    Qt6::Qml
 )
 
 if(JARVIS_HAS_WEBENGINE)
@@ -368,8 +372,9 @@ if(WIN32)
                 --no-system-d3d-compiler
                 --no-opengl-sw
                 --no-compiler-runtime
+                --qmldir "${CMAKE_SOURCE_DIR}/src"
                 "$<TARGET_FILE:jarvis>"
-                COMMENT "Deploying Qt runtime..."
+                COMMENT "Deploying Qt runtime (incl. QML imports for notification toasts)..."
         )
     endif()
 endif()

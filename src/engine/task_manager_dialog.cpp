@@ -3,57 +3,31 @@
 // ============================================================
 
 #include "task_manager_dialog.h"
+#include "task_board_model.h"
+#include "notification_manager.h"
+#include "lang.h"
+
+#include <QQuickWidget>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QCoreApplication>
+#include <QLabel>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QDateTimeEdit>
 #include <QCheckBox>
+#include <QPushButton>
+#include <QHBoxLayout>
 #include <QMessageBox>
 #include <QDateTime>
 #include <QDebug>
 
-static const char* kDialogCss = R"(
+static const char* kDialogFormCss = R"(
     QDialog {
         background-color: #0B0C10;
         color: #c5c6c7;
     }
     QLabel { color: #c5c6c7; }
-    QLabel#columnTitle {
-        color: #66FCF1;
-        font-size: 15px;
-        font-weight: bold;
-        font-family: "Segoe UI Semibold", "Segoe UI", sans-serif;
-        letter-spacing: 2px;
-        padding: 6px 0;
-    }
-    QScrollArea {
-        border: 1px solid rgba(102,252,241,0.12);
-        border-radius: 8px;
-        background: rgba(15,17,22,0.85);
-    }
-    QPushButton#addBtn {
-        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-            stop:0 #45A29E, stop:1 #66FCF1);
-        color: #0B0C10;
-        font-weight: bold;
-        font-size: 13px;
-        border: none;
-        border-radius: 6px;
-        padding: 8px 24px;
-    }
-    QPushButton#addBtn:hover {
-        background: #66FCF1;
-    }
-    QPushButton#cardBtn {
-        background: rgba(102,252,241,0.06);
-        border: 1px solid rgba(102,252,241,0.12);
-        border-radius: 6px;
-        color: #c5c6c7;
-        text-align: left;
-        padding: 10px 12px;
-        font-family: "Segoe UI", sans-serif;
-        font-size: 12px;
-    }
-    QPushButton#cardBtn:hover {
-        background: rgba(102,252,241,0.14);
-        border-color: rgba(102,252,241,0.35);
-    }
     QLineEdit, QComboBox, QDateTimeEdit {
         background: #1F2833;
         color: #c5c6c7;
@@ -72,6 +46,17 @@ static const char* kDialogCss = R"(
         selection-background-color: rgba(102,252,241,0.2);
         border: 1px solid rgba(102,252,241,0.2);
     }
+    QPushButton#addBtn {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+            stop:0 #45A29E, stop:1 #66FCF1);
+        color: #0B0C10;
+        font-weight: bold;
+        font-size: 13px;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 24px;
+    }
+    QPushButton#addBtn:hover { background: #66FCF1; }
     QPushButton#dlgBtn {
         background: #1F2833;
         color: #66FCF1;
@@ -80,9 +65,7 @@ static const char* kDialogCss = R"(
         padding: 6px 18px;
         font-size: 12px;
     }
-    QPushButton#dlgBtn:hover {
-        background: rgba(102,252,241,0.12);
-    }
+    QPushButton#dlgBtn:hover { background: rgba(102,252,241,0.12); }
     QPushButton#deleteBtn {
         background: rgba(255,82,82,0.15);
         color: #ff5252;
@@ -91,9 +74,7 @@ static const char* kDialogCss = R"(
         padding: 6px 18px;
         font-size: 12px;
     }
-    QPushButton#deleteBtn:hover {
-        background: rgba(255,82,82,0.3);
-    }
+    QPushButton#deleteBtn:hover { background: rgba(255,82,82,0.3); }
     QCheckBox { color: #c5c6c7; }
     QCheckBox::indicator {
         width: 14px; height: 14px;
@@ -114,22 +95,46 @@ TaskManagerDialog::TaskManagerDialog(qint64 userId, QWidget* parent)
 {
     setWindowTitle(QStringLiteral("JARVIS — Task Manager"));
     setMinimumSize(900, 560);
-    setStyleSheet(QString::fromUtf8(kDialogCss));
+
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+
+    m_board = new QQuickWidget(this);
+    m_board->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    m_board->setClearColor(QColor(0x0B, 0x0C, 0x10));
+
+    // See notification_manager.cpp for why this is needed: windeployqt
+    // drops QML plugin deps under bin/qml/, which isn't on the engine's
+    // default import search path.
+    m_board->engine()->addImportPath(QCoreApplication::applicationDirPath()
+                                     + QStringLiteral("/qml"));
+
+    m_todoModel       = new TaskListModel(this);
+    m_inProgressModel = new TaskListModel(this);
+    m_doneModel       = new TaskListModel(this);
+    m_todoModel->setEnglish(IS_EN);
+    m_inProgressModel->setEnglish(IS_EN);
+    m_doneModel->setEnglish(IS_EN);
+
+    QQmlContext* ctx = m_board->rootContext();
+    ctx->setContextProperty(QStringLiteral("todoModel"), m_todoModel);
+    ctx->setContextProperty(QStringLiteral("inProgressModel"), m_inProgressModel);
+    ctx->setContextProperty(QStringLiteral("doneModel"), m_doneModel);
+    ctx->setContextProperty(QStringLiteral("boardEnglish"), IS_EN);
+    ctx->setContextProperty(QStringLiteral("boardProgress"), 0.0);
+    ctx->setContextProperty(QStringLiteral("boardDoneCount"), 0);
+    ctx->setContextProperty(QStringLiteral("boardTotalCount"), 0);
+    ctx->setContextProperty(QStringLiteral("taskBoard"), this);
+
+    m_board->setSource(QUrl(QStringLiteral("qrc:/qml/TaskBoard.qml")));
+
+    root->addWidget(m_board);
+
     rebuild();
 }
 
 void TaskManagerDialog::rebuild()
 {
-    // Delete old layout
-    if (layout()) {
-        QLayoutItem* item;
-        while ((item = layout()->takeAt(0)) != nullptr) {
-            delete item->widget();
-            delete item;
-        }
-        delete layout();
-    }
-
     auto& db = DatabaseManager::instance();
     auto allTasks = db.getTasks(m_userId);
 
@@ -140,145 +145,87 @@ void TaskManagerDialog::rebuild()
         else                                                done.append(t);
     }
 
-    auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(16, 12, 16, 12);
-    root->setSpacing(10);
+    m_todoModel->setTasks(todo);
+    m_inProgressModel->setTasks(inProg);
+    m_doneModel->setTasks(done);
 
-    // Header
-    auto* header = new QHBoxLayout();
-    auto* titleLbl = new QLabel(QStringLiteral("TASK MANAGER"), this);
-    titleLbl->setStyleSheet(QStringLiteral(
-        "color:#66FCF1; font-size:18px; font-weight:bold; letter-spacing:3px;"));
-    header->addWidget(titleLbl);
-    header->addStretch();
+    const int total = allTasks.size();
+    const double progress = total > 0 ? double(done.size()) / total : 0.0;
 
-    auto* addBtn = new QPushButton(QStringLiteral("+ NEW TASK"), this);
-    addBtn->setObjectName(QStringLiteral("addBtn"));
-    connect(addBtn, &QPushButton::clicked, this, &TaskManagerDialog::showAddDialog);
-    header->addWidget(addBtn);
-    root->addLayout(header);
-
-    // Separator
-    auto* sep = new QFrame(this);
-    sep->setFrameShape(QFrame::HLine);
-    sep->setStyleSheet(QStringLiteral(
-        "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-        "stop:0 transparent, stop:0.2 #45A29E, stop:0.5 #66FCF1,"
-        "stop:0.8 #45A29E, stop:1 transparent); max-height:2px;"));
-    root->addWidget(sep);
-
-    // Columns
-    auto* cols = new QHBoxLayout();
-    cols->setSpacing(12);
-    cols->addWidget(buildColumn(QStringLiteral("TO DO"),        QStringLiteral("Todo"),       todo));
-    cols->addWidget(buildColumn(QStringLiteral("IN PROGRESS"),  QStringLiteral("InProgress"), inProg));
-    cols->addWidget(buildColumn(QStringLiteral("DONE"),         QStringLiteral("Done"),       done));
-    root->addLayout(cols, 1);
-
-    // Close button
-    auto* closeRow = new QHBoxLayout();
-    closeRow->addStretch();
-    auto* closeBtn = new QPushButton(QStringLiteral("CLOSE"), this);
-    closeBtn->setObjectName(QStringLiteral("dlgBtn"));
-    closeBtn->setFixedWidth(100);
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
-    closeRow->addWidget(closeBtn);
-    closeRow->addStretch();
-    root->addLayout(closeRow);
+    QQmlContext* ctx = m_board->rootContext();
+    ctx->setContextProperty(QStringLiteral("boardProgress"), progress);
+    ctx->setContextProperty(QStringLiteral("boardDoneCount"), done.size());
+    ctx->setContextProperty(QStringLiteral("boardTotalCount"), total);
 }
 
-QWidget* TaskManagerDialog::buildColumn(const QString& title, const QString& status,
-                                         const QList<DbTask>& tasks)
+// ============================================================
+// Invokable from TaskBoard.qml
+// ============================================================
+
+void TaskManagerDialog::openTask(qint64 id)
 {
-    Q_UNUSED(status)
-    auto* frame = new QWidget(this);
-    auto* lay = new QVBoxLayout(frame);
-    lay->setContentsMargins(0, 0, 0, 0);
-    lay->setSpacing(6);
-
-    auto* lbl = new QLabel(title, frame);
-    lbl->setObjectName(QStringLiteral("columnTitle"));
-    lbl->setAlignment(Qt::AlignCenter);
-    lay->addWidget(lbl);
-
-    auto* countLbl = new QLabel(
-        QStringLiteral("<span style='color:#45A29E;font-size:11px;'>%1 task%2</span>")
-            .arg(tasks.size()).arg(tasks.size() == 1 ? "" : "s"), frame);
-    countLbl->setTextFormat(Qt::RichText);
-    countLbl->setAlignment(Qt::AlignCenter);
-    lay->addWidget(countLbl);
-
-    auto* scrollArea = new QScrollArea(frame);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-    auto* scrollContent = new QWidget();
-    auto* scrollLay = new QVBoxLayout(scrollContent);
-    scrollLay->setContentsMargins(6, 6, 6, 6);
-    scrollLay->setSpacing(6);
-
-    for (const auto& t : tasks)
-        scrollLay->addWidget(buildCard(t));
-    scrollLay->addStretch();
-
-    scrollArea->setWidget(scrollContent);
-    lay->addWidget(scrollArea, 1);
-
-    return frame;
+    auto t = DatabaseManager::instance().getTask(id);
+    if (t) showEditDialog(*t);
 }
 
-QWidget* TaskManagerDialog::buildCard(const DbTask& task)
+void TaskManagerDialog::requestAdd()
 {
-    auto* btn = new QPushButton(this);
-    btn->setObjectName(QStringLiteral("cardBtn"));
-    btn->setCursor(Qt::PointingHandCursor);
-
-    // Priority color
-    QString priColor = QStringLiteral("#45A29E");
-    if (task.priority == QStringLiteral("High"))   priColor = QStringLiteral("#ff5252");
-    if (task.priority == QStringLiteral("Medium")) priColor = QStringLiteral("#FFD740");
-
-    // Deadline text
-    QString deadText;
-    if (task.deadline.isValid()) {
-        qint64 secsTo = QDateTime::currentDateTime().secsTo(task.deadline);
-        if (secsTo < 0)
-            deadText = QStringLiteral(" | OVERDUE");
-        else if (secsTo < 3600)
-            deadText = QStringLiteral(" | %1m left").arg(secsTo / 60);
-        else if (secsTo < 86400)
-            deadText = QStringLiteral(" | %1h left").arg(secsTo / 3600);
-        else
-            deadText = QStringLiteral(" | ") + task.deadline.toString(QStringLiteral("MMM dd"));
-    }
-
-    QString text = QStringLiteral("%1\n[%2] [%3]%4")
-        .arg(task.title, task.category, task.priority, deadText);
-    btn->setText(text);
-
-    // Overdue styling
-    if (task.deadline.isValid() && QDateTime::currentDateTime() > task.deadline
-        && task.status != QStringLiteral("Done")) {
-        btn->setStyleSheet(
-            QStringLiteral("QPushButton#cardBtn { border-color: rgba(255,82,82,0.5); "
-                           "background: rgba(255,82,82,0.08); }"));
-    }
-
-    qint64 taskId = task.id;
-    connect(btn, &QPushButton::clicked, this, [this, taskId]() {
-        auto t = DatabaseManager::instance().getTask(taskId);
-        if (t) showEditDialog(*t);
-    });
-
-    return btn;
+    showAddDialog();
 }
+
+void TaskManagerDialog::moveTask(qint64 id, const QString& fromStatus, const QString& toStatus)
+{
+    if (fromStatus == toStatus) return;
+
+    auto t = DatabaseManager::instance().getTask(id);
+    if (!t) return;
+
+    t->status = toStatus;
+    DatabaseManager::instance().updateTask(*t);
+
+    // Move the row between the in-memory models directly (instead of a
+    // full rebuild()) so TaskBoard.qml's add/remove transitions animate
+    // exactly the one card that moved rather than resetting the board.
+    auto modelFor = [this](const QString& status) -> TaskListModel* {
+        if (status == QStringLiteral("Todo"))       return m_todoModel;
+        if (status == QStringLiteral("InProgress")) return m_inProgressModel;
+        return m_doneModel;
+    };
+    TaskListModel* from = modelFor(fromStatus);
+    TaskListModel* to   = modelFor(toStatus);
+
+    if (auto moved = from->takeById(id))
+        to->insertTask(*moved);
+
+    const int total = m_todoModel->count() + m_inProgressModel->count() + m_doneModel->count();
+    const double progress = total > 0 ? double(m_doneModel->count()) / total : 0.0;
+    QQmlContext* ctx = m_board->rootContext();
+    ctx->setContextProperty(QStringLiteral("boardProgress"), progress);
+    ctx->setContextProperty(QStringLiteral("boardDoneCount"), m_doneModel->count());
+    ctx->setContextProperty(QStringLiteral("boardTotalCount"), total);
+
+    NotificationManager::instance().showNotification(
+        toStatus == QStringLiteral("Done")
+            ? (IS_EN ? QStringLiteral("Task completed") : QStringLiteral("Задача выполнена"))
+            : (IS_EN ? QStringLiteral("Task moved") : QStringLiteral("Задача перемещена")),
+        t->title,
+        toStatus == QStringLiteral("Done") ? NotificationManager::Level::Success
+                                            : NotificationManager::Level::Info);
+
+    emit taskChanged();
+}
+
+// ============================================================
+// Add / Edit forms — still plain QDialog; no reason to rebuild a
+// perfectly good form in QML just for the sake of it.
+// ============================================================
 
 void TaskManagerDialog::showAddDialog()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("New Task"));
     dlg.setFixedWidth(400);
-    dlg.setStyleSheet(styleSheet());
+    dlg.setStyleSheet(QString::fromUtf8(kDialogFormCss));
 
     auto* lay = new QVBoxLayout(&dlg);
     lay->setContentsMargins(16, 12, 16, 12);
@@ -329,6 +276,8 @@ void TaskManagerDialog::showAddDialog()
     btnRow->addWidget(saveBtn);
     lay->addLayout(btnRow);
 
+    QString createdTitle;
+
     connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
     connect(saveBtn, &QPushButton::clicked, &dlg, [&]() {
         if (titleEdit->text().trimmed().isEmpty()) return;
@@ -341,11 +290,15 @@ void TaskManagerDialog::showAddDialog()
         if (deadCheck->isChecked())
             t.deadline = deadEdit->dateTime();
         DatabaseManager::instance().addTask(t);
+        createdTitle = t.title;
         dlg.accept();
     });
 
     if (dlg.exec() == QDialog::Accepted) {
         rebuild();
+        NotificationManager::instance().showNotification(
+            IS_EN ? QStringLiteral("Task created") : QStringLiteral("Задача создана"),
+            createdTitle, NotificationManager::Level::Success);
         emit taskChanged();
     }
 }
@@ -355,7 +308,7 @@ void TaskManagerDialog::showEditDialog(const DbTask& task)
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("Edit Task"));
     dlg.setFixedWidth(420);
-    dlg.setStyleSheet(styleSheet());
+    dlg.setStyleSheet(QString::fromUtf8(kDialogFormCss));
 
     auto* lay = new QVBoxLayout(&dlg);
     lay->setContentsMargins(16, 12, 16, 12);
@@ -455,6 +408,11 @@ void TaskManagerDialog::showEditDialog(const DbTask& task)
 
     if (dlg.exec() == QDialog::Accepted) {
         rebuild();
+        if (deleted) {
+            NotificationManager::instance().showNotification(
+                IS_EN ? QStringLiteral("Task deleted") : QStringLiteral("Задача удалена"),
+                titleEdit->text(), NotificationManager::Level::Warning);
+        }
         emit taskChanged();
     }
 }

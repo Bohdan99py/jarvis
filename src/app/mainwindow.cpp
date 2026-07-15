@@ -5,6 +5,7 @@
 #include "mainwindow.h"
 #include "jarvis.h"
 #include "jarvis_paths.h"
+#include "notification_manager.h"
 #include "theme.h"
 #include "virtual_keyboard.h"
 #include "claude_api.h"
@@ -35,6 +36,7 @@
 #include "activity_tracker.h"
 #include "user_profile.h"
 #include "curiosity_engine.h"
+#include "proactive_reminder_manager.h"
 #include "user_profile_extended.h"
 #include "memory_consolidation.h"
 #include "self_journal.h"
@@ -105,6 +107,23 @@
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QRegularExpression>
+
+namespace {
+// TaskNotifications::checkDeadlines() returns one "[TASK WARNING]: ..." /
+// "[ЗАДАЧА]: ..." line per approaching/overdue task, newline-separated —
+// split it into individual notification toasts instead of one wall of text.
+void notifyDeadlineWarnings(const QString& warnings)
+{
+    const QString overdueMarker = IS_EN ? QStringLiteral("OVERDUE") : QStringLiteral("ПРОСРОЧЕНО");
+    for (const QString& line : warnings.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        NotificationManager::instance().showNotification(
+            IS_EN ? QStringLiteral("Task deadline") : QStringLiteral("Дедлайн задачи"),
+            line,
+            line.contains(overdueMarker) ? NotificationManager::Level::Error
+                                          : NotificationManager::Level::Warning);
+    }
+}
+}
 
 // ============================================================
 // Конструктор
@@ -178,8 +197,10 @@ MainWindow::MainWindow(QWidget* parent)
                 appendLog(QStringLiteral("J.A.R.V.I.S."), message, "#66FCF1");
             });
 
-    connect(&CuriosityEngine::instance(), &CuriosityEngine::questionPosted,
-            this, &MainWindow::onCuriosityQuestionPosted);
+    // CuriosityEngine::questionPosted is now handled entirely via the
+    // NotificationManager::askQuestion toast wired up further below
+    // (right after the file-operation notifications), which replaced the
+    // old clarify-bar-based prompt.
 
     connect(m_jarvis->attachments(), &AttachmentsManager::changed,
             this, &MainWindow::onAttachmentsChanged);
@@ -196,6 +217,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(updater, &AutoUpdater::updateAvailable,
             this, [this](const QString& newVersion, const QString&, const QUrl&) {
         showUpdateBar(newVersion);
+        NotificationManager::instance().showNotification(
+            QStringLiteral("System Update"),
+            IS_EN ? QStringLiteral("Version %1 is available").arg(newVersion)
+                  : QStringLiteral("Доступна версия %1").arg(newVersion));
     });
     connect(updater, &AutoUpdater::noUpdateAvailable,
             this, [this]() {
@@ -214,6 +239,13 @@ MainWindow::MainWindow(QWidget* parent)
     connect(updater, &AutoUpdater::downloadFinished,
             this, [this](const QString& path) {
         m_updateProgress->setVisible(false);
+
+        NotificationManager::instance().showNotification(
+            QStringLiteral("System Update"),
+            IS_EN ? QStringLiteral("Update v%1 downloaded successfully")
+                        .arg(m_jarvis->autoUpdater()->pendingVersion())
+                  : QStringLiteral("Обновление v%1 успешно загружено")
+                        .arg(m_jarvis->autoUpdater()->pendingVersion()));
 
         m_updateBtn->setText(IS_EN ? QStringLiteral("Open Folder")
                                    : QStringLiteral("Открыть папку"));
@@ -248,6 +280,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(updater, &AutoUpdater::updateError,
             this, [this](const QString& error) {
         appendLog(Str::logError(), error, Theme::LogColors::error);
+        NotificationManager::instance().showNotification(
+            QStringLiteral("System Update"), error, NotificationManager::Level::Error);
     });
 
     buildUI();
@@ -267,6 +301,66 @@ MainWindow::MainWindow(QWidget* parent)
             ? QStringLiteral("📁 Saved to: %1").arg(path)
             : QStringLiteral("📁 Сохранено: %1").arg(path);
         appendLog(Str::logSystem(), folderLine, Theme::LogColors::system);
+    });
+
+    // ── Неоновые toast-уведомления о файловых операциях ──
+    connect(m_jarvis->codeActions(), &CodeActions::fileCreated,
+            this, [](const QString& path) {
+        NotificationManager::instance().showNotification(
+            IS_EN ? QStringLiteral("File created") : QStringLiteral("Файл создан"),
+            QFileInfo(path).fileName(),
+            NotificationManager::Level::Success);
+    });
+    connect(m_jarvis->codeActions(), &CodeActions::fileModified,
+            this, [](const QString& path) {
+        NotificationManager::instance().showNotification(
+            IS_EN ? QStringLiteral("File modified") : QStringLiteral("Файл изменён"),
+            QFileInfo(path).fileName(),
+            NotificationManager::Level::Success);
+    });
+    connect(m_jarvis->codeActions(), &CodeActions::kicadSchematicCreated,
+            this, [](const QString& path) {
+        NotificationManager::instance().showNotification(
+            IS_EN ? QStringLiteral("KiCad schematic ready")
+                  : QStringLiteral("Схема KiCad готова"),
+            QFileInfo(path).fileName(),
+            NotificationManager::Level::Success);
+    });
+    connect(m_jarvis->codeActions(), &CodeActions::actionError,
+            this, [](const QString& path, const QString& error) {
+        NotificationManager::instance().showNotification(
+            IS_EN ? QStringLiteral("File operation failed")
+                  : QStringLiteral("Ошибка файловой операции"),
+            path.isEmpty() ? error
+                           : QFileInfo(path).fileName() + QStringLiteral("\n") + error,
+            NotificationManager::Level::Error);
+    });
+
+    // ── CuriosityEngine proactive questions → answerable notification ──
+    // Previously this only ever reached the user via Telegram (it required
+    // a gateway + target chat id that nothing in the codebase actually set,
+    // so it never fired at all in practice). Now it's desktop-native: a
+    // toast with the question, Yes/No quick-reply pills, and a free-text
+    // field pops up; whatever the user types or taps is fed straight back
+    // into CuriosityEngine::consumeAnswer so it's remembered exactly like a
+    // Telegram reply would be. chatId 0 = desktop, which consumeAnswer
+    // always matches regardless of which chat the question was pending for.
+    connect(&CuriosityEngine::instance(), &CuriosityEngine::questionPosted,
+            this, [](const QString& question, const QStringList& options) {
+        NotificationManager::instance().askQuestion(
+            QStringLiteral("J.A.R.V.I.S."), question,
+            [](const QString& answer) {
+                CuriosityEngine::instance().consumeAnswer(0, answer);
+            },
+            options);
+    });
+
+    // ── Task deadlines & reminders → notification ──
+    connect(&ProactiveReminderManager::instance(), &ProactiveReminderManager::reminderFired,
+            this, [](qint64, const QString& text) {
+        NotificationManager::instance().showNotification(
+            QStringLiteral("⏰ ") + (IS_EN ? QStringLiteral("Reminder") : QStringLiteral("Напоминание")),
+            text, NotificationManager::Level::Warning);
     });
 
     m_themeIndex = cfg.value(QStringLiteral("ui/theme"), 0).toInt();
@@ -372,10 +466,47 @@ MainWindow::MainWindow(QWidget* parent)
     QTimer::singleShot(3000, this, [this]() {
         QString warnings = m_jarvis->getOverdueTasksSummary();
         if (!warnings.isEmpty()) {
+            notifyDeadlineWarnings(warnings);
             appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
                 warnings, Theme::LogColors::error);
         }
+        // The one-shot summary above already covered whatever's overdue
+        // right now — seed the dedup set so the periodic timer below only
+        // announces tasks that cross into "overdue" *after* startup.
+        for (const auto& t : m_jarvis->getOverdueTasks())
+            m_notifiedDeadlineTaskIds.insert(t.id);
     });
+
+    // Periodic deadline re-check — unlike the one-shot startup check above,
+    // this keeps running for the life of the session so a task that
+    // becomes overdue at 3pm gets flagged even if JARVIS was opened at
+    // 9am. Notifies once per task (by id) so a still-overdue task doesn't
+    // re-spam a toast every cycle.
+    m_deadlineTimer = new QTimer(this);
+    connect(m_deadlineTimer, &QTimer::timeout, this, [this]() {
+        for (const auto& t : m_jarvis->getOverdueTasks()) {
+            if (m_notifiedDeadlineTaskIds.contains(t.id)) continue;
+            m_notifiedDeadlineTaskIds.insert(t.id);
+
+            const qint64 secsTo = QDateTime::currentDateTime().secsTo(t.deadline);
+            const bool overdue = secsTo < 0;
+            const QString timeStr = overdue
+                ? (IS_EN ? QStringLiteral("OVERDUE by %1h").arg(qMax<qint64>(-secsTo / 3600, 1))
+                         : QStringLiteral("ПРОСРОЧЕНО на %1ч").arg(qMax<qint64>(-secsTo / 3600, 1)))
+                : (secsTo < 3600
+                    ? (IS_EN ? QStringLiteral("due in %1 min").arg(secsTo / 60)
+                             : QStringLiteral("через %1 мин").arg(secsTo / 60))
+                    : (IS_EN ? QStringLiteral("due in %1h").arg(secsTo / 3600)
+                             : QStringLiteral("через %1 ч").arg(secsTo / 3600)));
+
+            NotificationManager::instance().showNotification(
+                IS_EN ? QStringLiteral("Task deadline") : QStringLiteral("Дедлайн задачи"),
+                QStringLiteral("%1 (%2) — %3").arg(t.title, t.category, timeStr),
+                overdue ? NotificationManager::Level::Error
+                        : NotificationManager::Level::Warning);
+        }
+    });
+    m_deadlineTimer->start(20 * 60 * 1000); // every 20 minutes
 }
 
 // ============================================================
@@ -1669,6 +1800,9 @@ void MainWindow::buildMenuBar()
                 appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
                     (IS_EN ? QStringLiteral("Task created: ") : QStringLiteral("Задача создана: ")) + title.trimmed(),
                     Theme::LogColors::system);
+                NotificationManager::instance().showNotification(
+                    IS_EN ? QStringLiteral("Task created") : QStringLiteral("Задача создана"),
+                    title.trimmed(), NotificationManager::Level::Success);
             }
         });
 
@@ -1685,6 +1819,7 @@ void MainWindow::buildMenuBar()
                           : QStringLiteral("Всё чисто, сэр. Дедлайнов в ближайшее время нет."),
                     Theme::LogColors::jarvis);
             } else {
+                notifyDeadlineWarnings(warnings);
                 appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
                     warnings, Theme::LogColors::error);
             }
@@ -4354,17 +4489,6 @@ void MainWindow::hideClarification()
     m_pendingDoubtId = 0;
 }
 
-void MainWindow::onCuriosityQuestionPosted(const QString& question, const QStringList& options)
-{
-    // The question text itself already reaches the chat log via
-    // Jarvis::asyncResponseReady (CuriosityEngine::proactiveDialogue is
-    // forwarded there) — here we only surface the quick-reply buttons.
-    m_pendingInput = question;
-    m_pendingOptions = options;
-    m_pendingSuggestionAction = QStringLiteral("curiosity_answer");
-    showClarification(question, options);
-}
-
 void MainWindow::onClarificationChoice(int choice)
 {
     if (m_pendingInput.isEmpty()) return;
@@ -4387,21 +4511,6 @@ void MainWindow::onClarificationChoice(int choice)
         }
         m_pendingSuggestionAction.clear();
         m_pendingInput.clear();
-        return;
-    }
-
-    // CuriosityEngine question answered via Да/Нет (or other option) button
-    if (m_pendingSuggestionAction == QStringLiteral("curiosity_answer")) {
-        const QString answer = (choice >= 1 && choice <= m_pendingOptions.size())
-            ? m_pendingOptions[choice - 1] : QString();
-        hideClarification();
-        m_pendingSuggestionAction.clear();
-        m_pendingOptions.clear();
-        m_pendingInput.clear();
-        if (!answer.isEmpty()) {
-            m_input->setPlainText(answer);
-            onSend();
-        }
         return;
     }
 

@@ -21,6 +21,8 @@
 #include "skill_manager.h"
 #include "applauncher.h"
 
+struct DbTask;
+
 class KeyEmulator;
 class SessionMemory;
 class ClaudeApi;
@@ -167,6 +169,10 @@ public:
                    const QDateTime& deadline = QDateTime());
     bool   updateTaskStatus(qint64 taskId, const QString& newStatus);
     QString getOverdueTasksSummary() const;
+    // Raw list (task ids) behind getOverdueTasksSummary() — used by
+    // MainWindow's periodic re-check timer to notify once per task
+    // instead of re-announcing the same overdue task every cycle.
+    QList<DbTask> getOverdueTasks(int withinHours = 24) const;
 
     // === IDE-агент (вайбкодинг) ===
     // Определяет, похож ли ввод на кодинг-запрос/запрос новой фичи.

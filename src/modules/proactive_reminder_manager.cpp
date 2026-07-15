@@ -38,9 +38,9 @@ ProactiveReminderManager::~ProactiveReminderManager()
 //  Intent detection from conversation
 // ============================================================
 
-bool ProactiveReminderManager::tryDetectAndSchedule(qint64 chatId,
-                                                     const QString& userMessage,
-                                                     bool english)
+QString ProactiveReminderManager::tryDetectAndSchedule(qint64 chatId,
+                                                        const QString& userMessage,
+                                                        bool english)
 {
     const QString lower = userMessage.toLower().trimmed();
 
@@ -54,14 +54,19 @@ bool ProactiveReminderManager::tryDetectAndSchedule(qint64 chatId,
 
     bool matched = english ? reEnReminder.match(lower).hasMatch()
                            : reRuReminder.match(lower).hasMatch();
-    if (!matched) return false;
+    if (!matched) return QString();
 
     int delayMin = detectDelayMinutes(lower);
     if (delayMin <= 0)
         delayMin = 30;
 
     addReminder(chatId, userMessage, delayMin, english);
-    return true;
+
+    return english
+        ? QStringLiteral("⏰ Reminder set for *%1 min*: %2\nActive reminders: %3")
+              .arg(delayMin).arg(userMessage).arg(activeCount())
+        : QStringLiteral("⏰ Напоминание через *%1 мин*: %2\nАктивных напоминаний: %3")
+              .arg(delayMin).arg(userMessage).arg(activeCount());
 }
 
 int ProactiveReminderManager::detectDelayMinutes(const QString& text)

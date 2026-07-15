@@ -156,6 +156,7 @@ private:
     QString buildPersonalProfilingQuestion() const;
     bool shouldInterrupt() const;
     void expirePendingIfStale();
+    QStringList yesNoOptions() const;
 
     J2JTelegramGateway* m_gateway          = nullptr;
     ActivityTracker*    m_activity          = nullptr;

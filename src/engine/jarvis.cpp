@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <QSettings>
 #include "database_manager.h"
+#include "proactive_reminder_manager.h"
 #include <QSqlQuery>
 #include <QSqlDatabase>
 #include "user_profile.h"
@@ -1170,6 +1171,22 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                                : QStringLiteral("Понял, спасибо! Учту на будущее."))
                 : (m_uiEnglish ? QStringLiteral("Noted. I'll adjust my approach next time.")
                                : QStringLiteral("Принял. В следующий раз подойду иначе."));
+        }
+    }
+
+    // Proactive reminders — "напомни через 30 минут" / "remind me in 30 min"
+    // detected locally. Previously this NLU path existed but nothing ever
+    // called it — the only way to schedule a reminder was Telegram's
+    // explicit "/remind <minutes> <text>" slash command. Hooking it into
+    // the shared processCommand path makes it work from PC chat too (and
+    // from free-text Telegram messages, not just the slash command).
+    {
+        const QString ack = ProactiveReminderManager::instance()
+                                .tryDetectAndSchedule(chatId, s, m_uiEnglish);
+        if (!ack.isEmpty()) {
+            m_memory->addMessage(QStringLiteral("user"), s);
+            m_memory->addMessage(QStringLiteral("assistant"), ack);
+            return ack;
         }
     }
 
@@ -3018,6 +3035,11 @@ bool Jarvis::updateTaskStatus(qint64 taskId, const QString& newStatus)
 QString Jarvis::getOverdueTasksSummary() const
 {
     return TaskNotifications::checkDeadlines(m_currentUserId, m_uiEnglish);
+}
+
+QList<DbTask> Jarvis::getOverdueTasks(int withinHours) const
+{
+    return DatabaseManager::instance().getOverdueTasks(m_currentUserId, withinHours);
 }
 
 // ============================================================

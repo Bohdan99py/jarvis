@@ -3,6 +3,7 @@
 // -------------------------------------------------------
 
 #include "code_actions.h"
+#include "jarvis_paths.h"
 #include "kicad_schematic_builder.h"
 #include "applauncher.h"
 // applauncher.h drags in <windows.h>/<shellapi.h> without WIN32_LEAN_AND_MEAN,
@@ -550,10 +551,15 @@ CodeAction CodeActions::doCreateKiCadSchematic(CodeAction action) const
 
 QString CodeActions::fullPath(const QString& relativePath) const
 {
-    if (m_projectRoot.isEmpty()) return relativePath;
-
     // Если путь абсолютный — используем как есть
     if (QFileInfo(relativePath).isAbsolute()) return relativePath;
 
-    return QDir(m_projectRoot).absoluteFilePath(relativePath);
+    if (!m_projectRoot.isEmpty())
+        return QDir(m_projectRoot).absoluteFilePath(relativePath);
+
+    // Без открытого проекта относительный путь раньше уходил в текущую
+    // рабочую директорию процесса — у установленной версии это Program Files,
+    // где запись запрещена ("Отказано в доступе"). Пишем в видимую
+    // пользователю папку Documents/Jarvis Data/workspace.
+    return JarvisPaths::subPath(QStringLiteral("workspace/") + relativePath);
 }

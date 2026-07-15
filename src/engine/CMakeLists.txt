@@ -14,6 +14,9 @@ add_library(jarvis_engine OBJECT
     system_manifest.h
     task_manager_dialog.h
     task_manager_dialog.cpp
+    task_board_model.h
+    task_board_model.cpp
+    task_board.qrc
     chat_history_dialog.h
     chat_history_dialog.cpp
     translation_engine.h

@@ -21,6 +21,7 @@
 #include <QSystemTrayIcon>
 #include <QStyle>
 #include <QDateTime>
+#include <QSet>
 
 class Jarvis;
 struct OrganizePlan;
@@ -78,10 +79,6 @@ private slots:
     void onAttachmentsConsumed();
 
     void onClarificationChoice(int choice);
-
-    // CuriosityEngine proactive question — mirrors Telegram's inline
-    // Да/Нет buttons on the PC side via the clarify bar.
-    void onCuriosityQuestionPosted(const QString& question, const QStringList& options);
 
     // Самообучение: подтверждение выученной команды
     void onCommandLearned(const LearnedCommand& cmd);
@@ -147,6 +144,11 @@ private:
     QTimer*                 m_pulseTimer = nullptr;
     bool                    m_pulse      = false;
 
+    // Periodic deadline re-check — notifies once per overdue/approaching
+    // task per session instead of re-announcing it every cycle.
+    QTimer*                 m_deadlineTimer = nullptr;
+    QSet<qint64>            m_notifiedDeadlineTaskIds;
+
     VirtualKeyboardWidget*  m_keyboard    = nullptr;
     QWidget*                m_kbContainer = nullptr;
     QPropertyAnimation*     m_kbAnim      = nullptr;
@@ -161,7 +163,6 @@ private:
     QLabel*                 m_clarifyText    = nullptr;
     QHBoxLayout*            m_clarifyBtnLay  = nullptr;
     QString                 m_pendingInput;
-    QStringList              m_pendingOptions; // labels for the active m_clarifyBar buttons
 
     // Praise/scold feedback for the last uncertain local/cached answer
     // (see Intent::doubtId). Two redundant paths resolve the same doubt:

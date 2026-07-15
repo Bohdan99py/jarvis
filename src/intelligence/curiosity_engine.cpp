@@ -175,8 +175,10 @@ void CuriosityEngine::onIdleCheck()
 
 bool CuriosityEngine::shouldInterrupt() const
 {
-    if (!m_gateway || m_targetChatId == 0) return false;
-
+    // No longer requires a Telegram gateway/chat — proactive questions are
+    // primarily surfaced as desktop notifications now (see MainWindow's
+    // askQuestion wiring), with Telegram as an optional extra channel when
+    // a gateway/target chat happen to be configured (see below).
     if (m_sessionQuestionCount >= MAX_QUESTIONS_PER_SESSION) return false;
 
     // Attention cost gate — never interrupt deep focus
@@ -641,13 +643,23 @@ QString CuriosityEngine::buildPersonalProfilingQuestion() const
 }
 
 // ============================================================
+//  Yes/No quick-reply options (Telegram inline buttons AND the
+//  desktop notification's quick-reply pills use the same pair)
+// ============================================================
+
+QStringList CuriosityEngine::yesNoOptions() const
+{
+    return m_uiEnglish
+        ? QStringList{ QStringLiteral("Yes"), QStringLiteral("No") }
+        : QStringList{ QStringLiteral("Да"),  QStringLiteral("Нет") };
+}
+
+// ============================================================
 //  Post context-aware question
 // ============================================================
 
 void CuriosityEngine::postContextAwareQuestion()
 {
-    if (!m_gateway || m_targetChatId == 0) return;
-
     const ProactiveCategory category = selectCategory();
     const QString question = pickQuestion(category);
 
@@ -688,16 +700,18 @@ void CuriosityEngine::postContextAwareQuestion()
         if (!doubts.isEmpty()) m_pendingDoubtId = doubts.first().id;
     }
 
-    m_gateway->sendProactiveQuestion(m_targetChatId, msg, m_uiEnglish);
+    // Telegram is an optional extra channel — only used if a gateway and
+    // target chat have actually been configured (see setTelegramGateway/
+    // setTargetChatId). The desktop notification (questionPosted below) is
+    // unconditional, so proactive questions work standalone on PC too.
+    if (m_gateway && m_targetChatId != 0)
+        m_gateway->sendProactiveQuestion(m_targetChatId, msg, m_uiEnglish);
 
     m_lastQuestionTime = QDateTime::currentDateTime();
     m_messagesSinceLastQuestion = 0;
     ++m_sessionQuestionCount;
 
-    const QStringList options = m_uiEnglish
-        ? QStringList{ QStringLiteral("Yes"), QStringLiteral("No") }
-        : QStringList{ QStringLiteral("Да"),  QStringLiteral("Нет") };
-    emit questionPosted(question, options);
+    emit questionPosted(question, yesNoOptions());
     emit proactiveDialogue(question, category);
 
     qDebug() << "[CuriosityEngine] Proactive question ("
@@ -708,7 +722,7 @@ void CuriosityEngine::postContextAwareQuestion()
 void CuriosityEngine::postOpinionRevisionQuestion(qint64 ownerId, qint64 opinionId,
                                                    const QString& question)
 {
-    if (!m_gateway || ownerId == 0) return;
+    if (ownerId == 0) return;
 
     const QString msg = QStringLiteral("🤔 ") + question;
 
@@ -720,7 +734,13 @@ void CuriosityEngine::postOpinionRevisionQuestion(qint64 ownerId, qint64 opinion
     m_pendingMessageId = 0; // set asynchronously once sendMessageRaw's onSent fires
     m_pendingOpinionId = opinionId;
 
-    m_gateway->sendProactiveQuestion(ownerId, msg, m_uiEnglish);
+    if (m_gateway)
+        m_gateway->sendProactiveQuestion(ownerId, msg, m_uiEnglish);
+
+    // Same as postContextAwareQuestion() — always surface as a desktop
+    // notification too, not just Telegram.
+    emit questionPosted(question, yesNoOptions());
+    emit proactiveDialogue(question, ProactiveCategory::OpinionRevision);
 
     qDebug() << "[CuriosityEngine] Opinion revision question to owner" << ownerId
              << "(opinion" << opinionId << "):" << question.left(60);

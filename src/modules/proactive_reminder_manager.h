@@ -35,9 +35,13 @@ public:
 
     void setTelegramGateway(J2JTelegramGateway* gw) { m_gateway = gw; }
 
-    bool tryDetectAndSchedule(qint64 chatId,
-                              const QString& userMessage,
-                              bool english);
+    // Detects reminder intent in free text ("remind me in 30 min",
+    // "напомни через 30 минут"...) and schedules it if found. Returns the
+    // human-readable confirmation to show the user, or an empty string if
+    // no reminder intent was detected.
+    QString tryDetectAndSchedule(qint64 chatId,
+                                 const QString& userMessage,
+                                 bool english);
 
     int addReminder(qint64 chatId,
                     const QString& text,
