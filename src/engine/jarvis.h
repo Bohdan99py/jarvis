@@ -18,6 +18,7 @@
 #include <atomic>
 
 #include "command_registry.h"
+#include "skill_manager.h"
 #include "applauncher.h"
 
 class KeyEmulator;
@@ -124,6 +125,7 @@ public:
     TranslationEngine*  translationEngine()  const { return m_translator; }
     PersonalityEngine*  personalityEngine()  const { return m_personality; }
     ReflectionEngine*   reflectionEngine()   const { return m_reflection; }
+    SkillManager*       skillManager()       const { return m_skills; }
 
     // FileOrganizer facade — keeps SystemController's full type (defined
     // in pc_controller.h) out of callers like MainWindow/J2JTelegramGateway,
@@ -274,6 +276,7 @@ private:
     TranslationEngine*  m_translator       = nullptr;  // multilingual translation + audio pipeline
     PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation
     ReflectionEngine*   m_reflection       = nullptr;  // behavioral analysis + morning nudge
+    SkillManager*       m_skills           = nullptr;  // модульные скиллы (лего-блоки знаний)
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 

@@ -375,6 +375,19 @@ if(WIN32)
 endif()
 
 # ============================================================
+# Post-build: copy bundled skill packs (модульные знания JARVIS)
+# ============================================================
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/skills")
+    add_custom_command(TARGET jarvis POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/skills"
+            "$<TARGET_FILE_DIR:jarvis>/skills"
+            COMMENT "Copying bundled skills..."
+    )
+endif()
+
+# ============================================================
 # Post-build: copy Vosk DLLs
 # ============================================================
 

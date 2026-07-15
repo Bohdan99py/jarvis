@@ -1,0 +1,14 @@
+{
+    "id": "electronics",
+    "name": {
+        "ru": "Электрик / Электроника",
+        "en": "Electronics Engineer"
+    },
+    "description": {
+        "ru": "Экспертиза в электронике и электротехнике: схемотехника, KiCad (схемы и печатные платы), встраиваемая прошивка (Arduino/ESP32/STM32), реальные компоненты и техника безопасности.",
+        "en": "Electronics and electrical engineering expertise: circuit design, KiCad (schematics and PCB), embedded firmware (Arduino/ESP32/STM32), real-world components and safety practice."
+    },
+    "version": "1.0.0",
+    "features": [],
+    "default_enabled": true
+}

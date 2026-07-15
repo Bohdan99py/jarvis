@@ -64,6 +64,17 @@ for %%f in ("%BIN_DIR%\JarvisPlugin_*.dll") do (
 REM Копируем plugins.json
 copy "plugins\plugins.json" "%RELEASE_DIR%\plugins\" >nul
 
+REM Копируем скилл-паки (модульные знания JARVIS)
+if exist "skills" (
+    xcopy /e /i /q "skills" "%RELEASE_DIR%\skills" >nul
+    echo   Skills copied.
+)
+
+REM Документация: юзер-гайд, EULA, политика приватности
+for %%f in (JARVIS_INSTALL_NOTES.txt EULA_JARVIS.txt JARVIS_EULA_EN.txt PRIVACY_POLICY.txt) do (
+    if exist "%%f" copy "%%f" "%RELEASE_DIR%\" >nul
+)
+
 echo   Core files copied.
 echo.
 

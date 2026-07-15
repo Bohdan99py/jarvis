@@ -9,11 +9,15 @@
 // -------------------------------------------------------
 
 #include <QDialog>
+#include <QList>
+#include <QPair>
 
 #include "database_manager.h"
 
 class QLineEdit;
 class QComboBox;
+class QCheckBox;
+class SkillManager;
 
 class ProfileSetupDialog : public QDialog
 {
@@ -22,7 +26,12 @@ class ProfileSetupDialog : public QDialog
 public:
     enum class Mode { FirstRun, Edit };
 
-    explicit ProfileSetupDialog(Mode mode, bool english, QWidget* parent = nullptr);
+    // skills != nullptr в режиме FirstRun добавляет секцию выбора
+    // скиллов (лего-блоков знаний): пользователь сразу решает, какие
+    // модули ему нужны. Выбор применяется при нажатии "Начать".
+    explicit ProfileSetupDialog(Mode mode, bool english,
+                                SkillManager* skills = nullptr,
+                                QWidget* parent = nullptr);
 
     void setProfile(const DbUserProfile& profile);
     DbUserProfile profile() const;
@@ -42,4 +51,8 @@ private:
     QLineEdit* m_nameEdit = nullptr;
     QComboBox* m_roleBox  = nullptr;
     QComboBox* m_langBox  = nullptr;
+
+    // Выбор скиллов при первом запуске: (id скилла, чекбокс)
+    SkillManager* m_skills = nullptr;
+    QList<QPair<QString, QCheckBox*>> m_skillChecks;
 };

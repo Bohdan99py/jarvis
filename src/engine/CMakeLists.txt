@@ -9,6 +9,8 @@ add_library(jarvis_engine OBJECT
     jarvis.cpp
     command_registry.h
     command_registry.cpp
+    skill_manager.h
+    skill_manager.cpp
     system_manifest.h
     task_manager_dialog.h
     task_manager_dialog.cpp

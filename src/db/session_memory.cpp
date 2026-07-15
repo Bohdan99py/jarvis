@@ -729,57 +729,55 @@ QString SessionMemory::buildSystemPrompt() const
         "you may omit the [SPEECH:] line — the full text will be spoken as-is.\n\n"
     );
 
-    prompt += QStringLiteral(
-        "=== MODE: DIALOG + CODING ===\n"
-        "You can both chat and write code. For regular questions — answer with text. "
-        "For coding requests — use the blocks below.\n\n"
-    );
-    prompt += QStringLiteral(
-        "=== FILE OPERATIONS (JARVIS APPLIES THEM AUTOMATICALLY) ===\n"
-        "Create/overwrite file:\n"
-        "[FILE:relative/path/file.cpp]\n"
-        "...full file code...\n"
-        "[/FILE]\n\n"
-        "Precise edit (saves tokens, preferred for small changes):\n"
-        "[DIFF:relative/path/file.cpp]\n"
-        "[FIND]\n"
-        "...exact old code...\n"
-        "[REPLACE]\n"
-        "...new code...\n"
-        "[/DIFF]\n\n"
-        "Create folder: [MKDIR:relative/path]\n"
-        "Delete file:   [DELETE:relative/path/file]\n"
-        "System command: [CMD:command]\n\n"
-        "Rules:\n"
-        "- Small edits -> [DIFF]. Large refactors or new files -> [FILE].\n"
-        "- Never write stubs like '// ...unchanged' inside [FILE] — only full code.\n"
-        "- Paths — ALWAYS relative from project root.\n"
-        "- Conversational question -> just text, no blocks.\n\n"
-    );
+    // --- Модульные скиллы ---
+    // Знания (кодинг с FILE-операциями, электроника, философия, ...)
+    // больше не захардкожены: их подают включённые скиллы через
+    // setSkillContext(). Скилл «Программист» несёт блоки MODE: DIALOG +
+    // CODING и FILE OPERATIONS; без него JARVIS — обычный ассистент.
+    if (m_codeActionsEnabled && m_skillPromptBlocks.isEmpty()) {
+        // Fallback для сборок/окружений без скилл-паков: сохраняем
+        // прежнее поведение IDE-агента, чтобы обновление ничего не сломало.
+        prompt += QStringLiteral(
+            "=== MODE: DIALOG + CODING ===\n"
+            "You can both chat and write code. For regular questions — answer with text. "
+            "For coding requests — use the blocks below.\n\n"
+            "=== FILE OPERATIONS (JARVIS APPLIES THEM AUTOMATICALLY) ===\n"
+            "Create/overwrite file:\n"
+            "[FILE:relative/path/file.cpp]\n"
+            "...full file code...\n"
+            "[/FILE]\n\n"
+            "Precise edit (saves tokens, preferred for small changes):\n"
+            "[DIFF:relative/path/file.cpp]\n"
+            "[FIND]\n"
+            "...exact old code...\n"
+            "[REPLACE]\n"
+            "...new code...\n"
+            "[/DIFF]\n\n"
+            "Create folder: [MKDIR:relative/path]\n"
+            "Delete file:   [DELETE:relative/path/file]\n"
+            "System command: [CMD:command]\n\n"
+            "Rules:\n"
+            "- Small edits -> [DIFF]. Large refactors or new files -> [FILE].\n"
+            "- Never write stubs like '// ...unchanged' inside [FILE] — only full code.\n"
+            "- Paths — ALWAYS relative from project root.\n"
+            "- Conversational question -> just text, no blocks.\n\n"
+        );
+    }
 
-    prompt += QStringLiteral(
-        "=== DOMAIN EXPERTISE: ELECTRONICS & ELECTRICAL ENGINEERING ===\n"
-        "The user does hardware work: KiCad schematic capture and PCB layout, "
-        "embedded firmware (Arduino/ESP32/STM32 etc.), and general circuit design/"
-        "debugging. When a question touches circuits, components, PCBs, power, "
-        "signals, or embedded firmware, reason like a working electrical engineer, "
-        "not a generalist:\n"
-        "- Apply Ohm's/Kirchhoff's laws and real component behavior (tolerances, "
-        "thermal derating, parasitic capacitance/inductance) instead of idealized "
-        "textbook answers.\n"
-        "- Think in terms of actual datasheets — voltage/current ratings, package "
-        "types, pinouts — and say when a value needs to be checked against one "
-        "rather than guessing.\n"
-        "- Default to safe practice: flag mains voltage, high current, or "
-        "ESD-sensitive parts, and call out common physical failure modes (shorts, "
-        "thermal runaway, reversed polarity, wrong footprint, cold solder joints).\n"
-        "- For KiCad questions, distinguish schematic (Eeschema) from PCB layout "
-        "(Pcbnew) specifics — nets, footprints, DRC/ERC rules, layer stackups, "
-        "trace width/clearance for the current.\n"
-        "- For firmware/embedded questions, account for actual hardware "
-        "constraints — timing, interrupts, logic-level voltages, GPIO current "
-        "limits, pull-ups/pull-downs.\n\n"
-    );
+    if (!m_skillPromptBlocks.isEmpty()) {
+        prompt += m_skillPromptBlocks;
+    }
+
+    if (!m_codeActionsEnabled) {
+        prompt += QStringLiteral(
+            "=== MODE: DIALOG ONLY ===\n"
+            "The coding/IDE-agent skill is disabled in this installation. "
+            "Answer conversationally. You may show code snippets in normal "
+            "markdown blocks when asked, but NEVER emit [FILE:], [DIFF:], "
+            "[MKDIR:], [DELETE:] or [CMD:] action blocks — the application "
+            "will not process them.\n\n"
+        );
+    }
 
     // --- Проект ---
     if (hasProjectInfo()) {

@@ -4,13 +4,17 @@
 
 #include "profile_setup_dialog.h"
 
+#include "skill_manager.h"
+
 #include <QLineEdit>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QDialogButtonBox>
 #include <QPushButton>
+#include <QGroupBox>
 
 QList<ProfileSetupDialog::RoleEntry> ProfileSetupDialog::knownRoles(bool english)
 {
@@ -29,10 +33,12 @@ QList<ProfileSetupDialog::RoleEntry> ProfileSetupDialog::knownRoles(bool english
     };
 }
 
-ProfileSetupDialog::ProfileSetupDialog(Mode mode, bool english, QWidget* parent)
+ProfileSetupDialog::ProfileSetupDialog(Mode mode, bool english,
+                                       SkillManager* skills, QWidget* parent)
     : QDialog(parent)
     , m_mode(mode)
     , m_english(english)
+    , m_skills(skills)
 {
     setWindowTitle(mode == Mode::FirstRun
         ? (english ? QStringLiteral("Welcome to J.A.R.V.I.S.")
@@ -76,6 +82,34 @@ ProfileSetupDialog::ProfileSetupDialog(Mode mode, bool english, QWidget* parent)
 
     layout->addLayout(form);
 
+    // --- Скиллы (только при первом запуске): пользователь сразу
+    // решает, какие лего-блоки знаний ему нужны. Потом это всегда
+    // можно поменять: Настройки -> Скиллы JARVIS.
+    if (mode == Mode::FirstRun && m_skills && !m_skills->skills().isEmpty()) {
+        auto* group = new QGroupBox(english
+            ? QStringLiteral("🧩 Skills — what should JARVIS know?")
+            : QStringLiteral("🧩 Скиллы — что JARVIS должен уметь?"), this);
+        auto* groupLayout = new QVBoxLayout(group);
+
+        auto* hint = new QLabel(english
+            ? QStringLiteral("Pick only what you need — you can change this "
+                             "anytime in Settings → JARVIS Skills.")
+            : QStringLiteral("Выбери только нужное — это всегда можно поменять "
+                             "в Настройки → Скиллы JARVIS."), group);
+        hint->setWordWrap(true);
+        hint->setStyleSheet(QStringLiteral("color: #8fa3b0;"));
+        groupLayout->addWidget(hint);
+
+        for (const SkillInfo& s : m_skills->skills()) {
+            auto* check = new QCheckBox(s.displayName(english), group);
+            check->setChecked(s.enabled);
+            check->setToolTip(s.description(english));
+            groupLayout->addWidget(check);
+            m_skillChecks.append({s.id, check});
+        }
+        layout->addWidget(group);
+    }
+
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | (mode == Mode::Edit ? QDialogButtonBox::Cancel
                                                    : QDialogButtonBox::NoButton),
@@ -88,6 +122,11 @@ ProfileSetupDialog::ProfileSetupDialog(Mode mode, bool english, QWidget* parent)
             m_nameEdit->setFocus();
             return; // имя обязательно
         }
+        // Применяем выбор скиллов (только FirstRun, см. секцию выше)
+        if (m_skills) {
+            for (const auto& sc : m_skillChecks)
+                m_skills->setEnabled(sc.first, sc.second->isChecked());
+        }
         accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -99,7 +138,11 @@ ProfileSetupDialog::ProfileSetupDialog(Mode mode, bool english, QWidget* parent)
         "QLineEdit, QComboBox { background: #0f2438; color: #ecf0f1; "
         "border: 1px solid #1a5070; border-radius: 4px; padding: 4px 8px; }"
         "QPushButton { background: #0f2438; color: #00d4ff; border: 1px solid #1a5070; "
-        "border-radius: 4px; padding: 5px 18px; }"));
+        "border-radius: 4px; padding: 5px 18px; }"
+        "QCheckBox { color: #ecf0f1; font-family: Consolas; font-size: 12px; }"
+        "QGroupBox { color: #00d4ff; font-family: Consolas; font-size: 12px; "
+        "border: 1px solid #1a5070; border-radius: 4px; margin-top: 10px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"));
 }
 
 void ProfileSetupDialog::setProfile(const DbUserProfile& profile)

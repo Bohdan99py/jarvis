@@ -86,6 +86,18 @@ Jarvis::Jarvis(QObject* parent)
     : QObject(parent)
 {
     m_memory       = new SessionMemory(this);
+
+    // Модульные скиллы — до первого LLM-вызова, чтобы system prompt
+    // сразу собирался из включённых лего-блоков знаний.
+    m_skills = new SkillManager(this);
+    auto applySkillContext = [this]() {
+        m_memory->setSkillContext(
+            m_skills->promptBlocks(),
+            m_skills->isFeatureEnabled(SkillManager::featureCodeActions()));
+    };
+    applySkillContext();
+    connect(m_skills, &SkillManager::skillsChanged, this, applySkillContext);
+
     m_claudeApi    = new ClaudeApi(m_memory, this);
     m_geminiApi    = new OllamaApi(this);   // Ollama — локальный LLM для быстрых ответов
     m_geminiBackup = new GeminiApi(m_memory, this); // Gemini — fallback если Ollama недоступна
@@ -1788,7 +1800,8 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // 2b. Вайбкодинг: похоже на запрос новой фичи/изменения кода и
     //     проект открыт — открываем его в CLion (один раз за сессию),
     //     чтобы пользователь видел, как JARVIS пишет файлы вживую.
-    if (needsClaude && !m_indexer->projectRoot().isEmpty() && isCodingIntent(s)) {
+    if (needsClaude && !m_indexer->projectRoot().isEmpty() && isCodingIntent(s)
+        && m_skills->isFeatureEnabled(SkillManager::featureCodeActions())) {
         const QString ideMsg = openProjectInIDE();
         if (!ideMsg.isEmpty()) {
             emit ideOpened(ideMsg);
@@ -2001,6 +2014,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
 
 void Jarvis::handleClaudeResponse(const QString& response)
 {
+    // Скилл «Программист» выключен — [CMD:] блоки не выполняем.
+    if (m_skills && !m_skills->isFeatureEnabled(SkillManager::featureCodeActions()))
+        return;
+
     static const QRegularExpression cmdPattern(
         QStringLiteral(R"(\[CMD:(.+?)\])"));
 
@@ -2030,8 +2047,16 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
                                        const QString& response,
                                        bool hadAttachments)
 {
+    // Гейт скилла «Программист»: без фичи code_actions ответы модели
+    // не парсятся на [FILE:]/[DIFF:] блоки — JARVIS работает как обычный
+    // диалоговый ассистент (модель и так проинструктирована их не слать,
+    // но гейт защищает и от «забывчивости» модели).
+    const bool codeOpsEnabled =
+        !m_skills || m_skills->isFeatureEnabled(SkillManager::featureCodeActions());
+
     QString openPath, openContent;
-    const bool openFile  = m_codeActions->detectOpenFileBlock(response, openPath, openContent);
+    const bool openFile  = codeOpsEnabled
+        && m_codeActions->detectOpenFileBlock(response, openPath, openContent);
     const bool truncated = m_claudeApi->wasTruncated();
 
     // --- Ответ обрезан посередине генерации файла — продолжаем сами ---
@@ -2142,8 +2167,10 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         finalResponse = response;
     }
 
-    QString fileReport      = m_codeActions->processResponse(finalResponse);
-    QString displayResponse = m_codeActions->cleanResponseForDisplay(finalResponse);
+    QString fileReport      = codeOpsEnabled
+        ? m_codeActions->processResponse(finalResponse) : QString();
+    QString displayResponse = codeOpsEnabled
+        ? m_codeActions->cleanResponseForDisplay(finalResponse) : finalResponse;
 
     m_memory->addMessage(QStringLiteral("assistant"), displayResponse);
     m_memory->updateContext(userInput, displayResponse);

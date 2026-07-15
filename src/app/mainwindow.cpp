@@ -49,6 +49,7 @@
 #include "face_registry.h"
 #include "dependency_manager_dialog.h"
 #include "profile_setup_dialog.h"
+#include "skills_dialog.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include "file_organizer.h"
@@ -720,6 +721,16 @@ void MainWindow::buildMenuBar()
             m_jarvis->claudeApi()->setApiKey(key.trimmed());
             appendLog(Str::logSystem(), Str::apiKeySaved(), Theme::LogColors::system);
         }
+    });
+
+    // ── Модульные скиллы (лего-блоки знаний) ─────────────────
+    settingsMenu->addSeparator();
+    auto* actSkills = settingsMenu->addAction(
+        IS_EN ? QStringLiteral("🧩 JARVIS Skills...")
+              : QStringLiteral("🧩 Скиллы JARVIS..."));
+    connect(actSkills, &QAction::triggered, this, [this]() {
+        SkillsDialog dlg(m_jarvis->skillManager(), this);
+        dlg.exec();
     });
 
     // ── Управление голосовыми моделями ──────────────────────
@@ -6202,7 +6213,8 @@ void MainWindow::runFirstRunProfileSetup()
         m_jarvis->setCurrentUserId(id);
     }
 
-    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::FirstRun, IS_EN, this);
+    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::FirstRun, IS_EN,
+                           m_jarvis->skillManager(), this);
     dlg.setProfile(*user);
     dlg.exec(); // FirstRun: закрыть можно только заполнив имя (кнопка Start)
 
@@ -6226,7 +6238,7 @@ void MainWindow::editCurrentUserProfile()
     auto user = db.getUser(m_jarvis->currentUserId());
     if (!user) return;
 
-    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::Edit, IS_EN, this);
+    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::Edit, IS_EN, nullptr, this);
     dlg.setProfile(*user);
     if (dlg.exec() != QDialog::Accepted) return;
 

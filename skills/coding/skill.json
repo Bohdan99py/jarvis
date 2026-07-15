@@ -1,0 +1,14 @@
+{
+    "id": "coding",
+    "name": {
+        "ru": "Программист (IDE-агент)",
+        "en": "Programmer (IDE agent)"
+    },
+    "description": {
+        "ru": "Вайбкодинг: JARVIS пишет и правит код прямо в файлах проекта ([FILE]/[DIFF] блоки), выполняет команды, открывает IDE. Выключите, если не программируете — JARVIS останется обычным ассистентом.",
+        "en": "Vibecoding: JARVIS writes and edits code directly in project files ([FILE]/[DIFF] blocks), runs commands, opens the IDE. Disable if you don't code — JARVIS keeps working as a regular assistant."
+    },
+    "version": "1.0.0",
+    "features": ["code_actions"],
+    "default_enabled": true
+}

@@ -1,113 +1,382 @@
 ===================================================================
    J.A.R.V.I.S. — Just A Rather Very Intelligent System
-   Version 3.1 · User Guide
+   Version 3.6.3 · User Guide
 ===================================================================
 
-WHAT'S NEW IN VERSION 3.x
---------------------------
-  * Voice model selection dialog on first launch
-  * Support for 6 languages: EN (fast/full), RU, DE, FR, ZH
-  * Download and remove models from Settings -> Voice
-  * All Vosk DLLs included in installer — internet only needed
-    to download language models (your choice)
-  * Recording only on voice activity (VAD) — silence is ignored
-
-FIRST LAUNCH
--------------
-  1. On first launch, a "Voice Input Setup" dialog will appear.
-  2. Select the languages you need. Start with "English — Fast" (40 MB).
-  3. Click "Install" — JARVIS will download and configure models automatically.
-  4. Once done, say "Jarvis" — you're good to go!
-
-If you skipped the dialog or want to add languages later:
-  Settings -> Voice -> Voice Models -> [Download]
+WHAT'S NEW
+-----------
+  * SKILLS — JARVIS is now modular. Expert knowledge comes in
+    skill packs (like Lego blocks) that you pick during install,
+    toggle on/off at runtime, and can add later. See "SKILLS" below.
+  * Skill selection in the installer and in the first-run wizard.
+  * Settings -> JARVIS Skills... — manage skills without restart.
+  * Make your own skills: a folder + two text files, no coding.
 
 
-VOICE MODELS (specs)
----------------------
-  English Fast      ~40 MB    Commands, wake word. Instant load.
-  English Full    ~1.8 GB     Dictation, transcription. High quality.
-  Russian         ~1.8 GB     Full RU/EN switching support.
-  Deutsch         ~1.0 GB     German.
-  Francais        ~1.0 GB     French.
-  Chinese           ~500 MB   Chinese (small model).
-
-Models are stored in: %APPDATA%\Bohdan99py\JARVIS\vosk\
-Remove a model: Settings -> Voice -> [Delete] next to the model.
-
-
-WAKE WORD (activation)
------------------------
-Say "Jarvis" to activate. You can speak a command right after:
-  "Jarvis, open the browser"
-  "Jarvis, what time is it?"
-
-
-VOICE COMMANDS
----------------
-Examples:
-  "Jarvis, open Telegram"             — launch an app
-  "Jarvis, search Google for [query]" — browser search
-  "Jarvis, take a screenshot"         — screen capture
-  "Jarvis, show the weather"          — weather forecast
-  "Jarvis, remind me in 30 minutes"   — timer/reminder
-  "Jarvis, what's open right now?"    — list windows
-  "Jarvis, shut down the computer"    — power management
-
-
-SETTINGS
+CONTENTS
 ---------
-  Voice -> Voice Models        — manage models
-  Voice -> Silence Threshold   — mic sensitivity (-45 dB default)
-  Voice -> Language            — auto / fixed language
-  AI -> API Key                — Claude API key (for complex queries)
-  General -> Autostart         — launch with Windows
+  1.  First launch
+  2.  Skills — modular knowledge
+  3.  Voice control
+  4.  Offline commands (no API key)
+  5.  AI brains (Claude / Gemini / Ollama)
+  6.  Coding: the IDE agent
+  7.  Electronics & KiCad
+  8.  Screen vision, camera & media
+  9.  Tasks & reminders
+  10. Memory, learning & self-tuning
+  11. Telegram & mobile
+  12. J2J mesh network
+  13. Translation
+  14. Where your data lives / Privacy
+  15. Troubleshooting
+  16. System requirements & support
 
 
-PRIVACY & SECURITY
--------------------
-  * Voice recognition runs LOCALLY — no cloud servers.
-  * Microphone activates only when sound exceeds VAD threshold (-45 dB).
-    Silence is never recorded or processed.
-  * Audio is never saved to disk — kept in RAM during recognition only.
-  * Data never leaves your computer (except Claude/Gemini API requests
-    if configured).
+1. FIRST LAUNCH
+----------------
+  1. A welcome wizard asks your NAME, ROLE (Developer, QA Tester,
+     Digital Artist, Casual, Student) and LANGUAGE. JARVIS uses this
+     to personalize tone and answers on this computer.
+  2. The same wizard shows the SKILLS list — tick only what you
+     need (see section 2). You can change this anytime.
+  3. A "Voice Input Setup" dialog offers speech models. Start with
+     "English — Fast" (40 MB) or "Russian" for full RU support.
+     Click "Install" — models download automatically.
+  4. Say "Jarvis" — you're good to go.
+
+  Skipped something? Everything is reachable later:
+    Settings -> Voice Models        (speech)
+    Settings -> JARVIS Skills...    (skills)
+    Menu -> Profile                 (name/role/language)
+
+
+2. SKILLS — MODULAR KNOWLEDGE
+------------------------------
+  JARVIS is built like Lego: the core assistant is always there,
+  and expert knowledge lives in SKILL PACKS you choose yourself.
+  Everyone gets a personalized assistant — a cook doesn't need the
+  programming module, a programmer might not need philosophy.
+
+  Bundled skills:
+
+    Programmer (IDE agent)     [default: ON]
+        Vibecoding: JARVIS writes and edits code directly in your
+        project files, applies precise diffs, creates folders, runs
+        commands, opens your IDE. Powers the [FILE]/[DIFF] blocks.
+        If disabled, JARVIS still answers coding questions as text —
+        it just never touches your files.
+
+    Electronics Engineer       [default: ON]
+        Circuit design like a working engineer: real component
+        behavior, datasheets, safety practice, KiCad specifics
+        (schematic vs PCB, DRC/ERC, trace widths), embedded
+        firmware constraints (Arduino/ESP32/STM32).
+
+    Philosopher                [default: OFF]
+        Deep conversations: history of ideas, ethics, logic,
+        critical thinking. An example of an optional skill.
+
+  Where to manage:
+    * During install — the installer lets you untick skill packs.
+    * First run — the welcome wizard shows checkboxes.
+    * Anytime — Settings -> 🧩 JARVIS Skills... Toggle on/off,
+      changes apply INSTANTLY, no restart.
+
+  Adding skills later:
+    * Settings -> JARVIS Skills -> "Import skill..." and pick a
+      skill folder, OR
+    * Drop the folder into:  Documents\Jarvis Data\skills\
+
+  Make your own skill (no programming needed):
+    A skill is a folder with two files:
+      skill.json  — manifest: id, name, description, version
+      prompt.md   — the knowledge itself, plain text/markdown
+    Example manifest:
+      {
+        "id": "chef",
+        "name":        { "ru": "Шеф-повар", "en": "Chef" },
+        "description": { "ru": "Кулинария", "en": "Cooking expert" },
+        "version": "1.0.0",
+        "features": [],
+        "default_enabled": true
+      }
+    Full format description: skills\README.md in the install folder.
+
+  Notes:
+    * Bundled skills are copied to Documents\Jarvis Data\skills on
+      first run — you can read, edit or delete them there. Deleted
+      skills stay deleted (they don't come back on update).
+    * Disabling the Programmer skill also disables automatic IDE
+      opening and file operations — JARVIS works as a normal
+      conversational assistant.
+
+
+3. VOICE CONTROL
+-----------------
+  Wake word: say "Jarvis", then the command:
+    "Jarvis, open the browser"
+    "Jarvis, what time is it?"
+
+  Voice models (Settings -> Voice Models):
+    English Fast      ~40 MB    Commands, wake word. Instant load.
+    English Full    ~1.8 GB     Dictation, transcription.
+    Russian         ~1.8 GB     Full RU/EN switching support.
+    Deutsch         ~1.0 GB     German.
+    Francais        ~1.0 GB     French.
+    Chinese          ~500 MB    Chinese (small model).
+
+  * Recognition runs LOCALLY (Vosk) — no cloud, works offline.
+  * Microphone activates only on voice activity (VAD threshold,
+    -45 dB default, adjustable in Settings).
+  * Voice PC control: mouse, windows, apps, system commands and
+    recorded macros — all by voice.
+  * Passive voice journal (optional) feeds the self-learning
+    pipeline — see section 10.
+
+
+4. OFFLINE COMMANDS (no API key, no internet)
+----------------------------------------------
+  Apps & system:
+    open Steam / открой Steam         — launch app
+    close Steam / закрой Steam        — kill process
+    lock screen / заблокируй          — lock Windows
+    shutdown / выключи компьютер      — power off
+    restart / перезагрузи             — reboot
+    what time / который час           — time
+    what date / какая дата            — date
+    2+2, 10*5                         — instant math
+    what can you do / что ты умеешь   — command list
+
+  Volume & brightness:
+    volume 70 / громкость 70          — set volume
+    volume up / громче                — +10%
+    mute / выключи звук               — mute
+    brightness up / яркость выше      — +10%
+    night mode on / ночной режим      — Night Light
+
+  File search:
+    find file readme                  — files on PC
+    find readme in project            — project sources
+    find readme in browser history    — browser history
+    find readme online                — Google search
+
+  Memory:
+    remember: my server IP is ...     — save a fact
+    recall server IP                  — retrieve it
+
+
+5. AI BRAINS (Claude / Gemini / Ollama)
+----------------------------------------
+  JARVIS routes each request to the best available brain:
+
+    Claude (Anthropic)  — code, analysis, files, architecture.
+                          Best quality. Settings -> Claude API key.
+                          Get a key: https://console.anthropic.com
+    Gemini (Google)     — conversations. Free tier available.
+                          Settings -> Gemini API key.
+    Ollama              — fully OFFLINE local AI. Install from
+                          https://ollama.com, pull a model
+                          (ollama pull llama3), enable
+                          Settings -> Agent mode.
+
+  * Multi-agent mode: coding goes to Claude, chat goes to
+    Ollama/Gemini automatically; if one brain is down, JARVIS
+    falls back to the next.
+  * Frequent answers are cached for offline replay.
+  * Responses are both shown as text and SPOKEN aloud (TTS) with
+    a natural short voice summary.
+  * Diagrams: ask "draw a scheme of ..." — JARVIS renders real
+    Mermaid diagrams (flowcharts, sequences) as images in chat.
+
+
+6. CODING: THE IDE AGENT  (requires "Programmer" skill + Claude)
+-----------------------------------------------------------------
+  Index your project first:
+    Project -> Index folder...  -> select project root
+    JARVIS scans .cpp/.h/.py files, builds a symbol-level index
+    and automatically attaches relevant code to AI requests (RAG).
+
+  Then just talk:
+    "fix the bug in PlayerController.cpp"
+    "add a settings dialog with a dark theme"
+  JARVIS writes files directly into the project ([FILE] blocks),
+  applies precise edits ([DIFF] blocks), creates folders, deletes
+  files, and can open the project in your IDE (CLion, Rider,
+  VS Code...) so you watch changes live.
+
+  * Big files are no problem: if a generated file hits the token
+    limit, JARVIS automatically requests continuations and stitches
+    the parts together.
+  * Project map, symbol search and grep are available from the
+    Project menu and by voice.
+
+
+7. ELECTRONICS & KICAD  (enhanced by "Electronics" skill)
+----------------------------------------------------------
+  * Circuit questions get real engineering answers: tolerances,
+    derating, failure modes, mains-voltage safety warnings.
+  * KiCad SCHEMATIC GENERATION: ask "draw me a schematic with an
+    L298N and two DC motors" — JARVIS generates a genuinely valid
+    .kicad_sch file (real symbols from KiCad's own libraries,
+    pin-accurate wiring, passes ERC). Supported parts: resistor,
+    capacitor, LED, diode, GND, VCC, battery, DC motor, L298N,
+    3-pin connector — the set is growing.
+  * Firmware help accounts for real hardware: GPIO limits, timing,
+    interrupts, logic levels, pull-ups.
+
+
+8. SCREEN VISION, CAMERA & MEDIA
+---------------------------------
+  * Screenshots + OCR (Tesseract): JARVIS reads what's on screen
+    and uses it as context ("what's this error?").
+  * Attach files (File -> Attach files...) — code, logs, images,
+    PDFs — they're sent to the AI with your next question.
+  * Clipboard watcher (optional) adds copied text to context.
+  * Camera: face enrollment — JARVIS learns to recognize you.
+  * GUARD MODE (security camera): motion detection through your
+    webcam with alerts; also controllable from Telegram
+    (/security). One shared camera instance — no double alerts.
+  * Media analysis: image/audio/video files get routed to the
+    right analyzer automatically.
+
+
+9. TASKS & REMINDERS
+---------------------
+  * Kanban task board (cyberpunk style): categories (UE5, KiCad,
+    Blender, General), priorities, deadlines, overdue alerts.
+  * Manage by voice/text: "add task: order PCBs, deadline Friday",
+    "remind me in 30 minutes".
+  * Proactive reminders surface overdue tasks.
+
+
+10. MEMORY, LEARNING & SELF-TUNING
+-----------------------------------
+  JARVIS gets better the more you use it — all locally:
+
+  * Session memory: recent dialogue, current task, topics.
+    Ask "recall what we did yesterday" — JARVIS searches its
+    session journal by period and topic.
+  * Persistent facts: "remember: ..." / learned automatically
+    from conversations into a knowledge base.
+  * User profile: JARVIS learns your patterns and scenarios
+    (work hours, apps, style) and adapts tone and priorities.
+  * Adaptive Focus: detects what you're doing (Developer,
+    Creative, Hardware, Admin, Casual) from a time-decay memory
+    stream and switches assistant mode automatically.
+  * Self-tuning: replies you LIKE are periodically baked into a
+    personalized local Ollama model — automatic, no clicks.
+  * Curiosity Engine: during your idle time JARVIS may ask a
+    thoughtful question (well-being, project check-in, verifying
+    something it wasn't sure it learned correctly). It never
+    interrupts gaming or deep coding.
+  * PDF Knowledge Distiller: drop PDFs into the knowledge_base
+    folder — JARVIS reads them in the background, keeps distilled
+    knowledge, and honestly asks you about low-confidence parts.
+  * Two-tier memory: raw assets can live on an external drive;
+    distilled summaries always stay in the local cache — the
+    drive can be unplugged anytime with zero data loss.
+  * Personality: emotional state (joy, curiosity, boredom...)
+    subtly modulates responses; a reflection engine analyzes
+    behavior and can give a morning nudge.
+
+
+11. TELEGRAM & MOBILE
+----------------------
+  * Pair your phone like WhatsApp Web: a dynamic 6-character PIN,
+    no bot tokens, no manual setup (Phone menu).
+  * Full JARVIS chat from Telegram: questions, coding, tasks,
+    system telemetry, Kanban board — with inline keyboards.
+  * Per-chat localization; QA-Tester profiles get an English bug
+    wizard with Markdown export for Jira/GitHub.
+  * Wake-on-LAN: wake your PC from your phone (one-click shortcut
+    export for iOS/Android).
+  * Access control: only paired/authorized chats may talk to
+    your JARVIS.
+
+
+12. J2J MESH NETWORK
+---------------------
+  Several JARVIS instances on one LAN find each other
+  automatically (UDP beacon + TCP channel) and can:
+    * sync knowledge,
+    * delegate tasks to each other,
+    * show mesh events in the log.
+  Roles come from user profiles (e.g., your desktop + your
+  laptop + a teammate's instance).
+
+
+13. TRANSLATION
+----------------
+  * Bidirectional FR/EN/RU translation via LLM.
+  * Audio files: transcription (Vosk) -> translation -> structured
+    Markdown summary stored in the knowledge base.
+  * UI language: Settings -> Language (Русский / English).
+    JARVIS always REPLIES in the language you write in.
+
+
+14. WHERE YOUR DATA LIVES / PRIVACY
+------------------------------------
+  Documents\Jarvis Data\        — all user data, visible, yours:
+    skills\                     — skill packs (editable)
+    memory\, jarvis.db          — memory, facts, sessions
+    voice_dataset\, training_export\ — learning data
+  %APPDATA%\Bohdan99py\JARVIS\vosk\ — voice models
+
+  * Voice recognition is LOCAL. Silence is never recorded; audio
+    lives in RAM only.
+  * Nothing leaves your computer except requests to Claude/Gemini
+    APIs (only if you configured keys) and Telegram (only if you
+    paired it).
   * API keys are stored encrypted.
+  * Want a factory reset? Delete Documents\Jarvis Data — JARVIS
+    starts fresh.
+  Details: PRIVACY_POLICY.txt in the installation folder.
 
-Details: PRIVACY_POLICY.txt in the installation folder.
 
-
-SYSTEM REQUIREMENTS
+15. TROUBLESHOOTING
 --------------------
+  Microphone not picking up:
+    -> Windows Settings -> Privacy -> Microphone; try another mic.
+  Wake word not triggering:
+    -> Settings -> Silence Threshold toward -60 dB; check a model
+       is downloaded (green indicator).
+  "Models not loaded":
+    -> Settings -> Voice Models -> download; check
+       %APPDATA%\Bohdan99py\JARVIS\vosk\
+  Slow startup:
+    -> Large models load 5-15 s. Use "English Fast" for instant.
+  "Could not find application: X":
+    -> The app isn't in a standard location; open it once manually
+       so JARVIS learns the path.
+  "Host api.anthropic.com not found":
+    -> No internet or firewall/antivirus blocks JARVIS.
+  AI answers in the wrong language:
+    -> JARVIS mirrors YOUR language per message; set UI language in
+       Settings -> Language.
+  JARVIS stopped writing files / opening IDE:
+    -> Check the "Programmer" skill is enabled:
+       Settings -> JARVIS Skills.
+  A skill has no effect:
+    -> Settings -> JARVIS Skills -> is it ticked? Click Rescan.
+       Check the folder has skill.json + prompt.md.
+  Antivirus blocks JARVIS:
+    -> Add the install folder to exclusions (JARVIS emulates
+       keyboard/mouse for PC control, which AVs may flag).
+  No response after sending a message:
+    -> Check the status bar: if all brains are offline, add an API
+       key or start Ollama.
+
+
+16. SYSTEM REQUIREMENTS & SUPPORT
+----------------------------------
   OS:         Windows 10/11 x64
   RAM:        4 GB minimum (8 GB recommended with large models)
-  Disk:       200 MB for the app + space for models
-  Microphone: any Windows-compatible (USB, built-in, Bluetooth)
-  Internet:   only needed for downloading models and Claude/Gemini API
+  Disk:       200 MB app + space for voice models
+  Microphone: any Windows-compatible
+  Internet:   only for model downloads, Claude/Gemini, Telegram
 
-
-TROUBLESHOOTING
-----------------
-  Microphone not picking up sound:
-    -> Check permissions: Start -> Settings -> Privacy -> Microphone
-    -> Try a different mic or increase volume in Windows
-
-  Wake word not triggering:
-    -> Settings -> Voice -> Silence Threshold: slide toward -60 dB
-    -> Make sure a model is downloaded (green indicator in main window)
-
-  "Models not loaded" error:
-    -> Settings -> Voice -> Voice Models -> select and download a model
-    -> Check folder: %APPDATA%\Bohdan99py\JARVIS\vosk\
-
-  Slow model loading on startup:
-    -> Large models (RU, EN Full) take 5-15 sec — this is normal.
-    -> Use "English Fast" for instant startup.
-
-
-SUPPORT
---------
-GitHub:  https://github.com/Bohdan99py/jarvis
-Issues:  https://github.com/Bohdan99py/jarvis/issues
+  GitHub:  https://github.com/Bohdan99py/jarvis
+  Issues:  https://github.com/Bohdan99py/jarvis/issues
 
 ===================================================================

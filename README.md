@@ -107,6 +107,24 @@ Open **Settings** menu inside JARVIS:
 
 ---
 
+## Skills — Modular Knowledge (Lego blocks)
+
+JARVIS is modular: expert knowledge lives in **skills** you can enable,
+disable, or add later — so everyone gets a personalized assistant.
+
+| Skill | What it adds | Default |
+|---|---|---|
+| 🧩 **Programmer (IDE agent)** | Vibecoding: JARVIS writes/edits files in your project, runs commands, opens IDE | On |
+| 🧩 **Electronics Engineer** | KiCad, circuit design, embedded firmware expertise | On |
+| 🧩 **Philosopher** | Deep conversations, ethics, logic | Off |
+
+- **Manage:** Settings → **🧩 JARVIS Skills...** — toggle on/off, applies instantly (no restart).
+- **During install:** the installer lets you pick which skills to install (e.g. skip the Programmer skill if you don't code — JARVIS still works normally as an assistant).
+- **Add later:** Settings → Skills → **Import skill...**, or drop a skill folder into `Documents\Jarvis Data\skills\`.
+- **Make your own:** a skill is just a folder with `skill.json` (manifest) + `prompt.md` (knowledge) — no programming needed. See `skills/README.md`.
+
+---
+
 ## Project Indexing (for code work)
 
 To let JARVIS understand your codebase:

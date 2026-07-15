@@ -1,0 +1,14 @@
+{
+    "id": "philosopher",
+    "name": {
+        "ru": "Философ",
+        "en": "Philosopher"
+    },
+    "description": {
+        "ru": "Глубокие беседы о философии: история идей, этика, логика, критическое мышление. Пример догружаемого скилла — включите, если любите такие разговоры.",
+        "en": "Deep conversations about philosophy: history of ideas, ethics, logic, critical thinking. An example of an optional skill — enable it if you enjoy such talks."
+    },
+    "version": "1.0.0",
+    "features": [],
+    "default_enabled": false
+}

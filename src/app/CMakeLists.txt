@@ -11,6 +11,8 @@ target_sources(jarvis PRIVATE
     dependency_manager_dialog.cpp
     profile_setup_dialog.h
     profile_setup_dialog.cpp
+    skills_dialog.h
+    skills_dialog.cpp
 )
 
 target_include_directories(jarvis PRIVATE

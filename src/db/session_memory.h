@@ -119,6 +119,17 @@ public:
     // Task board context (deadlines, active tasks)
     void setTaskContext(const QString& ctx) { m_taskBoardContext = ctx; }
 
+    // Модульные скиллы: конкатенация промпт-блоков включённых скиллов
+    // (SkillManager::promptBlocks) + флаг, разрешены ли модели
+    // [FILE:]/[DIFF:]/[CMD:] блоки (фича code_actions скилла «Программист»).
+    // Jarvis обновляет это при старте и при каждом изменении скиллов.
+    void setSkillContext(const QString& promptBlocks, bool codeActionsEnabled)
+    {
+        m_skillPromptBlocks  = promptBlocks;
+        m_codeActionsEnabled = codeActionsEnabled;
+    }
+    bool codeActionsEnabled() const { return m_codeActionsEnabled; }
+
     // Per-turn directives (mood, language, diagram requirements) — set by
     // Jarvis right before each LLM call. They belong to the SYSTEM prompt:
     // injecting persona/behaviour instructions into the user turn makes
@@ -166,6 +177,10 @@ private:
     QString m_capabilitiesContext;
     QString m_taskBoardContext;
     QString m_turnDirectives;
+    QString m_skillPromptBlocks;
+    // По умолчанию true: до первого setSkillContext (и в сборках без
+    // SkillManager) JARVIS ведёт себя как раньше — кодинг разрешён.
+    bool    m_codeActionsEnabled = true;
 
     // Сознание: что JARVIS знает о себе
     int m_totalInteractions = 0;
