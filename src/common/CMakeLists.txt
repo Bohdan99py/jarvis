@@ -24,8 +24,11 @@ add_library(jarvis_common OBJECT
     kicad_schematic_builder.cpp
     notification_manager.h
     notification_manager.cpp
-    notification_toast.qrc
 )
+# notification_toast.qrc is intentionally NOT listed here — see the
+# top-level CMakeLists.txt comment above where it's attached to the
+# "jarvis" executable target instead (Visual Studio generator + AUTORCC +
+# OBJECT library + $<TARGET_OBJECTS:> does not reliably link).
 
 target_include_directories(jarvis_common PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

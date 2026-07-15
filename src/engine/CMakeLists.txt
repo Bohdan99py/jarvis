@@ -16,7 +16,8 @@ add_library(jarvis_engine OBJECT
     task_manager_dialog.cpp
     task_board_model.h
     task_board_model.cpp
-    task_board.qrc
+    training_center_dialog.h
+    training_center_dialog.cpp
     chat_history_dialog.h
     chat_history_dialog.cpp
     translation_engine.h
@@ -28,6 +29,10 @@ add_library(jarvis_engine OBJECT
     self_update_reflector.h
     self_update_reflector.cpp
 )
+# task_board.qrc / training_center.qrc are intentionally NOT listed here —
+# see the top-level CMakeLists.txt comment where they're attached to the
+# "jarvis" executable target instead (Visual Studio generator + AUTORCC +
+# OBJECT library + $<TARGET_OBJECTS:> does not reliably link).
 
 target_include_directories(jarvis_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

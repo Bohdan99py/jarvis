@@ -122,8 +122,14 @@ TaskManagerDialog::TaskManagerDialog(qint64 userId, QWidget* parent)
     ctx->setContextProperty(QStringLiteral("doneModel"), m_doneModel);
     ctx->setContextProperty(QStringLiteral("boardEnglish"), IS_EN);
     ctx->setContextProperty(QStringLiteral("boardProgress"), 0.0);
-    ctx->setContextProperty(QStringLiteral("boardDoneCount"), 0);
-    ctx->setContextProperty(QStringLiteral("boardTotalCount"), 0);
+    // NB: the literal 0 must be wrapped in QVariant() — passed bare, C++
+    // overload resolution prefers QQmlContext::setContextProperty(name,
+    // QObject*) over the QVariant overload (0 is a null-pointer-constant),
+    // silently registering the property as a null QObject instead of an
+    // int. QML then throws "Cannot assign std::nullptr_t to int" the
+    // moment anything binds to it strictly-typed.
+    ctx->setContextProperty(QStringLiteral("boardDoneCount"), QVariant(0));
+    ctx->setContextProperty(QStringLiteral("boardTotalCount"), QVariant(0));
     ctx->setContextProperty(QStringLiteral("taskBoard"), this);
 
     m_board->setSource(QUrl(QStringLiteral("qrc:/qml/TaskBoard.qml")));

@@ -335,11 +335,27 @@ qt_add_executable(jarvis WIN32
 # App sources added via src/app/CMakeLists.txt
 add_subdirectory(src/app)
 
-# Qt resource file
-set(_qrc "${CMAKE_CURRENT_SOURCE_DIR}/assets/resources.qrc")
-if(EXISTS "${_qrc}")
-    target_sources(jarvis PRIVATE "${_qrc}")
-endif()
+# Qt resource files — deliberately attached to the "jarvis" executable
+# target itself, not to the OBJECT libraries whose code actually uses them
+# (jarvis_common, jarvis_engine). Qt resources are registered globally at
+# static-init time regardless of which translation unit embeds them, so
+# qrc:/... paths resolve the same either way — but the Visual Studio
+# generator has a known limitation where AUTORCC-generated .obj files
+# added to an OBJECT library aren't reliably included when that library's
+# objects are pulled into another target via $<TARGET_OBJECTS:...> (works
+# fine with Ninja, fails with "LNK1181: cannot open input file
+# qrc_*.obj" under MSBuild). Keeping .qrc sources on the final
+# executable target sidesteps that entirely.
+foreach(_qrc
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/resources.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/common/notification_toast.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/task_board.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/training_center.qrc"
+)
+    if(EXISTS "${_qrc}")
+        target_sources(jarvis PRIVATE "${_qrc}")
+    endif()
+endforeach()
 
 target_link_libraries(jarvis PRIVATE JarvisCore)
 
