@@ -51,6 +51,7 @@
 #include "face_registry.h"
 #include "dependency_manager_dialog.h"
 #include "profile_setup_dialog.h"
+#include "user_center_dialog.h"
 #include "skills_dialog.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
@@ -680,163 +681,24 @@ void MainWindow::buildMenuBar()
     connect(actExit, &QAction::triggered, this, &QWidget::close);
 
     // --- Пользователь (multi-user) ---
+    // Previously four separate flows (Switch User / My Profile / Edit
+    // Profile / Delete User — three different QInputDialog pickers plus a
+    // QMessageBox text dump) — merged into one QML dashboard.
     {
         auto* userMenu = menuBar->addMenu(
             IS_EN ? QStringLiteral("👤 User") : QStringLiteral("👤 Пользователь"));
 
-        // Switch user
-        auto* actSwitch = userMenu->addAction(
-            IS_EN ? QStringLiteral("Switch User...") : QStringLiteral("Сменить пользователя..."));
-        connect(actSwitch, &QAction::triggered, this, [this]() {
-            auto& db = DatabaseManager::instance();
-            auto users = db.getAllUsers();
-
-            QStringList items;
-            for (const auto& u : users)
-                items << QStringLiteral("%1 — %2 (%3)").arg(u.name, u.scenario, u.language);
-            items << (IS_EN ? QStringLiteral("+ New user...") : QStringLiteral("+ Новый пользователь..."));
-
-            bool ok;
-            QString choice = QInputDialog::getItem(this,
-                IS_EN ? QStringLiteral("Switch User") : QStringLiteral("Сменить пользователя"),
-                IS_EN ? QStringLiteral("Select user:") : QStringLiteral("Выберите пользователя:"),
-                items, 0, false, &ok);
-            if (!ok) return;
-
-            int idx = items.indexOf(choice);
-            if (idx >= 0 && idx < users.size()) {
-                // Switch to existing user
-                auto& user = users[idx];
-                m_jarvis->setCurrentUserId(user.id);
-                m_jarvis->memory()->setActiveUserName(user.name);
-                db.updateUser(user); // touch last_seen
-                QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
-                    .setValue(QStringLiteral("user/currentId"), user.id);
+        auto* actUserCenter = userMenu->addAction(
+            IS_EN ? QStringLiteral("User Center...") : QStringLiteral("Управление пользователями..."));
+        connect(actUserCenter, &QAction::triggered, this, [this]() {
+            UserCenterDialog dlg(m_jarvis, IS_EN, this);
+            connect(&dlg, &UserCenterDialog::userSwitched, this, [this]() {
                 appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    (IS_EN ? QStringLiteral("Switched to user: ") : QStringLiteral("Переключено на: ")) + user.name,
+                    IS_EN ? QStringLiteral("User profile updated.")
+                          : QStringLiteral("Профиль пользователя обновлён."),
                     Theme::LogColors::system);
-            } else {
-                // New user dialog
-                QString name = QInputDialog::getText(this,
-                    IS_EN ? QStringLiteral("New User") : QStringLiteral("Новый пользователь"),
-                    IS_EN ? QStringLiteral("Name:") : QStringLiteral("Имя:"),
-                    QLineEdit::Normal, QString(), &ok);
-                if (!ok || name.trimmed().isEmpty()) return;
-
-                QStringList roles = {
-                    QStringLiteral("programmer"), QStringLiteral("artist"),
-                    QStringLiteral("game_dev"), QStringLiteral("tester"),
-                    QStringLiteral("designer"), QStringLiteral("student"),
-                    QStringLiteral("general")
-                };
-                QString role = QInputDialog::getItem(this,
-                    IS_EN ? QStringLiteral("User Role") : QStringLiteral("Роль"),
-                    IS_EN ? QStringLiteral("Primary role:") : QStringLiteral("Основная роль:"),
-                    roles, 0, false, &ok);
-                if (!ok) return;
-
-                DbUserProfile newUser;
-                newUser.name     = name.trimmed();
-                newUser.scenario = role;
-                newUser.language = QStringLiteral("auto");
-                newUser.preferences = QStringLiteral("{}");
-                qint64 newId = db.addUser(newUser);
-                if (newId > 0) {
-                    m_jarvis->setCurrentUserId(newId);
-                    m_jarvis->memory()->setActiveUserName(newUser.name);
-                    QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
-                        .setValue(QStringLiteral("user/currentId"), newId);
-                    appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                        (IS_EN ? QStringLiteral("Created user: ") : QStringLiteral("Создан пользователь: ")) + newUser.name
-                        + QStringLiteral(" (") + role + QStringLiteral(")"),
-                        Theme::LogColors::system);
-                }
-            }
-        });
-
-        // Current user info
-        auto* actProfile = userMenu->addAction(
-            IS_EN ? QStringLiteral("My Profile") : QStringLiteral("Мой профиль"));
-        connect(actProfile, &QAction::triggered, this, [this]() {
-            auto& db = DatabaseManager::instance();
-            auto user = db.getUser(m_jarvis->currentUserId());
-            if (!user) return;
-
-            QString role = m_jarvis->activityTracker()->detectUserRole();
-            QString knowledge = m_jarvis->activityTracker()->knowledgeSummary(m_jarvis->currentUserId(), 20);
-            QString activity = m_jarvis->activityTracker()->recentActivitySummary(60);
-
-            QString info = QStringLiteral("👤 ") + user->name + QStringLiteral("\n")
-                + QStringLiteral("Role: ") + user->scenario + QStringLiteral("\n")
-                + QStringLiteral("Detected role: ") + role + QStringLiteral("\n")
-                + QStringLiteral("Language: ") + user->language + QStringLiteral("\n\n");
-
-            if (!activity.isEmpty())
-                info += QStringLiteral("📊 Recent activity (1h):\n") + activity + QStringLiteral("\n");
-            if (!knowledge.isEmpty())
-                info += QStringLiteral("🧠 Knowledge base:\n") + knowledge;
-
-            QMessageBox box(this);
-            box.setWindowTitle(IS_EN ? QStringLiteral("User Profile") : QStringLiteral("Профиль пользователя"));
-            box.setText(info);
-            box.setStyleSheet(QStringLiteral(
-                "QMessageBox { background: #0a0a1a; color: #ecf0f1; }"
-                "QLabel { color: #ecf0f1; font-family: Consolas; font-size: 12px; }"
-                "QPushButton { background: #0f2438; color: #00d4ff; border: 1px solid #1a5070; "
-                "border-radius: 4px; padding: 5px 18px; }"));
-            box.exec();
-        });
-
-        // Edit profile (name, role, language)
-        auto* actEdit = userMenu->addAction(
-            IS_EN ? QStringLiteral("Edit Profile...") : QStringLiteral("Редактировать профиль..."));
-        connect(actEdit, &QAction::triggered, this, [this]() {
-            editCurrentUserProfile();
-        });
-
-        // Delete user
-        auto* actDelete = userMenu->addAction(
-            IS_EN ? QStringLiteral("Delete User...") : QStringLiteral("Удалить пользователя..."));
-        connect(actDelete, &QAction::triggered, this, [this]() {
-            auto& db = DatabaseManager::instance();
-            auto users = db.getAllUsers();
-            if (users.size() <= 1) {
-                QMessageBox::information(this,
-                    IS_EN ? QStringLiteral("Delete User") : QStringLiteral("Удаление"),
-                    IS_EN ? QStringLiteral("Cannot delete the last user.")
-                          : QStringLiteral("Нельзя удалить последнего пользователя."));
-                return;
-            }
-
-            QStringList items;
-            for (const auto& u : users)
-                if (u.id != 1) items << QStringLiteral("%1 (id=%2)").arg(u.name).arg(u.id);
-            if (items.isEmpty()) return;
-
-            bool ok;
-            QString choice = QInputDialog::getItem(this,
-                IS_EN ? QStringLiteral("Delete User") : QStringLiteral("Удалить пользователя"),
-                IS_EN ? QStringLiteral("Select user to delete:") : QStringLiteral("Выберите:"),
-                items, 0, false, &ok);
-            if (!ok) return;
-
-            // Extract id from "Name (id=N)"
-            static const QRegularExpression reId(QStringLiteral("id=(\\d+)"));
-            auto m = reId.match(choice);
-            if (m.hasMatch()) {
-                qint64 delId = m.captured(1).toLongLong();
-                QSqlQuery q(QSqlDatabase::database());
-                q.prepare("DELETE FROM users WHERE id=:id");
-                q.bindValue(":id", delId);
-                q.exec();
-                if (m_jarvis->currentUserId() == delId) {
-                    m_jarvis->setCurrentUserId(1);
-                    m_jarvis->memory()->setActiveUserName(QStringLiteral(""));
-                }
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    IS_EN ? QStringLiteral("User deleted.") : QStringLiteral("Пользователь удалён."),
-                    Theme::LogColors::system);
-            }
+            });
+            dlg.exec();
         });
     }
 
@@ -5925,25 +5787,4 @@ void MainWindow::runFirstRunProfileSetup()
 
     QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
         .setValue(QStringLiteral("user/profileSetupDone"), true);
-}
-
-void MainWindow::editCurrentUserProfile()
-{
-    auto& db = DatabaseManager::instance();
-    auto user = db.getUser(m_jarvis->currentUserId());
-    if (!user) return;
-
-    ProfileSetupDialog dlg(ProfileSetupDialog::Mode::Edit, IS_EN, nullptr, this);
-    dlg.setProfile(*user);
-    if (dlg.exec() != QDialog::Accepted) return;
-
-    DbUserProfile updated = dlg.profile();
-    if (updated.name.isEmpty()) return;
-
-    db.updateUser(updated);
-    m_jarvis->memory()->setActiveUserName(updated.name);
-    appendLog(Str::logSystem(),
-        (IS_EN ? QStringLiteral("Profile updated: ") : QStringLiteral("Профиль обновлён: "))
-        + updated.name + QStringLiteral(" (") + updated.scenario + QStringLiteral(")"),
-        Theme::LogColors::system);
 }

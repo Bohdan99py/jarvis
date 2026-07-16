@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/qml">
+        <file alias="UserCenter.qml">UserCenter.qml</file>
+    </qresource>
+</RCC>

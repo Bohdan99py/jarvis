@@ -110,9 +110,8 @@ private:
     void showWelcomeDashboard();
     QString buildWelcomeHtml() const;
 
-    // Профиль: мастер первого запуска и редактирование
+    // Профиль: мастер первого запуска (редактирование — UserCenterDialog)
     void runFirstRunProfileSetup();
-    void editCurrentUserProfile();
 
     void showClarification(const QString& question, const QStringList& options);
     void hideClarification();
