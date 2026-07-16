@@ -114,6 +114,7 @@ namespace {
 // split it into individual notification toasts instead of one wall of text.
 void notifyDeadlineWarnings(const QString& warnings)
 {
+    qDebug() << "[MainWindow] notifyDeadlineWarnings called with:" << warnings;
     const QString overdueMarker = IS_EN ? QStringLiteral("OVERDUE") : QStringLiteral("ПРОСРОЧЕНО");
     for (const QString& line : warnings.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
         NotificationManager::instance().showNotification(
@@ -465,6 +466,8 @@ MainWindow::MainWindow(QWidget* parent)
     // Startup deadline check — notify about overdue/approaching tasks
     QTimer::singleShot(3000, this, [this]() {
         QString warnings = m_jarvis->getOverdueTasksSummary();
+        qDebug() << "[MainWindow] startup deadline check: userId=" << m_jarvis->currentUserId()
+                 << "warnings=" << warnings;
         if (!warnings.isEmpty()) {
             notifyDeadlineWarnings(warnings);
             appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),

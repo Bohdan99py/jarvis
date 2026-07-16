@@ -47,10 +47,15 @@ NotificationToast::NotificationToast(const QString& title, const QString& messag
     : QQuickWidget()
     , m_onAnswer(std::move(onAnswer))
 {
-    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint
-                   | Qt::WindowStaysOnTopHint | Qt::WindowDoesNotAcceptFocus);
+    // Qt::Window (not Qt::Tool) — this widget has no parent/owner, and a
+    // parentless Tool window is a state Windows' compositor sometimes
+    // never actually paints (geometry/rootObject are valid, DWM just never
+    // presents a frame for it). Window is the type DWM unconditionally
+    // knows how to composite. WindowDoesNotAcceptFocus/ShowWithoutActivating
+    // are dropped too — see slideIn()'s explicit raise()/activateWindow(),
+    // which needs the window able to actually take focus to be effective.
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
-    setAttribute(Qt::WA_ShowWithoutActivating);
     setAttribute(Qt::WA_DeleteOnClose);
     setClearColor(Qt::transparent);
     setResizeMode(QQuickWidget::SizeViewToRootObject);
@@ -84,6 +89,8 @@ void NotificationToast::slideIn(const QPoint& target)
     move(target + QPoint(0, 48));
     setWindowOpacity(0.0);
     show();
+    raise();
+    activateWindow();
 
     auto* group = new QParallelAnimationGroup(this);
 
@@ -208,8 +215,12 @@ void NotificationManager::spawnToast(const QString& title, const QString& messag
         m_toasts.removeFirst();
     }
 
+    qDebug() << "[NotificationManager] spawnToast:" << title << "|" << message;
+
     auto* toast = new NotificationToast(title, message, level, quickOptions,
                                         answerable, std::move(onAnswer));
+    qDebug() << "[NotificationManager] toast created, status=" << toast->status()
+             << "rootObject=" << toast->rootObject();
     connect(toast, &NotificationToast::closed, this, [this](NotificationToast* t) {
         m_toasts.removeAll(t);
         layoutToasts(nullptr);
@@ -229,8 +240,10 @@ void NotificationManager::spawnToast(const QString& title, const QString& messag
 void NotificationManager::layoutToasts(NotificationToast* newcomer)
 {
     QScreen* screen = QGuiApplication::primaryScreen();
-    if (!screen) return;
+    if (!screen) { qDebug() << "[NotificationManager] layoutToasts: no primary screen!"; return; }
     const QRect area = screen->availableGeometry();
+    qDebug() << "[NotificationManager] layoutToasts: newcomer=" << newcomer
+             << "toastCount=" << m_toasts.size() << "screenArea=" << area;
 
     // Новейший — внизу у угла, остальные сдвигаются вверх
     int y = area.bottom() - kMargin;
@@ -239,6 +252,8 @@ void NotificationManager::layoutToasts(NotificationToast* newcomer)
         if (!t) continue;
         y -= t->height();
         const QPoint target(area.right() - kMargin - t->width(), y);
+        qDebug() << "[NotificationManager] toast" << i << "size=" << t->size()
+                 << "target=" << target << (t == newcomer ? "(slideIn)" : "(glideTo)");
         if (t == newcomer) t->slideIn(target);
         else               t->glideTo(target);
         y -= kSpacing;
