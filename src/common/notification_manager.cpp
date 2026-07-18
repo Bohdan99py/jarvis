@@ -13,6 +13,7 @@
 #include <QParallelAnimationGroup>
 #include <QScreen>
 #include <QThread>
+#include <QSurfaceFormat>
 
 namespace {
 constexpr int kMargin          = 18;    // отступ от краёв рабочей области экрана
@@ -55,7 +56,21 @@ NotificationToast::NotificationToast(const QString& title, const QString& messag
     // are dropped too — see slideIn()'s explicit raise()/activateWindow(),
     // which needs the window able to actually take focus to be effective.
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+
+    // WA_TranslucentBackground alone tells the QWidget compositing path to
+    // allow transparency, but QQuickWidget's own RHI surface negotiates its
+    // format separately — without an explicit alpha channel there, the
+    // Quick scene graph itself can render on an opaque surface regardless
+    // of the widget attribute, so the toast paints but never blends against
+    // the desktop (this only bites *standalone top-level* QQuickWidgets;
+    // one embedded in a normal opaque dialog, like TaskBoard, never hits
+    // this path, which is why that one renders fine and this one doesn't).
+    QSurfaceFormat fmt = format();
+    fmt.setAlphaBufferSize(8);
+    setFormat(fmt);
+
     setAttribute(Qt::WA_TranslucentBackground);
+    setAttribute(Qt::WA_NoSystemBackground);
     setAttribute(Qt::WA_DeleteOnClose);
     setClearColor(Qt::transparent);
     setResizeMode(QQuickWidget::SizeViewToRootObject);

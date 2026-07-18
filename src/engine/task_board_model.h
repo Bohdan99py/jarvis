@@ -20,6 +20,15 @@
 class TaskListModel : public QAbstractListModel
 {
     Q_OBJECT
+    // A plain Q_INVOKABLE count() looks like a property in QML
+    // (modelData.listModel.count) but isn't one — reading a method
+    // reference without calling it just stringifies the function itself
+    // ("function() { [native code] }"), and even called correctly with
+    // count(), QML's binding engine only tracks *property* reads for
+    // auto-reevaluation, not arbitrary method calls, so the label would
+    // never update as cards move between columns. A real Q_PROPERTY with
+    // a change signal is what TaskBoard.qml actually needs here.
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
 public:
     enum Roles {
         IdRole = Qt::UserRole + 1,
@@ -47,7 +56,10 @@ public:
     std::optional<DbTask> takeById(qint64 id);
     void insertTask(const DbTask& task);
 
-    Q_INVOKABLE int count() const { return m_tasks.size(); }
+    int count() const { return m_tasks.size(); }
+
+signals:
+    void countChanged();
 
 private:
     QList<DbTask> m_tasks;

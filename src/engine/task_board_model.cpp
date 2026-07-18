@@ -76,6 +76,7 @@ void TaskListModel::setTasks(const QList<DbTask>& tasks)
     beginResetModel();
     m_tasks = tasks;
     endResetModel();
+    emit countChanged();
 }
 
 std::optional<DbTask> TaskListModel::takeById(qint64 id)
@@ -87,6 +88,7 @@ std::optional<DbTask> TaskListModel::takeById(qint64 id)
     beginRemoveRows(QModelIndex(), idx, idx);
     DbTask removed = m_tasks.takeAt(idx);
     endRemoveRows();
+    emit countChanged();
     return removed;
 }
 
@@ -96,4 +98,5 @@ void TaskListModel::insertTask(const DbTask& task)
     beginInsertRows(QModelIndex(), idx, idx);
     m_tasks.append(task);
     endInsertRows();
+    emit countChanged();
 }
