@@ -45,35 +45,25 @@ NotificationToast::NotificationToast(const QString& title, const QString& messag
                                      Level level, const QStringList& quickOptions,
                                      bool answerable,
                                      std::function<void(const QString&)> onAnswer)
-    : QQuickWidget()
+    : QQuickView()
     , m_onAnswer(std::move(onAnswer))
 {
-    // Qt::Window (not Qt::Tool) — this widget has no parent/owner, and a
-    // parentless Tool window is a state Windows' compositor sometimes
-    // never actually paints (geometry/rootObject are valid, DWM just never
-    // presents a frame for it). Window is the type DWM unconditionally
-    // knows how to composite. WindowDoesNotAcceptFocus/ShowWithoutActivating
-    // are dropped too — see slideIn()'s explicit raise()/activateWindow(),
-    // which needs the window able to actually take focus to be effective.
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    // Tool: utility popup, no taskbar/alt-tab entry. FramelessWindowHint +
+    // WindowStaysOnTopHint for the same reason as before. Not setting
+    // Qt::WindowDoesNotAcceptFocus — answerable toasts need real keyboard
+    // focus for their TextInput field, and slideIn() explicitly requests
+    // activation below.
+    setFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
 
-    // WA_TranslucentBackground alone tells the QWidget compositing path to
-    // allow transparency, but QQuickWidget's own RHI surface negotiates its
-    // format separately — without an explicit alpha channel there, the
-    // Quick scene graph itself can render on an opaque surface regardless
-    // of the widget attribute, so the toast paints but never blends against
-    // the desktop (this only bites *standalone top-level* QQuickWidgets;
-    // one embedded in a normal opaque dialog, like TaskBoard, never hits
-    // this path, which is why that one renders fine and this one doesn't).
+    // QQuickView (a QWindow) needs an alpha channel in its own surface
+    // format for setColor(transparent) below to actually blend against the
+    // desktop rather than just paint solid on an opaque surface.
     QSurfaceFormat fmt = format();
     fmt.setAlphaBufferSize(8);
     setFormat(fmt);
+    setColor(Qt::transparent);
 
-    setAttribute(Qt::WA_TranslucentBackground);
-    setAttribute(Qt::WA_NoSystemBackground);
-    setAttribute(Qt::WA_DeleteOnClose);
-    setClearColor(Qt::transparent);
-    setResizeMode(QQuickWidget::SizeViewToRootObject);
+    setResizeMode(QQuickView::SizeViewToRootObject);
 
     // windeployqt drops QML plugin dependencies (QtQuick, QtQuick.Effects)
     // into bin/qml/ next to the exe — that path isn't part of the engine's
@@ -101,11 +91,11 @@ NotificationToast::NotificationToast(const QString& title, const QString& messag
 
 void NotificationToast::slideIn(const QPoint& target)
 {
-    move(target + QPoint(0, 48));
-    setWindowOpacity(0.0);
+    setPosition(target + QPoint(0, 48));
+    setOpacity(0.0);
     show();
     raise();
-    activateWindow();
+    requestActivate();
 
     auto* group = new QParallelAnimationGroup(this);
 
@@ -115,7 +105,7 @@ void NotificationToast::slideIn(const QPoint& target)
     pos->setEasingCurve(QEasingCurve::OutCubic);
     group->addAnimation(pos);
 
-    auto* fade = new QPropertyAnimation(this, "windowOpacity", group);
+    auto* fade = new QPropertyAnimation(this, "opacity", group);
     fade->setDuration(kSlideMs);
     fade->setStartValue(0.0);
     fade->setEndValue(1.0);
@@ -145,18 +135,19 @@ void NotificationToast::dismiss()
 
     auto* pos = new QPropertyAnimation(this, "pos", group);
     pos->setDuration(kFadeMs);
-    pos->setEndValue(this->pos() + QPoint(0, 24));
+    pos->setEndValue(position() + QPoint(0, 24));
     pos->setEasingCurve(QEasingCurve::InCubic);
     group->addAnimation(pos);
 
-    auto* fade = new QPropertyAnimation(this, "windowOpacity", group);
+    auto* fade = new QPropertyAnimation(this, "opacity", group);
     fade->setDuration(kFadeMs);
     fade->setEndValue(0.0);
     group->addAnimation(fade);
 
     connect(group, &QParallelAnimationGroup::finished, this, [this]() {
         emit closed(this);
-        close();   // WA_DeleteOnClose → deleteLater
+        close();
+        deleteLater(); // QWindow has no WA_DeleteOnClose equivalent
     });
     group->start(QAbstractAnimation::DeleteWhenStopped);
 }
@@ -173,14 +164,16 @@ void NotificationToast::requestDismiss()
     dismiss();
 }
 
-void NotificationToast::enterEvent(QEnterEvent* /*event*/)
+bool NotificationToast::event(QEvent* e)
 {
-    m_lifeTimer->stop();   // пока мышь над тостом — не исчезает
-}
-
-void NotificationToast::leaveEvent(QEvent* /*event*/)
-{
-    if (!m_dismissing) m_lifeTimer->start();
+    // QWindow has no enterEvent/leaveEvent virtuals like QWidget did —
+    // Enter/Leave arrive through the generic event() dispatcher instead.
+    if (e->type() == QEvent::Enter) {
+        m_lifeTimer->stop();   // пока мышь над тостом — не исчезает
+    } else if (e->type() == QEvent::Leave) {
+        if (!m_dismissing) m_lifeTimer->start();
+    }
+    return QQuickView::event(e);
 }
 
 // ============================================================
@@ -242,7 +235,7 @@ void NotificationManager::spawnToast(const QString& title, const QString& messag
     });
     m_toasts.append(toast);
 
-    // QQuickWidget's SizeViewToRootObject resize happens once the scene
+    // QQuickView's SizeViewToRootObject resize happens once the scene
     // graph has processed the QML root item's implicit size — not
     // synchronously within the constructor. Give it one event-loop tick
     // before reading height() to position the slide-in target.

@@ -11,15 +11,25 @@
 //     {"Да", "Нет"});
 //
 // Every toast is its own frameless, translucent, always-on-top
-// QQuickWidget window — one per notification, stacked in the
+// QQuickView window — one per notification, stacked in the
 // bottom-right corner. All visual design (glass panel, rounded
 // corners, blurred neon breathing border, the answer field) lives
 // in NotificationToast.qml; this header only owns lifecycle,
 // thread-safety and screen positioning.
+//
+// NB: this is QQuickView (a QWindow), not QQuickWidget. A standalone,
+// parentless, translucent, frameless top-level QQuickWidget does not
+// reliably composite on Windows — its RHI surface negotiates its own
+// format separately from the QWidget's WA_TranslucentBackground
+// attribute, so it can render fully but never blend against the desktop.
+// QQuickWidget is designed for *embedding* Quick content inside a normal
+// widget hierarchy (see TaskBoard.qml/TrainingCenter.qml/UserCenter.qml,
+// which are all embedded in a QDialog and render fine) — QQuickView is
+// Qt's actual supported primitive for a standalone top-level Quick popup.
 // -------------------------------------------------------
 
 #include <QObject>
-#include <QQuickWidget>
+#include <QQuickView>
 #include <QList>
 #include <QPointer>
 #include <QString>
@@ -29,9 +39,13 @@
 class QTimer;
 
 // ── Одно всплывающее окошко ─────────────────────────────
-class NotificationToast : public QQuickWidget
+class NotificationToast : public QQuickView
 {
     Q_OBJECT
+    // QWindow has x/y as separate properties but no combined QPoint one —
+    // this lets slideIn()/glideTo() keep animating a single "pos"
+    // property exactly like the old QWidget-based version did.
+    Q_PROPERTY(QPoint pos READ position WRITE setPosition)
 public:
     enum class Level { Info, Success, Warning, Error, Question };
 
@@ -52,8 +66,7 @@ signals:
     void closed(NotificationToast* toast);
 
 protected:
-    void enterEvent(QEnterEvent* event) override;
-    void leaveEvent(QEvent* event) override;
+    bool event(QEvent* e) override; // QWindow has no enterEvent/leaveEvent virtuals
 
 private:
     QTimer* m_lifeTimer  = nullptr;
