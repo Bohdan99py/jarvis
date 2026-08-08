@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.Theme
 
 // ============================================================
 // TaskBoard.qml — Kanban board visuals for TaskManagerDialog.
@@ -13,11 +14,11 @@ import QtQuick
 
 Rectangle {
     id: root
-    color: "#0B0C10"
+    color: Theme.bg
 
     readonly property bool en: boardEnglish
-    readonly property color cyan: "#66FCF1"
-    readonly property color teal: "#45A29E"
+    readonly property color cyan: Theme.accent
+    readonly property color teal: Theme.accentMuted
 
     function nextStatus(s) {
         return s === "Todo" ? "InProgress" : (s === "InProgress" ? "Done" : "")
@@ -62,7 +63,7 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     text: en ? "+ NEW TASK" : "+ ЗАДАЧА"
-                    color: "#0B0C10"
+                    color: Theme.bg
                     font.bold: true
                     font.pixelSize: 12
                 }
@@ -84,7 +85,7 @@ Rectangle {
                 Text {
                     text: en ? "Progress: %1 of %2 done".arg(boardDoneCount).arg(boardTotalCount)
                              : "Прогресс: %1 из %2 готово".arg(boardDoneCount).arg(boardTotalCount)
-                    color: "#8a95a5"
+                    color: Theme.onSurfaceVariant
                     font.pixelSize: 11
                 }
                 Item { width: parent.width - 260; height: 1 }
@@ -99,9 +100,9 @@ Rectangle {
                 width: parent.width
                 height: 8
                 radius: 4
-                color: Qt.rgba(102/255, 252/255, 241/255, 0.08)
+                color: Theme.outline
                 border.width: 1
-                border.color: Qt.rgba(102/255, 252/255, 241/255, 0.15)
+                border.color: Theme.accentSubtle
 
                 Rectangle {
                     id: fill
@@ -149,9 +150,9 @@ Rectangle {
                     width: (root.width - 32 - 24) / 3
                     height: parent.height
                     radius: 10
-                    color: Qt.rgba(15/255, 17/255, 22/255, 0.85)
+                    color: Theme.surface1
                     border.width: 1
-                    border.color: Qt.rgba(102/255, 252/255, 241/255, 0.12)
+                    border.color: Theme.accentSubtle
 
                     property string columnStatus: modelData.status
 
@@ -211,11 +212,11 @@ Rectangle {
                                         width: cardColumn.width
                                         height: cardCol.implicitHeight + 20
                                         radius: 8
-                                        color: overdue ? Qt.rgba(1, 82/255, 82/255, 0.10)
-                                                        : Qt.rgba(102/255, 252/255, 241/255, 0.05)
+                                        color: overdue ? Qt.alpha(Theme.error, 0.10)
+                                                        : Theme.outline
                                         border.width: 1
-                                        border.color: overdue ? Qt.rgba(1, 82/255, 82/255, 0.5)
-                                                               : Qt.rgba(102/255, 252/255, 241/255, 0.15)
+                                        border.color: overdue ? Qt.alpha(Theme.error, 0.5)
+                                                               : Theme.accentSubtle
 
                                         Rectangle {
                                             x: 0; y: 8
@@ -234,7 +235,7 @@ Rectangle {
                                             Text {
                                                 width: parent.width
                                                 text: title
-                                                color: "#e8f0fe"
+                                                color: Theme.onSurface
                                                 font.pixelSize: 12
                                                 font.bold: true
                                                 wrapMode: Text.WordWrap
@@ -243,7 +244,7 @@ Rectangle {
                                                 width: parent.width
                                                 text: category + " · " + priority
                                                       + (deadlineText.length > 0 ? " · " + deadlineText : "")
-                                                color: overdue ? "#ff5252" : "#8a95a5"
+                                                color: overdue ? Theme.error : Theme.onSurfaceVariant
                                                 font.pixelSize: 10
                                                 wrapMode: Text.WordWrap
                                             }
@@ -255,8 +256,8 @@ Rectangle {
                                                 Rectangle {
                                                     visible: root.prevStatus(columnStatus) !== ""
                                                     width: 22; height: 20; radius: 5
-                                                    color: prevArea.pressed ? Qt.rgba(102/255, 252/255, 241/255, 0.3)
-                                                                             : Qt.rgba(102/255, 252/255, 241/255, 0.12)
+                                                    color: prevArea.pressed ? Theme.outlineStrong
+                                                                             : Theme.accentSubtle
                                                     Text { anchors.centerIn: parent; text: "◀"; color: root.cyan; font.pixelSize: 10 }
                                                     MouseArea {
                                                         id: prevArea
@@ -268,8 +269,8 @@ Rectangle {
                                                 Rectangle {
                                                     visible: root.nextStatus(columnStatus) !== ""
                                                     width: 22; height: 20; radius: 5
-                                                    color: nextArea.pressed ? Qt.rgba(102/255, 252/255, 241/255, 0.3)
-                                                                             : Qt.rgba(102/255, 252/255, 241/255, 0.12)
+                                                    color: nextArea.pressed ? Theme.outlineStrong
+                                                                             : Theme.accentSubtle
                                                     Text { anchors.centerIn: parent; text: "▶"; color: root.cyan; font.pixelSize: 10 }
                                                     MouseArea {
                                                         id: nextArea

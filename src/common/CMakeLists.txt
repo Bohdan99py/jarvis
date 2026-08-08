@@ -8,6 +8,8 @@ add_library(jarvis_common OBJECT
     lang.h
     theme.h
     theme_manager.h
+    jarvis_theme.h
+    jarvis_theme.cpp
     context_snapshot.h
     embedded_key.h
     fileviewer.h
@@ -39,6 +41,7 @@ target_link_libraries(jarvis_common PUBLIC
     Qt6::Gui
     Qt6::Widgets
     Qt6::Concurrent
+    Qt6::Qml
     Qt6::Quick
     Qt6::QuickWidgets
     Qt6::QuickEffects

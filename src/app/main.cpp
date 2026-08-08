@@ -6,6 +6,7 @@
 #include "database_manager.h"
 #include "background_learner.h"
 #include "jarvis_paths.h"
+#include "jarvis_theme.h"
 
 #include <QApplication>
 #include <QFont>
@@ -58,7 +59,15 @@ int main(int argc, char* argv[])
     qInstallMessageHandler(fileMessageHandler);
 
     QApplication app(argc, argv);
-    app.setFont(QFont(QStringLiteral("Segoe UI"), 10));
+
+    // Дизайн-токены регистрируем до создания любого QQuickWidget —
+    // иначе QML-экраны стартуют с неразрешённым import Jarvis.Theme.
+    // Базовый шрифт берём из той же шкалы, что и QML: один источник
+    // правды и для виджетов, и для QML (см. jarvis_theme.h).
+    JarvisTheme::registerQmlTypes();
+    app.setFont(QFont(QStringLiteral("Segoe UI Variable Text"),
+                      JarvisType::instance().body() * 3 / 4)); // px -> pt @96dpi
+
     app.setApplicationName(QStringLiteral("Jarvis"));
     app.setApplicationVersion(QStringLiteral(JARVIS_VERSION));
     app.setOrganizationName(QStringLiteral("JARVIS Project"));

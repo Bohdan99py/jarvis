@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.Theme
 
 // ============================================================
 // OrganizePanel.qml — File Organizer plan review + rules editor.
@@ -12,13 +13,12 @@ import QtQuick
 
 Rectangle {
     id: root
-    color: "#0B0C10"
+    color: Theme.bg
 
     readonly property bool en: opEnglish
-    readonly property color cyan: "#66FCF1"
-    readonly property color teal: "#45A29E"
+    readonly property color cyan: Theme.accent
+    readonly property color teal: Theme.accentMuted
 
-    function rgba(r, g, b, a) { return Qt.rgba(r / 255, g / 255, b / 255, a) }
     function fmtSize(bytes) {
         if (bytes > 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB"
         if (bytes > 1024) return (bytes / 1024).toFixed(0) + " KB"
@@ -45,7 +45,7 @@ Rectangle {
             visible: opTargetFolder.length > 0
             width: parent.width
             text: opTargetFolder
-            color: "#8a95a5"
+            color: Theme.onSurfaceVariant
             font.pixelSize: 11
             elide: Text.ElideMiddle
         }
@@ -62,14 +62,14 @@ Rectangle {
                     width: tabTxt.implicitWidth + 24
                     height: 34
                     radius: 8
-                    color: root.currentTab === index ? root.rgba(102, 252, 241, 0.15) : "transparent"
+                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
                     border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : root.rgba(102, 252, 241, 0.15)
+                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
                     Text {
                         id: tabTxt
                         anchors.centerIn: parent
                         text: modelData
-                        color: root.currentTab === index ? root.cyan : "#8a95a5"
+                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
                         font.pixelSize: 12
                         font.bold: root.currentTab === index
                     }
@@ -123,14 +123,14 @@ Rectangle {
                                 radius: 7
                                 height: 24
                                 width: chipTxt.implicitWidth + 16
-                                color: unsorted ? root.rgba(255, 82, 82, 0.12) : root.rgba(102, 252, 241, 0.08)
+                                color: unsorted ? Qt.alpha(Theme.error, 0.12) : Theme.outline
                                 border.width: 1
-                                border.color: unsorted ? root.rgba(255, 82, 82, 0.4) : root.rgba(102, 252, 241, 0.2)
+                                border.color: unsorted ? Qt.alpha(Theme.error, 0.4) : Theme.accentSubtle
                                 Text {
                                     id: chipTxt
                                     anchors.centerIn: parent
                                     text: (unsorted ? "❓ " : "📁 ") + modelData.category + " · " + modelData.count
-                                    color: unsorted ? "#ff5252" : root.cyan
+                                    color: unsorted ? Theme.error : root.cyan
                                     font.pixelSize: 10
                                 }
                             }
@@ -157,9 +157,9 @@ Rectangle {
                                     width: itemsCol.width
                                     height: rowContent.height + 16
                                     radius: 8
-                                    color: modelData.confident ? root.rgba(102, 252, 241, 0.04) : root.rgba(255, 82, 82, 0.06)
+                                    color: modelData.confident ? Theme.outline : Qt.alpha(Theme.error, 0.06)
                                     border.width: 1
-                                    border.color: modelData.confident ? root.rgba(102, 252, 241, 0.12) : root.rgba(255, 82, 82, 0.25)
+                                    border.color: modelData.confident ? Theme.accentSubtle : Qt.alpha(Theme.error, 0.25)
 
                                     Column {
                                         id: rowContent
@@ -172,7 +172,7 @@ Rectangle {
                                             Text {
                                                 width: parent.width - 90
                                                 text: modelData.fileName
-                                                color: "#e8f0fe"
+                                                color: Theme.onSurface
                                                 font.pixelSize: 12
                                                 elide: Text.ElideMiddle
                                             }
@@ -180,7 +180,7 @@ Rectangle {
                                                 width: 90
                                                 horizontalAlignment: Text.AlignRight
                                                 text: root.fmtSize(modelData.sizeBytes)
-                                                color: "#8a95a5"
+                                                color: Theme.onSurfaceVariant
                                                 font.pixelSize: 10
                                             }
                                         }
@@ -189,12 +189,12 @@ Rectangle {
                                             Text {
                                                 text: (modelData.confident ? "📁 " : "❓ ") + modelData.category
                                                       + (modelData.subcategory.length > 0 ? " / " + modelData.subcategory : "")
-                                                color: modelData.confident ? root.teal : "#ff5252"
+                                                color: modelData.confident ? root.teal : Theme.error
                                                 font.pixelSize: 10
                                             }
                                             Text {
                                                 text: en ? "· change" : "· изменить"
-                                                color: root.rgba(102, 252, 241, 0.6)
+                                                color: Theme.accentMuted
                                                 font.pixelSize: 10
                                                 font.underline: true
                                                 MouseArea {
@@ -217,14 +217,14 @@ Rectangle {
                                                     radius: 6
                                                     height: 22
                                                     width: catTxt.implicitWidth + 14
-                                                    color: root.rgba(255, 255, 255, 0.06)
+                                                    color: Theme.outline
                                                     border.width: 1
-                                                    border.color: root.rgba(255, 255, 255, 0.15)
+                                                    border.color: Theme.outlineStrong
                                                     Text {
                                                         id: catTxt
                                                         anchors.centerIn: parent
                                                         text: modelData
-                                                        color: "#e8f0fe"
+                                                        color: Theme.onSurface
                                                         font.pixelSize: 10
                                                     }
                                                     MouseArea {
@@ -253,7 +253,7 @@ Rectangle {
                         Rectangle {
                             width: 130; height: 32; radius: 8
                             visible: opTargetFolder.length > 0
-                            color: rescanArea.pressed ? root.rgba(102, 252, 241, 0.3) : root.rgba(102, 252, 241, 0.12)
+                            color: rescanArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
                             border.width: 1; border.color: root.cyan
                             Text { anchors.centerIn: parent; text: en ? "🔄 Rescan" : "🔄 Пересканировать"; color: root.cyan; font.pixelSize: 11 }
                             MouseArea { id: rescanArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.rescan() }
@@ -261,16 +261,16 @@ Rectangle {
                         Item { width: Math.max(0, parent.width - 130 - 110 - 90 - 110 - 30); height: 1 }
                         Rectangle {
                             width: 110; height: 32; radius: 8
-                            color: undoArea.pressed ? root.rgba(255, 255, 255, 0.15) : root.rgba(255, 255, 255, 0.06)
-                            border.width: 1; border.color: root.rgba(255, 255, 255, 0.2)
-                            Text { anchors.centerIn: parent; text: en ? "↩ Undo Last" : "↩ Отменить"; color: "#c5c6c7"; font.pixelSize: 11 }
+                            color: undoArea.pressed ? Theme.outlineStrong : Theme.outline
+                            border.width: 1; border.color: Theme.outlineStrong
+                            Text { anchors.centerIn: parent; text: en ? "↩ Undo Last" : "↩ Отменить"; color: Theme.onSurfaceVariant; font.pixelSize: 11 }
                             MouseArea { id: undoArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.undoLast() }
                         }
                         Rectangle {
                             width: 90; height: 32; radius: 8
-                            color: cancelArea.pressed ? root.rgba(255, 82, 82, 0.3) : root.rgba(255, 82, 82, 0.12)
-                            border.width: 1; border.color: root.rgba(255, 82, 82, 0.4)
-                            Text { anchors.centerIn: parent; text: en ? "✕ Cancel" : "✕ Отмена"; color: "#ff5252"; font.pixelSize: 11 }
+                            color: cancelArea.pressed ? Qt.alpha(Theme.error, 0.3) : Qt.alpha(Theme.error, 0.12)
+                            border.width: 1; border.color: Qt.alpha(Theme.error, 0.4)
+                            Text { anchors.centerIn: parent; text: en ? "✕ Cancel" : "✕ Отмена"; color: Theme.error; font.pixelSize: 11 }
                             MouseArea { id: cancelArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.cancelDialog() }
                         }
                         Rectangle {
@@ -280,7 +280,7 @@ Rectangle {
                                 GradientStop { position: 0.0; color: root.teal }
                                 GradientStop { position: 1.0; color: root.cyan }
                             }
-                            Text { anchors.centerIn: parent; text: en ? "✅ Apply" : "✅ Применить"; color: "#0B0C10"; font.pixelSize: 12; font.bold: true }
+                            Text { anchors.centerIn: parent; text: en ? "✅ Apply" : "✅ Применить"; color: Theme.bg; font.pixelSize: 12; font.bold: true }
                             MouseArea { id: applyArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.apply() }
                         }
                     }
@@ -305,16 +305,16 @@ Rectangle {
                         Text {
                             text: en ? "Category rules — extensions and content-aware subcategories"
                                      : "Правила категорий — расширения и подкатегории по содержимому"
-                            color: "#8a95a5"
+                            color: Theme.onSurfaceVariant
                             font.pixelSize: 11
                             width: parent.width - 130
                             wrapMode: Text.WordWrap
                         }
                         Rectangle {
                             width: 120; height: 26; radius: 7
-                            color: resetArea.pressed ? root.rgba(255, 255, 255, 0.15) : root.rgba(255, 255, 255, 0.06)
-                            border.width: 1; border.color: root.rgba(255, 255, 255, 0.2)
-                            Text { anchors.centerIn: parent; text: en ? "Reset defaults" : "Сбросить"; color: "#c5c6c7"; font.pixelSize: 10 }
+                            color: resetArea.pressed ? Theme.outlineStrong : Theme.outline
+                            border.width: 1; border.color: Theme.outlineStrong
+                            Text { anchors.centerIn: parent; text: en ? "Reset defaults" : "Сбросить"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             MouseArea { id: resetArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.resetRules() }
                         }
                     }
@@ -337,9 +337,9 @@ Rectangle {
                                     width: rulesCol.width
                                     height: ruleContent.height + 20
                                     radius: 8
-                                    color: root.rgba(15, 17, 22, 0.85)
+                                    color: Theme.surface1
                                     border.width: 1
-                                    border.color: root.rgba(102, 252, 241, 0.12)
+                                    border.color: Theme.accentSubtle
 
                                     Column {
                                         id: ruleContent
@@ -358,25 +358,25 @@ Rectangle {
                                             }
                                             Rectangle {
                                                 width: 80; height: 22; radius: 6
-                                                color: removeArea.pressed ? root.rgba(255, 82, 82, 0.3) : root.rgba(255, 82, 82, 0.12)
-                                                border.width: 1; border.color: root.rgba(255, 82, 82, 0.4)
-                                                Text { anchors.centerIn: parent; text: en ? "Remove" : "Удалить"; color: "#ff5252"; font.pixelSize: 9 }
+                                                color: removeArea.pressed ? Qt.alpha(Theme.error, 0.3) : Qt.alpha(Theme.error, 0.12)
+                                                border.width: 1; border.color: Qt.alpha(Theme.error, 0.4)
+                                                Text { anchors.centerIn: parent; text: en ? "Remove" : "Удалить"; color: Theme.error; font.pixelSize: 9 }
                                                 MouseArea { id: removeArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.removeRule(modelData.category) }
                                             }
                                         }
 
-                                        Text { text: en ? "Extensions (comma-separated):" : "Расширения (через запятую):"; color: "#8a95a5"; font.pixelSize: 9 }
+                                        Text { text: en ? "Extensions (comma-separated):" : "Расширения (через запятую):"; color: Theme.onSurfaceVariant; font.pixelSize: 9 }
                                         Rectangle {
                                             width: parent.width; height: 28; radius: 6
-                                            color: root.rgba(255, 255, 255, 0.05)
+                                            color: Theme.outline
                                             border.width: 1
-                                            border.color: extInput.activeFocus ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                            border.color: extInput.activeFocus ? root.cyan : Theme.outlineStrong
                                             TextInput {
                                                 id: extInput
                                                 anchors.fill: parent
                                                 anchors.margins: 8
                                                 verticalAlignment: TextInput.AlignVCenter
-                                                color: "#e8f0fe"
+                                                color: Theme.onSurface
                                                 font.pixelSize: 11
                                                 text: modelData.extensions
                                                 selectByMouse: true
@@ -390,11 +390,11 @@ Rectangle {
                                                 id: ctxToggle
                                                 property bool checked: modelData.contextAware
                                                 width: 36; height: 20; radius: 10
-                                                color: checked ? root.teal : root.rgba(255, 255, 255, 0.15)
+                                                color: checked ? root.teal : Theme.outlineStrong
                                                 Behavior on color { ColorAnimation { duration: 150 } }
                                                 Rectangle {
                                                     width: 16; height: 16; radius: 8
-                                                    color: "#0B0C10"
+                                                    color: Theme.bg
                                                     x: ctxToggle.checked ? parent.width - width - 2 : 2
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     Behavior on x { NumberAnimation { duration: 150 } }
@@ -410,7 +410,7 @@ Rectangle {
                                             }
                                             Text {
                                                 text: en ? "Content-aware subcategories" : "Подкатегории по содержимому"
-                                                color: "#c5c6c7"
+                                                color: Theme.onSurfaceVariant
                                                 font.pixelSize: 10
                                                 anchors.verticalCenter: parent.verticalCenter
                                             }
@@ -420,18 +420,18 @@ Rectangle {
                                             width: parent.width
                                             spacing: 4
                                             visible: ctxToggle.checked
-                                            Text { text: en ? "Subcategories (comma-separated):" : "Подкатегории (через запятую):"; color: "#8a95a5"; font.pixelSize: 9 }
+                                            Text { text: en ? "Subcategories (comma-separated):" : "Подкатегории (через запятую):"; color: Theme.onSurfaceVariant; font.pixelSize: 9 }
                                             Rectangle {
                                                 width: parent.width; height: 28; radius: 6
-                                                color: root.rgba(255, 255, 255, 0.05)
+                                                color: Theme.outline
                                                 border.width: 1
-                                                border.color: subInput.activeFocus ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                                border.color: subInput.activeFocus ? root.cyan : Theme.outlineStrong
                                                 TextInput {
                                                     id: subInput
                                                     anchors.fill: parent
                                                     anchors.margins: 8
                                                     verticalAlignment: TextInput.AlignVCenter
-                                                    color: "#e8f0fe"
+                                                    color: Theme.onSurface
                                                     font.pixelSize: 11
                                                     text: modelData.subcategories
                                                     selectByMouse: true
@@ -453,22 +453,22 @@ Rectangle {
                             width: parent.width - 128
                             height: 32
                             radius: 8
-                            color: root.rgba(255, 255, 255, 0.05)
+                            color: Theme.outline
                             border.width: 1
-                            border.color: newCatInput.activeFocus ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                            border.color: newCatInput.activeFocus ? root.cyan : Theme.outlineStrong
                             TextInput {
                                 id: newCatInput
                                 anchors.fill: parent
                                 anchors.margins: 10
                                 verticalAlignment: TextInput.AlignVCenter
-                                color: "#e8f0fe"
+                                color: Theme.onSurface
                                 font.pixelSize: 12
                                 selectByMouse: true
                             }
                             Text {
                                 text: en ? "New category name..." : "Название новой категории..."
                                 visible: newCatInput.text.length === 0 && !newCatInput.activeFocus
-                                color: root.rgba(255, 255, 255, 0.3)
+                                color: Theme.onSurfaceDim
                                 anchors.left: parent.left
                                 anchors.leftMargin: 10
                                 anchors.verticalCenter: parent.verticalCenter
@@ -477,7 +477,7 @@ Rectangle {
                         }
                         Rectangle {
                             width: 110; height: 32; radius: 8
-                            color: addArea.pressed ? root.rgba(102, 252, 241, 0.3) : root.rgba(102, 252, 241, 0.12)
+                            color: addArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
                             border.width: 1; border.color: root.cyan
                             Text { anchors.centerIn: parent; text: en ? "+ Add" : "+ Добавить"; color: root.cyan; font.pixelSize: 11 }
                             MouseArea {

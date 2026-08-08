@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.Theme
 
 // ============================================================
 // TrainingCenter.qml — Training & Dataset Center dashboard.
@@ -11,14 +12,13 @@ import QtQuick
 
 Rectangle {
     id: root
-    color: "#0B0C10"
+    color: Theme.bg
 
     readonly property bool en: tcEnglish
-    readonly property color cyan: "#66FCF1"
-    readonly property color teal: "#45A29E"
-    readonly property color violet: "#7c4dff"
+    readonly property color cyan: Theme.accent
+    readonly property color teal: Theme.accentMuted
+    readonly property color violet: Theme.info
 
-    function rgba(r, g, b, a) { return Qt.rgba(r / 255, g / 255, b / 255, a) }
 
     property int currentTab: initialTab
 
@@ -53,14 +53,14 @@ Rectangle {
                     width: tabText.implicitWidth + 24
                     height: 34
                     radius: 8
-                    color: root.currentTab === index ? root.rgba(102, 252, 241, 0.15) : "transparent"
+                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
                     border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : root.rgba(102, 252, 241, 0.15)
+                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
                     Text {
                         id: tabText
                         anchors.centerIn: parent
                         text: modelData
-                        color: root.currentTab === index ? root.cyan : "#8a95a5"
+                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
                         font.pixelSize: 12
                         font.bold: root.currentTab === index
                     }
@@ -118,11 +118,11 @@ Rectangle {
                             var cx = width / 2, cy = height / 2, r = width / 2 - 10
                             ctx.lineWidth = 10
                             ctx.lineCap = "round"
-                            ctx.strokeStyle = "rgba(102,252,241,0.12)"
+                            ctx.strokeStyle = "Theme.accentSubtle"
                             ctx.beginPath()
                             ctx.arc(cx, cy, r, 0, Math.PI * 2)
                             ctx.stroke()
-                            ctx.strokeStyle = "#66FCF1"
+                            ctx.strokeStyle = Theme.accent
                             ctx.beginPath()
                             ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2)
                             ctx.stroke()
@@ -140,7 +140,7 @@ Rectangle {
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: en ? "of goal" : "от цели"
-                                color: "#8a95a5"
+                                color: Theme.onSurfaceVariant
                                 font.pixelSize: 10
                             }
                         }
@@ -156,22 +156,22 @@ Rectangle {
                         Row {
                             spacing: 28
                             Column {
-                                Text { text: datasetTotal; color: "#e8f0fe"; font.pixelSize: 20; font.bold: true }
-                                Text { text: en ? "pairs saved" : "пар сохранено"; color: "#8a95a5"; font.pixelSize: 10 }
+                                Text { text: datasetTotal; color: Theme.onSurface; font.pixelSize: 20; font.bold: true }
+                                Text { text: en ? "pairs saved" : "пар сохранено"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             }
                             Column {
                                 Text { text: datasetLiked; color: root.cyan; font.pixelSize: 20; font.bold: true }
-                                Text { text: en ? "liked (👍)" : "лайкнуто (👍)"; color: "#8a95a5"; font.pixelSize: 10 }
+                                Text { text: en ? "liked (👍)" : "лайкнуто (👍)"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             }
                             Column {
-                                Text { text: datasetGoal; color: "#8a95a5"; font.pixelSize: 20; font.bold: true }
-                                Text { text: en ? "goal" : "цель"; color: "#8a95a5"; font.pixelSize: 10 }
+                                Text { text: datasetGoal; color: Theme.onSurfaceVariant; font.pixelSize: 20; font.bold: true }
+                                Text { text: en ? "goal" : "цель"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             }
                         }
 
                         Rectangle {
                             width: 160; height: 32; radius: 8
-                            color: exportArea.pressed ? root.rgba(102, 252, 241, 0.3) : root.rgba(102, 252, 241, 0.12)
+                            color: exportArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
                             border.width: 1
                             border.color: root.cyan
                             Text {
@@ -196,9 +196,9 @@ Rectangle {
                     width: parent.width
                     height: 150
                     radius: 10
-                    color: root.rgba(15, 17, 22, 0.85)
+                    color: Theme.surface1
                     border.width: 1
-                    border.color: root.rgba(102, 252, 241, 0.12)
+                    border.color: Theme.accentSubtle
 
                     Column {
                         anchors.fill: parent
@@ -213,7 +213,7 @@ Rectangle {
                                 spacing: 6
                                 Text {
                                     text: en ? "Recording:" : "Запись:"
-                                    color: "#8a95a5"
+                                    color: Theme.onSurfaceVariant
                                     font.pixelSize: 11
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
@@ -223,11 +223,11 @@ Rectangle {
                                     // it can never drift out of sync with the real backend state.
                                     width: 44; height: 22; radius: 11
                                     anchors.verticalCenter: parent.verticalCenter
-                                    color: recordingActive ? root.teal : root.rgba(255, 255, 255, 0.15)
+                                    color: recordingActive ? root.teal : Theme.outlineStrong
                                     Behavior on color { ColorAnimation { duration: 150 } }
                                     Rectangle {
                                         width: 18; height: 18; radius: 9
-                                        color: "#ffffff"
+                                        color: Theme.onSurface
                                         y: 2
                                         x: recordingActive ? parent.width - width - 2 : 2
                                         Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -246,7 +246,7 @@ Rectangle {
                             width: parent.width
                             height: 10
                             radius: 5
-                            color: root.rgba(255, 255, 255, 0.06)
+                            color: Theme.outline
                             Row {
                                 anchors.fill: parent
                                 Rectangle {
@@ -263,16 +263,16 @@ Rectangle {
                         Row {
                             spacing: 28
                             Column {
-                                Text { text: journalTotal; color: "#e8f0fe"; font.pixelSize: 16; font.bold: true }
-                                Text { text: en ? "recorded" : "записано"; color: "#8a95a5"; font.pixelSize: 10 }
+                                Text { text: journalTotal; color: Theme.onSurface; font.pixelSize: 16; font.bold: true }
+                                Text { text: en ? "recorded" : "записано"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             }
                             Column {
                                 Text { text: journalDone; color: root.teal; font.pixelSize: 16; font.bold: true }
-                                Text { text: en ? "processed" : "обработано"; color: "#8a95a5"; font.pixelSize: 10 }
+                                Text { text: en ? "processed" : "обработано"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             }
                             Column {
-                                Text { text: journalPending; color: "#FFD740"; font.pixelSize: 16; font.bold: true }
-                                Text { text: en ? "pending" : "в ожидании"; color: "#8a95a5"; font.pixelSize: 10 }
+                                Text { text: journalPending; color: Theme.warning; font.pixelSize: 16; font.bold: true }
+                                Text { text: en ? "pending" : "в ожидании"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             }
                         }
                     }
@@ -281,9 +281,9 @@ Rectangle {
                 Rectangle {
                     y: 340
                     width: 130; height: 30; radius: 6
-                    color: refreshArea.pressed ? root.rgba(102, 252, 241, 0.25) : root.rgba(102, 252, 241, 0.1)
+                    color: refreshArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
                     border.width: 1
-                    border.color: root.rgba(102, 252, 241, 0.3)
+                    border.color: Theme.outlineStrong
                     Text {
                         anchors.centerIn: parent
                         text: (en ? "🔄 Refresh" : "🔄 Обновить")
@@ -316,7 +316,7 @@ Rectangle {
                         width: parent.width
                         Text {
                             text: (en ? "Total records: " : "Всего записей: ") + appUsageTotal
-                            color: "#c5c6c7"
+                            color: Theme.onSurfaceVariant
                             font.pixelSize: 12
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -325,18 +325,18 @@ Rectangle {
                             spacing: 6
                             Text {
                                 text: en ? "Enable learning:" : "Включить обучение:"
-                                color: "#8a95a5"
+                                color: Theme.onSurfaceVariant
                                 font.pixelSize: 11
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Rectangle {
                                 width: 44; height: 22; radius: 11
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: appLearningEnabled ? root.teal : root.rgba(255, 255, 255, 0.15)
+                                color: appLearningEnabled ? root.teal : Theme.outlineStrong
                                 Behavior on color { ColorAnimation { duration: 150 } }
                                 Rectangle {
                                     width: 18; height: 18; radius: 9
-                                    color: "#ffffff"
+                                    color: Theme.onSurface
                                     y: 2
                                     x: appLearningEnabled ? parent.width - width - 2 : 2
                                     Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -349,14 +349,14 @@ Rectangle {
                             }
                             Rectangle {
                                 width: 90; height: 26; radius: 6
-                                color: clearArea.pressed ? root.rgba(255, 82, 82, 0.3) : root.rgba(255, 82, 82, 0.12)
+                                color: clearArea.pressed ? Qt.alpha(Theme.error, 0.3) : Qt.alpha(Theme.error, 0.12)
                                 border.width: 1
-                                border.color: root.rgba(255, 82, 82, 0.4)
+                                border.color: Qt.alpha(Theme.error, 0.4)
                                 anchors.verticalCenter: parent.verticalCenter
                                 Text {
                                     anchors.centerIn: parent
                                     text: en ? "Clear data" : "Очистить"
-                                    color: "#ff5252"
+                                    color: Theme.error
                                     font.pixelSize: 10
                                 }
                                 MouseArea {
@@ -369,7 +369,7 @@ Rectangle {
                         }
                     }
 
-                    Text { text: en ? "Predictions for now" : "Предсказания на сейчас"; color: "#2ecc71"; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
+                    Text { text: en ? "Predictions for now" : "Предсказания на сейчас"; color: Theme.success; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
 
                     Flickable {
                         width: parent.width
@@ -387,7 +387,7 @@ Rectangle {
                                 visible: appPredictions.length === 0
                                 text: en ? "Not enough data yet. Keep using your PC!"
                                          : "Ещё мало данных. Продолжайте использовать ПК!"
-                                color: "#8a95a5"
+                                color: Theme.onSurfaceVariant
                                 font.pixelSize: 11
                             }
 
@@ -399,7 +399,7 @@ Rectangle {
                                     Text {
                                         width: 140
                                         text: modelData.name
-                                        color: "#e8f0fe"
+                                        color: Theme.onSurface
                                         font.pixelSize: 12
                                         elide: Text.ElideRight
                                     }
@@ -408,19 +408,19 @@ Rectangle {
                                         height: 14
                                         radius: 4
                                         anchors.verticalCenter: parent.verticalCenter
-                                        color: root.rgba(255, 255, 255, 0.06)
+                                        color: Theme.outline
                                         Rectangle {
                                             width: parent.width * modelData.confidence
                                             height: parent.height
                                             radius: 4
-                                            color: modelData.confidence >= 0.5 ? "#2ecc71" : root.teal
+                                            color: modelData.confidence >= 0.5 ? Theme.success : root.teal
                                             Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
                                         }
                                     }
                                     Text {
                                         width: 50
                                         text: Math.round(modelData.confidence * 100) + "% ×" + modelData.frequency
-                                        color: "#8a95a5"
+                                        color: Theme.onSurfaceVariant
                                         font.pixelSize: 9
                                     }
                                 }
@@ -428,7 +428,7 @@ Rectangle {
                         }
                     }
 
-                    Text { text: en ? "Today's usage" : "Сегодня"; color: "#3498db"; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
+                    Text { text: en ? "Today's usage" : "Сегодня"; color: Theme.info; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
 
                     Flickable {
                         width: parent.width
@@ -445,7 +445,7 @@ Rectangle {
                             Text {
                                 visible: appToday.length === 0
                                 text: en ? "No data for today" : "Нет данных за сегодня"
-                                color: "#8a95a5"
+                                color: Theme.onSurfaceVariant
                                 font.pixelSize: 11
                             }
 
@@ -457,7 +457,7 @@ Rectangle {
                                     Text {
                                         width: 140
                                         text: modelData.name
-                                        color: "#e8f0fe"
+                                        color: Theme.onSurface
                                         font.pixelSize: 12
                                         elide: Text.ElideRight
                                     }
@@ -466,12 +466,12 @@ Rectangle {
                                         height: 14
                                         radius: 4
                                         anchors.verticalCenter: parent.verticalCenter
-                                        color: root.rgba(255, 255, 255, 0.06)
+                                        color: Theme.outline
                                         Rectangle {
                                             width: parent.width * modelData.fraction
                                             height: parent.height
                                             radius: 4
-                                            color: "#3498db"
+                                            color: Theme.info
                                             Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
                                         }
                                     }
@@ -479,7 +479,7 @@ Rectangle {
                                         width: 100
                                         text: modelData.minutes + " " + (en ? "min" : "мин")
                                               + " · " + modelData.sessions + (en ? " sess." : " сесс.")
-                                        color: "#8a95a5"
+                                        color: Theme.onSurfaceVariant
                                         font.pixelSize: 9
                                     }
                                 }
@@ -507,14 +507,14 @@ Rectangle {
                         visible: !ollamaAvailable
                         text: en ? "⚠️ Ollama not found — install from ollama.com, then reopen this dialog."
                                  : "⚠️ Ollama не найдена — установите с ollama.com и откройте это окно заново."
-                        color: "#ff5252"
+                        color: Theme.error
                         font.pixelSize: 11
                         wrapMode: Text.WordWrap
                     }
 
                     Text {
                         text: (en ? "👍 Liked responses available: " : "👍 Лайкнутых ответов: ") + likedCount
-                        color: "#c5c6c7"
+                        color: Theme.onSurfaceVariant
                         font.pixelSize: 12
                     }
 
@@ -529,14 +529,14 @@ Rectangle {
                                 radius: 8
                                 height: 28
                                 width: modelTxt.implicitWidth + 20
-                                color: modelData === selectedModel ? root.rgba(102, 252, 241, 0.25) : root.rgba(255, 255, 255, 0.06)
+                                color: modelData === selectedModel ? Theme.outlineStrong : Theme.outline
                                 border.width: 1
-                                border.color: modelData === selectedModel ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                border.color: modelData === selectedModel ? root.cyan : Theme.outlineStrong
                                 Text {
                                     id: modelTxt
                                     anchors.centerIn: parent
                                     text: modelData
-                                    color: "#e8f0fe"
+                                    color: Theme.onSurface
                                     font.pixelSize: 11
                                 }
                                 MouseArea {
@@ -564,14 +564,14 @@ Rectangle {
                                 radius: 8
                                 height: 28
                                 width: exTxt.implicitWidth + 20
-                                color: modelData.value === maxExamples ? root.rgba(102, 252, 241, 0.25) : root.rgba(255, 255, 255, 0.06)
+                                color: modelData.value === maxExamples ? Theme.outlineStrong : Theme.outline
                                 border.width: 1
-                                border.color: modelData.value === maxExamples ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                border.color: modelData.value === maxExamples ? root.cyan : Theme.outlineStrong
                                 Text {
                                     id: exTxt
                                     anchors.centerIn: parent
                                     text: modelData.label
-                                    color: "#e8f0fe"
+                                    color: Theme.onSurface
                                     font.pixelSize: 11
                                 }
                                 MouseArea {
@@ -587,9 +587,9 @@ Rectangle {
                         width: 180; height: 36; radius: 8
                         enabled: likedCount > 0 && ollamaAvailable && !trainingActive
                         opacity: enabled ? 1 : 0.4
-                        color: trainBtnArea.pressed ? "#00897b" : "#00695c"
+                        color: trainBtnArea.pressed ? Theme.accentMuted : Theme.accentMuted
                         border.width: 1
-                        border.color: "#00897b"
+                        border.color: Theme.accentMuted
 
                         // Gentle pulse while training is running
                         SequentialAnimation on opacity {
@@ -604,7 +604,7 @@ Rectangle {
                             text: trainingActive
                                   ? (en ? "⏳ Training..." : "⏳ Обучение...")
                                   : (en ? "🚀 Start Training" : "🚀 Начать обучение")
-                            color: "#ffffff"
+                            color: Theme.onSurface
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -621,9 +621,9 @@ Rectangle {
                         width: parent.width
                         height: parent.height - y
                         radius: 8
-                        color: root.rgba(13, 26, 40, 0.9)
+                        color: Theme.surface2
                         border.width: 1
-                        border.color: root.rgba(102, 252, 241, 0.15)
+                        border.color: Theme.accentSubtle
                         clip: true
 
                         Flickable {
@@ -641,7 +641,7 @@ Rectangle {
                                 width: logFlick.width
                                 text: trainingLog.length > 0 ? trainingLog
                                       : (en ? "Training log will appear here..." : "Здесь появится лог обучения...")
-                                color: "#95a5a6"
+                                color: Theme.onSurfaceDim
                                 font.family: "Consolas"
                                 font.pixelSize: 10
                                 wrapMode: Text.WordWrap
@@ -668,9 +668,9 @@ Rectangle {
                         width: parent.width
                         height: 34
                         radius: 8
-                        color: root.rgba(255, 255, 255, 0.05)
+                        color: Theme.outline
                         border.width: 1
-                        border.color: searchInput.activeFocus ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                        border.color: searchInput.activeFocus ? root.cyan : Theme.outlineStrong
 
                         TextInput {
                             id: searchInput
@@ -678,7 +678,7 @@ Rectangle {
                             anchors.leftMargin: 12
                             anchors.rightMargin: 36
                             verticalAlignment: TextInput.AlignVCenter
-                            color: "#e8f0fe"
+                            color: Theme.onSurface
                             font.pixelSize: 12
                             clip: true
                             selectByMouse: true
@@ -687,7 +687,7 @@ Rectangle {
                         Text {
                             text: en ? "Search chat history..." : "Поиск по истории чатов..."
                             visible: searchInput.text.length === 0 && !searchInput.activeFocus
-                            color: root.rgba(255, 255, 255, 0.3)
+                            color: Theme.onSurfaceDim
                             anchors.left: parent.left
                             anchors.leftMargin: 12
                             anchors.verticalCenter: parent.verticalCenter
@@ -733,9 +733,9 @@ Rectangle {
                                     width: resultsCol.width
                                     height: resultCol.implicitHeight + 16
                                     radius: 8
-                                    color: root.rgba(102, 252, 241, 0.04)
+                                    color: Theme.outline
                                     border.width: 1
-                                    border.color: root.rgba(102, 252, 241, 0.12)
+                                    border.color: Theme.accentSubtle
 
                                     Column {
                                         id: resultCol
@@ -745,7 +745,7 @@ Rectangle {
                                         Text {
                                             width: parent.width
                                             text: "▶ " + modelData.userMessage
-                                            color: "#e8f0fe"
+                                            color: Theme.onSurface
                                             font.pixelSize: 11
                                             font.bold: true
                                             wrapMode: Text.WordWrap
@@ -755,7 +755,7 @@ Rectangle {
                                         Text {
                                             width: parent.width
                                             text: modelData.aiResponse
-                                            color: "#8a95a5"
+                                            color: Theme.onSurfaceVariant
                                             font.pixelSize: 10
                                             wrapMode: Text.WordWrap
                                             maximumLineCount: 3

@@ -1,65 +1,86 @@
 import QtQuick
 import QtQuick.Effects
+import Jarvis.Theme
 
 // ============================================================
-// NotificationToast.qml — visual layer for the neon toast.
+// NotificationToast.qml — visual layer for the toast.
 //
-// Everything about how it LOOKS lives here: glass panel, rounded
-// corners, blurred neon glow that breathes, the optional free-text
-// answer field and quick-reply pills. All state comes in from C++
-// via rootContext properties (toastTitle/toastMessage/toastAccentColor/
-// toastAnswerable/toastQuickOptions) and the "toast" object, whose
-// invokable methods (submitAnswer/requestDismiss) are the only way
-// this file talks back to C++.
+// Everything about how it LOOKS lives here. All state comes in from
+// C++ via rootContext properties (toastTitle/toastMessage/
+// toastAccentColor/toastAnswerable/toastQuickOptions) and the "toast"
+// object, whose invokable methods (submitAnswer/requestDismiss) are
+// the only way this file talks back to C++.
+//
+// Дизайн: карточка поднята над фоном ступенью поверхности и мягкой
+// тенью, а не пульсирующей неоновой обводкой. Бесконечная пульсация
+// убрана намеренно — анимация без конца тянет внимание на себя
+// постоянно, хотя уведомление важно ровно в момент появления.
+// Вместо неё однократное появление со смещением: движение сообщает
+// «я только что пришло» и затихает.
 // ============================================================
 
 Item {
     id: root
     width: 372
-    height: card.height + 16
+    height: card.height + 20
 
+    // Цвет-акцент приходит из C++ (разный для типов уведомлений).
+    // Если не задан — берём фирменный из токенов.
     readonly property color accent: toastAccentColor
+                                    && String(toastAccentColor).length > 0
+                                    ? toastAccentColor : Theme.accent
 
-    // Breathing phase 0..1..0, drives the glow's opacity/brightness
-    property real glow: 0.0
-    SequentialAnimation on glow {
-        loops: Animation.Infinite
-        NumberAnimation { from: 0.0; to: 1.0; duration: 1400; easing.type: Easing.InOutSine }
-        NumberAnimation { from: 1.0; to: 0.0; duration: 1400; easing.type: Easing.InOutSine }
+    // ---- Появление: сдвиг + проявление ----
+    // Замедляющееся easing (быстрый старт, мягкая остановка) читается
+    // как «прилетело и встало», а не «выскочило».
+    opacity: 0
+    transform: Translate { id: slide; x: 24 }
+    Component.onCompleted: appear.start()
+    ParallelAnimation {
+        id: appear
+        NumberAnimation {
+            target: root; property: "opacity"; to: 1.0
+            duration: Theme.motionBase * Theme.motionScale
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: slide; property: "x"; to: 0
+            duration: Theme.motionBase * Theme.motionScale
+            easing.type: Easing.OutCubic
+        }
     }
 
-    // ---- Blurred neon glow behind the glass card ----
+    // ---- Мягкая тень для отрыва от фона ----
+    // Заменяет неоновое свечение: даёт глубину, не претендуя на внимание.
     Rectangle {
-        id: glowSource
+        id: shadowSource
         anchors.fill: card
-        anchors.margins: -5
-        radius: card.radius + 5
-        color: "transparent"
-        border.width: 3
-        border.color: root.accent
-        opacity: 0.30 + 0.40 * root.glow
+        radius: card.radius
+        color: "#000000"
         visible: false
     }
     MultiEffect {
-        anchors.fill: glowSource
-        source: glowSource
+        anchors.fill: shadowSource
+        source: shadowSource
         blurEnabled: true
-        blur: 0.7
-        blurMax: 48
+        blur: 0.55
+        blurMax: 28
+        opacity: 0.55
         autoPaddingEnabled: true
+        z: -1
     }
 
-    // ---- Glass card ----
+    // ---- Карточка ----
     Rectangle {
         id: card
-        x: 8
+        x: 10
         y: 8
-        width: root.width - 16
-        height: column.implicitHeight + 24
-        radius: 14
-        color: Qt.rgba(12 / 255, 18 / 255, 30 / 255, 0.93)
-        border.width: 1.4
-        border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.45 + 0.45 * root.glow)
+        width: root.width - 20
+        height: column.implicitHeight + 2 * Theme.spaceLg
+        radius: Theme.radiusLg
+        color: Theme.surface3
+        border.width: 1
+        border.color: Theme.outlineStrong
         clip: true
 
         // Click-anywhere-to-dismiss background — declared first so it sits
@@ -71,56 +92,62 @@ Item {
             onClicked: toast.requestDismiss()
         }
 
-        // Accent bar, cyan -> violet gradient
+        // Полоса типа уведомления. Сплошной акцент вместо градиента
+        // в фиолетовый: градиент здесь ничего не сообщал, а два цвета
+        // на 3 пикселях читаются как грязь.
         Rectangle {
-            x: 10
-            y: 12
+            x: 0
+            y: 0
             width: 3
-            height: parent.height - 24
-            radius: 1.5
-            gradient: Gradient {
-                orientation: Gradient.Vertical
-                GradientStop { position: 0.0; color: root.accent }
-                GradientStop { position: 1.0; color: "#7c4dff" }
-            }
+            height: parent.height
+            color: root.accent
         }
 
         // Close button
         Text {
             id: closeGlyph
             text: "✕"
-            color: Qt.rgba(1, 1, 1, 0.35)
-            font.pixelSize: 12
+            color: closeArea.containsMouse ? Theme.onSurface : Theme.onSurfaceDim
+            font.pixelSize: Type.caption
             anchors.top: parent.top
             anchors.right: parent.right
-            anchors.margins: 10
+            anchors.margins: Theme.spaceMd
+            Behavior on color {
+                ColorAnimation { duration: Theme.motionFast * Theme.motionScale }
+            }
             MouseArea {
+                id: closeArea
                 anchors.fill: parent
-                anchors.margins: -8
+                anchors.margins: -10   // добираем до комфортной зоны нажатия
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
                 onClicked: toast.requestDismiss()
             }
         }
 
         Column {
             id: column
-            x: 24
-            y: 12
-            width: parent.width - 24 - 22
-            spacing: 6
+            x: Theme.spaceLg + 4
+            y: Theme.spaceLg
+            width: parent.width - (Theme.spaceLg + 4) - Theme.spaceXl
+            spacing: Theme.spaceSm
 
             Text {
                 text: toastTitle
-                color: root.accent
-                font.pixelSize: 14
-                font.bold: true
-                font.family: "Segoe UI Semibold"
+                color: Theme.onSurface
+                font.pixelSize: Type.body
+                font.weight: Font.DemiBold
+                font.family: Type.family
                 width: parent.width
                 wrapMode: Text.WordWrap
             }
             Text {
                 text: toastMessage
-                color: "#c0d8ee"
-                font.pixelSize: 12
+                color: Theme.onSurfaceVariant
+                font.pixelSize: Type.caption
+                font.family: Type.family
+                lineHeight: Type.lineHeightBody
+                lineHeightMode: Text.ProportionalHeight
                 width: parent.width
                 wrapMode: Text.WordWrap
             }
@@ -128,30 +155,39 @@ Item {
             // Quick-reply pills (e.g. Yes/No)
             Row {
                 visible: toastQuickOptions.length > 0
-                spacing: 8
+                spacing: Theme.spaceSm
+                topPadding: Theme.spaceXs
 
                 Repeater {
                     model: toastQuickOptions
                     delegate: Rectangle {
-                        radius: 8
-                        width: pillText.implicitWidth + 20
-                        height: 26
-                        color: pillArea.pressed
-                            ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
-                            : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.15)
+                        radius: Theme.radiusSm
+                        width: pillText.implicitWidth + 2 * Theme.spaceMd
+                        height: Theme.hitTarget
+                        color: pillArea.pressed ? Theme.accentSubtle
+                             : pillArea.containsMouse ? Theme.surface2
+                             : "transparent"
                         border.width: 1
-                        border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.55)
+                        border.color: pillArea.containsMouse
+                                      ? Theme.accent : Theme.outlineStrong
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.motionFast * Theme.motionScale }
+                        }
 
                         Text {
                             id: pillText
                             anchors.centerIn: parent
                             text: modelData
-                            color: "#e8f0fe"
-                            font.pixelSize: 12
+                            color: Theme.onSurface
+                            font.pixelSize: Type.caption
+                            font.family: Type.family
                         }
                         MouseArea {
                             id: pillArea
                             anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: toast.submitAnswer(modelData)
                         }
                     }
@@ -163,22 +199,25 @@ Item {
                 id: answerBox
                 visible: toastAnswerable
                 width: parent.width
-                height: 34
-                radius: 8
-                color: Qt.rgba(1, 1, 1, 0.05)
+                height: Theme.hitTarget + 4
+                radius: Theme.radiusSm
+                color: Theme.surface2
                 border.width: 1
-                border.color: input.activeFocus
-                    ? root.accent
-                    : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.30)
+                border.color: input.activeFocus ? Theme.accent : Theme.outline
+
+                Behavior on border.color {
+                    ColorAnimation { duration: Theme.motionFast * Theme.motionScale }
+                }
 
                 TextInput {
                     id: input
                     anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 32
+                    anchors.leftMargin: Theme.spaceMd
+                    anchors.rightMargin: Theme.spaceXxl
                     verticalAlignment: TextInput.AlignVCenter
-                    color: "#e8f0fe"
-                    font.pixelSize: 12
+                    color: Theme.onSurface
+                    font.pixelSize: Type.caption
+                    font.family: Type.family
                     clip: true
                     selectByMouse: true
                     onAccepted: {
@@ -191,22 +230,26 @@ Item {
                 Text {
                     text: toastPlaceholder
                     visible: input.text.length === 0 && !input.activeFocus
-                    color: Qt.rgba(1, 1, 1, 0.30)
+                    color: Theme.onSurfaceDim
                     anchors.left: parent.left
-                    anchors.leftMargin: 10
+                    anchors.leftMargin: Theme.spaceMd
                     anchors.verticalCenter: parent.verticalCenter
-                    font.pixelSize: 12
+                    font.pixelSize: Type.caption
+                    font.family: Type.family
                 }
                 Text {
                     text: "➤"
-                    color: root.accent
+                    color: sendArea.containsMouse ? Theme.accent : Theme.onSurfaceVariant
                     anchors.right: parent.right
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: Theme.spaceMd
                     anchors.verticalCenter: parent.verticalCenter
-                    font.pixelSize: 13
+                    font.pixelSize: Type.caption
                     MouseArea {
+                        id: sendArea
                         anchors.fill: parent
-                        anchors.margins: -8
+                        anchors.margins: -10
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             if (input.text.trim().length > 0) {
                                 toast.submitAnswer(input.text)

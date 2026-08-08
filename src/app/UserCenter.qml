@@ -1,4 +1,5 @@
 import QtQuick
+import Jarvis.Theme
 
 // ============================================================
 // UserCenter.qml — User Center dashboard.
@@ -11,13 +12,12 @@ import QtQuick
 
 Rectangle {
     id: root
-    color: "#0B0C10"
+    color: Theme.bg
 
     readonly property bool en: ucEnglish
-    readonly property color cyan: "#66FCF1"
-    readonly property color teal: "#45A29E"
+    readonly property color cyan: Theme.accent
+    readonly property color teal: Theme.accentMuted
 
-    function rgba(r, g, b, a) { return Qt.rgba(r / 255, g / 255, b / 255, a) }
 
     property int currentTab: 0
     property bool addFormOpen: false
@@ -37,7 +37,7 @@ Rectangle {
         { value: "ship_fast", label: en ? "Ship fast"        : "Сначала работает" },
         { value: "balanced",  label: en ? "Balanced"         : "Баланс" }
     ]
-    readonly property var accentOptions: ["#66FCF1", "#45A29E", "#7c4dff", "#ff5252", "#FFD740", "#00e676"]
+    readonly property var accentOptions: [Theme.accent, Theme.accentMuted, Theme.info, Theme.error, Theme.warning, Theme.success]
     readonly property var hoursOptions: [
         { label: "9–18",  start: 9,  end: 18 },
         { label: "10–19", start: 10, end: 19 },
@@ -71,14 +71,14 @@ Rectangle {
                     width: tabText.implicitWidth + 24
                     height: 34
                     radius: 8
-                    color: root.currentTab === index ? root.rgba(102, 252, 241, 0.15) : "transparent"
+                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
                     border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : root.rgba(102, 252, 241, 0.15)
+                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
                     Text {
                         id: tabText
                         anchors.centerIn: parent
                         text: modelData
-                        color: root.currentTab === index ? root.cyan : "#8a95a5"
+                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
                         font.pixelSize: 12
                         font.bold: root.currentTab === index
                     }
@@ -139,9 +139,9 @@ Rectangle {
                                     width: 230
                                     height: 108
                                     radius: 10
-                                    color: modelData.isCurrent ? root.rgba(102, 252, 241, 0.10) : root.rgba(15, 17, 22, 0.85)
+                                    color: modelData.isCurrent ? Theme.accentSubtle : Theme.surface1
                                     border.width: modelData.isCurrent ? 2 : 1
-                                    border.color: modelData.isCurrent ? root.cyan : root.rgba(102, 252, 241, 0.15)
+                                    border.color: modelData.isCurrent ? root.cyan : Theme.accentSubtle
 
                                     Rectangle {
                                         visible: modelData.id !== 1
@@ -149,8 +149,8 @@ Rectangle {
                                         anchors.top: parent.top
                                         anchors.right: parent.right
                                         anchors.margins: 8
-                                        color: delArea.pressed ? root.rgba(255, 82, 82, 0.35) : root.rgba(255, 82, 82, 0.12)
-                                        Text { anchors.centerIn: parent; text: "✕"; color: "#ff5252"; font.pixelSize: 11 }
+                                        color: delArea.pressed ? Qt.alpha(Theme.error, 0.35) : Qt.alpha(Theme.error, 0.12)
+                                        Text { anchors.centerIn: parent; text: "✕"; color: Theme.error; font.pixelSize: 11 }
                                         MouseArea {
                                             id: delArea
                                             anchors.fill: parent
@@ -165,7 +165,7 @@ Rectangle {
                                         spacing: 4
                                         Text {
                                             text: modelData.name
-                                            color: modelData.isCurrent ? root.cyan : "#e8f0fe"
+                                            color: modelData.isCurrent ? root.cyan : Theme.onSurface
                                             font.pixelSize: 14
                                             font.bold: true
                                             elide: Text.ElideRight
@@ -173,13 +173,13 @@ Rectangle {
                                         }
                                         Text {
                                             text: modelData.role + " · " + modelData.language
-                                            color: "#8a95a5"
+                                            color: Theme.onSurfaceVariant
                                             font.pixelSize: 11
                                         }
                                         Text {
                                             visible: modelData.lastSeen.length > 0
                                             text: (en ? "Last seen: " : "Был(а): ") + modelData.lastSeen
-                                            color: "#8a95a5"
+                                            color: Theme.onSurfaceVariant
                                             font.pixelSize: 9
                                         }
                                         Text {
@@ -204,9 +204,9 @@ Rectangle {
                                 width: 230
                                 height: 108
                                 radius: 10
-                                color: addCardArea.pressed ? root.rgba(102, 252, 241, 0.12) : "transparent"
+                                color: addCardArea.pressed ? Theme.accentSubtle : "transparent"
                                 border.width: 1
-                                border.color: root.rgba(102, 252, 241, 0.3)
+                                border.color: Theme.outlineStrong
 
                                 Text {
                                     anchors.centerIn: parent
@@ -231,9 +231,9 @@ Rectangle {
                             height: addFormOpen ? addFormCol.implicitHeight + 24 : 0
                             radius: 10
                             clip: true
-                            color: root.rgba(15, 17, 22, 0.85)
+                            color: Theme.surface1
                             border.width: addFormOpen ? 1 : 0
-                            border.color: root.rgba(102, 252, 241, 0.15)
+                            border.color: Theme.accentSubtle
                             Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
                             Column {
@@ -253,16 +253,16 @@ Rectangle {
                                     width: Math.min(parent.width, 300)
                                     height: 32
                                     radius: 8
-                                    color: root.rgba(255, 255, 255, 0.05)
+                                    color: Theme.outline
                                     border.width: 1
-                                    border.color: nameInput.activeFocus ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                    border.color: nameInput.activeFocus ? root.cyan : Theme.outlineStrong
                                     TextInput {
                                         id: nameInput
                                         anchors.fill: parent
                                         anchors.leftMargin: 10
                                         anchors.rightMargin: 10
                                         verticalAlignment: TextInput.AlignVCenter
-                                        color: "#e8f0fe"
+                                        color: Theme.onSurface
                                         font.pixelSize: 12
                                         clip: true
                                         selectByMouse: true
@@ -270,7 +270,7 @@ Rectangle {
                                     Text {
                                         text: en ? "Name..." : "Имя..."
                                         visible: nameInput.text.length === 0 && !nameInput.activeFocus
-                                        color: root.rgba(255, 255, 255, 0.3)
+                                        color: Theme.onSurfaceDim
                                         anchors.left: parent.left
                                         anchors.leftMargin: 10
                                         anchors.verticalCenter: parent.verticalCenter
@@ -288,15 +288,15 @@ Rectangle {
                                             height: 26
                                             width: roleTxt.implicitWidth + 18
                                             color: modelData.value === root.selectedAddRole
-                                                   ? root.rgba(102, 252, 241, 0.25) : root.rgba(255, 255, 255, 0.06)
+                                                   ? Theme.outlineStrong : Theme.outline
                                             border.width: 1
                                             border.color: modelData.value === root.selectedAddRole
-                                                          ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                                          ? root.cyan : Theme.outlineStrong
                                             Text {
                                                 id: roleTxt
                                                 anchors.centerIn: parent
                                                 text: modelData.label
-                                                color: "#e8f0fe"
+                                                color: Theme.onSurface
                                                 font.pixelSize: 10
                                             }
                                             MouseArea {
@@ -310,13 +310,13 @@ Rectangle {
 
                                 Rectangle {
                                     width: 110; height: 30; radius: 7
-                                    color: createArea.pressed ? "#00897b" : "#00695c"
+                                    color: createArea.pressed ? Theme.accentMuted : Theme.accentMuted
                                     border.width: 1
-                                    border.color: "#00897b"
+                                    border.color: Theme.accentMuted
                                     Text {
                                         anchors.centerIn: parent
                                         text: en ? "Create" : "Создать"
-                                        color: "#ffffff"
+                                        color: Theme.onSurface
                                         font.pixelSize: 11
                                         font.bold: true
                                     }
@@ -366,16 +366,16 @@ Rectangle {
                                 Text {
                                     text: currentUserRole + " · " + currentUserLanguage
                                           + (detectedRole.length > 0 ? " · " + (en ? "detected: " : "определено: ") + detectedRole : "")
-                                    color: "#8a95a5"
+                                    color: Theme.onSurfaceVariant
                                     font.pixelSize: 11
                                 }
                             }
                             Item { width: parent.width - 400; height: 1 }
                             Rectangle {
                                 width: 150; height: 30; radius: 7
-                                color: editArea.pressed ? root.rgba(102, 252, 241, 0.25) : root.rgba(102, 252, 241, 0.1)
+                                color: editArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
                                 border.width: 1
-                                border.color: root.rgba(102, 252, 241, 0.3)
+                                border.color: Theme.outlineStrong
                                 Text {
                                     anchors.centerIn: parent
                                     text: en ? "✏ Edit Full Profile" : "✏ Полный профиль"
@@ -394,7 +394,7 @@ Rectangle {
                         Rectangle {
                             width: parent.width
                             height: 1
-                            color: root.rgba(102, 252, 241, 0.12)
+                            color: Theme.accentSubtle
                         }
 
                         // ---- Activity + knowledge ----
@@ -405,9 +405,9 @@ Rectangle {
                                 width: (parent.width - 12) / 2
                                 height: 120
                                 radius: 10
-                                color: root.rgba(15, 17, 22, 0.85)
+                                color: Theme.surface1
                                 border.width: 1
-                                border.color: root.rgba(102, 252, 241, 0.12)
+                                border.color: Theme.accentSubtle
                                 Column {
                                     x: 12; y: 10
                                     width: parent.width - 24
@@ -416,7 +416,7 @@ Rectangle {
                                     Text {
                                         width: parent.width
                                         text: activitySummary.length > 0 ? activitySummary : (en ? "No data yet" : "Пока нет данных")
-                                        color: "#8a95a5"
+                                        color: Theme.onSurfaceVariant
                                         font.pixelSize: 10
                                         wrapMode: Text.WordWrap
                                         maximumLineCount: 6
@@ -428,9 +428,9 @@ Rectangle {
                                 width: (parent.width - 12) / 2
                                 height: 120
                                 radius: 10
-                                color: root.rgba(15, 17, 22, 0.85)
+                                color: Theme.surface1
                                 border.width: 1
-                                border.color: root.rgba(102, 252, 241, 0.12)
+                                border.color: Theme.accentSubtle
                                 Column {
                                     x: 12; y: 10
                                     width: parent.width - 24
@@ -439,7 +439,7 @@ Rectangle {
                                     Text {
                                         width: parent.width
                                         text: knowledgeSummary.length > 0 ? knowledgeSummary : (en ? "No data yet" : "Пока нет данных")
-                                        color: "#8a95a5"
+                                        color: Theme.onSurfaceVariant
                                         font.pixelSize: 10
                                         wrapMode: Text.WordWrap
                                         maximumLineCount: 6
@@ -461,21 +461,21 @@ Rectangle {
                         Column {
                             width: parent.width
                             spacing: 4
-                            Text { text: en ? "Nickname" : "Никнейм"; color: "#8a95a5"; font.pixelSize: 10 }
+                            Text { text: en ? "Nickname" : "Никнейм"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             Rectangle {
                                 width: Math.min(parent.width, 300)
                                 height: 32
                                 radius: 8
-                                color: root.rgba(255, 255, 255, 0.05)
+                                color: Theme.outline
                                 border.width: 1
-                                border.color: nickInput.activeFocus ? root.cyan : root.rgba(255, 255, 255, 0.15)
+                                border.color: nickInput.activeFocus ? root.cyan : Theme.outlineStrong
                                 TextInput {
                                     id: nickInput
                                     anchors.fill: parent
                                     anchors.leftMargin: 10
                                     anchors.rightMargin: 10
                                     verticalAlignment: TextInput.AlignVCenter
-                                    color: "#e8f0fe"
+                                    color: Theme.onSurface
                                     font.pixelSize: 12
                                     clip: true
                                     selectByMouse: true
@@ -490,7 +490,7 @@ Rectangle {
                         Column {
                             width: parent.width
                             spacing: 4
-                            Text { text: en ? "Dev style" : "Стиль разработки"; color: "#8a95a5"; font.pixelSize: 10 }
+                            Text { text: en ? "Dev style" : "Стиль разработки"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             Flow {
                                 width: parent.width
                                 spacing: 6
@@ -500,10 +500,10 @@ Rectangle {
                                         radius: 7
                                         height: 26
                                         width: devTxt.implicitWidth + 18
-                                        color: modelData.value === devStyle ? root.rgba(102, 252, 241, 0.25) : root.rgba(255, 255, 255, 0.06)
+                                        color: modelData.value === devStyle ? Theme.outlineStrong : Theme.outline
                                         border.width: 1
-                                        border.color: modelData.value === devStyle ? root.cyan : root.rgba(255, 255, 255, 0.15)
-                                        Text { id: devTxt; anchors.centerIn: parent; text: modelData.label; color: "#e8f0fe"; font.pixelSize: 10 }
+                                        border.color: modelData.value === devStyle ? root.cyan : Theme.outlineStrong
+                                        Text { id: devTxt; anchors.centerIn: parent; text: modelData.label; color: Theme.onSurface; font.pixelSize: 10 }
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
@@ -518,7 +518,7 @@ Rectangle {
                         Column {
                             width: parent.width
                             spacing: 4
-                            Text { text: en ? "UI accent color" : "Акцентный цвет"; color: "#8a95a5"; font.pixelSize: 10 }
+                            Text { text: en ? "UI accent color" : "Акцентный цвет"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             Row {
                                 spacing: 8
                                 Repeater {
@@ -527,7 +527,7 @@ Rectangle {
                                         width: 26; height: 26; radius: 13
                                         color: modelData
                                         border.width: modelData === accentColor ? 3 : 1
-                                        border.color: modelData === accentColor ? "#ffffff" : root.rgba(255, 255, 255, 0.3)
+                                        border.color: modelData === accentColor ? Theme.onSurface : Theme.onSurfaceDim
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
@@ -542,7 +542,7 @@ Rectangle {
                         Column {
                             width: parent.width
                             spacing: 4
-                            Text { text: en ? "Active hours" : "Рабочие часы"; color: "#8a95a5"; font.pixelSize: 10 }
+                            Text { text: en ? "Active hours" : "Рабочие часы"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             Flow {
                                 width: parent.width
                                 spacing: 6
@@ -553,10 +553,10 @@ Rectangle {
                                         height: 26
                                         width: hrsTxt.implicitWidth + 18
                                         property bool active: modelData.start === activeStart && modelData.end === activeEnd
-                                        color: active ? root.rgba(102, 252, 241, 0.25) : root.rgba(255, 255, 255, 0.06)
+                                        color: active ? Theme.outlineStrong : Theme.outline
                                         border.width: 1
-                                        border.color: active ? root.cyan : root.rgba(255, 255, 255, 0.15)
-                                        Text { id: hrsTxt; anchors.centerIn: parent; text: modelData.label; color: "#e8f0fe"; font.pixelSize: 10 }
+                                        border.color: active ? root.cyan : Theme.outlineStrong
+                                        Text { id: hrsTxt; anchors.centerIn: parent; text: modelData.label; color: Theme.onSurface; font.pixelSize: 10 }
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
@@ -571,7 +571,7 @@ Rectangle {
                         Column {
                             width: parent.width
                             spacing: 4
-                            Text { text: en ? "Mesh role" : "Роль в меше"; color: "#8a95a5"; font.pixelSize: 10 }
+                            Text { text: en ? "Mesh role" : "Роль в меше"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
                             Row {
                                 spacing: 6
                                 Repeater {
@@ -583,10 +583,10 @@ Rectangle {
                                         radius: 7
                                         height: 26
                                         width: meshTxt.implicitWidth + 18
-                                        color: modelData.value === meshRole ? root.rgba(102, 252, 241, 0.25) : root.rgba(255, 255, 255, 0.06)
+                                        color: modelData.value === meshRole ? Theme.outlineStrong : Theme.outline
                                         border.width: 1
-                                        border.color: modelData.value === meshRole ? root.cyan : root.rgba(255, 255, 255, 0.15)
-                                        Text { id: meshTxt; anchors.centerIn: parent; text: modelData.label; color: "#e8f0fe"; font.pixelSize: 10 }
+                                        border.color: modelData.value === meshRole ? root.cyan : Theme.outlineStrong
+                                        Text { id: meshTxt; anchors.centerIn: parent; text: modelData.label; color: Theme.onSurface; font.pixelSize: 10 }
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
