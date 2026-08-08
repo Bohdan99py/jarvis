@@ -45,6 +45,7 @@ class LocalTrainer;
 class BackgroundLearner;
 class CaseDistiller;
 class SecurityCamera;
+class Esp32HubManager;
 class QTimer;
 struct OrganizePlan;
 
@@ -128,6 +129,7 @@ public:
     PersonalityEngine*  personalityEngine()  const { return m_personality; }
     ReflectionEngine*   reflectionEngine()   const { return m_reflection; }
     SkillManager*       skillManager()       const { return m_skills; }
+    Esp32HubManager*    esp32Hub()           const { return m_esp32Hub; }
 
     // FileOrganizer facade — keeps SystemController's full type (defined
     // in pc_controller.h) out of callers like MainWindow/J2JTelegramGateway,
@@ -283,6 +285,7 @@ private:
     PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation
     ReflectionEngine*   m_reflection       = nullptr;  // behavioral analysis + morning nudge
     SkillManager*       m_skills           = nullptr;  // модульные скиллы (лего-блоки знаний)
+    Esp32HubManager*    m_esp32Hub         = nullptr;  // ESP32 physical node (sensors + LED)
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов
 

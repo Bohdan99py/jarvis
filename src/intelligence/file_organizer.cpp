@@ -70,39 +70,153 @@ void FileOrganizer::ensureTable()
 }
 
 // ============================================================
-//  Extension-based fast classification
+//  Rules — default set, persistence, extension lookup
 // ============================================================
 
-QString FileOrganizer::classifyByExtension(const QString& fileName)
+QVector<OrganizeRule> FileOrganizer::defaultRules()
 {
-    const QString ext = QFileInfo(fileName).suffix().toLower();
+    return {
+        { QStringLiteral("Документы"),
+          {"doc", "docx", "odt", "rtf", "pdf", "txt", "md", "epub", "fb2"},
+          true,
+          {QStringLiteral("Учёба"), QStringLiteral("Работа"), QStringLiteral("Личное"),
+           QStringLiteral("Финансы"), QStringLiteral("Другое")} },
 
-    static const QHash<QString, QString> byExt = {
-        {"jpg", "Изображения"}, {"jpeg", "Изображения"}, {"png", "Изображения"},
-        {"gif", "Изображения"}, {"bmp", "Изображения"}, {"webp", "Изображения"},
-        {"svg", "Изображения"}, {"heic", "Изображения"}, {"tiff", "Изображения"},
+        { QStringLiteral("Изображения"),
+          {"jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "heic", "tiff"},
+          false, {} },
 
-        {"zip", "Архивы"}, {"rar", "Архивы"}, {"7z", "Архивы"},
-        {"tar", "Архивы"}, {"gz", "Архивы"},
+        { QStringLiteral("Архивы"),
+          {"zip", "rar", "7z", "tar", "gz"},
+          false, {} },
 
-        {"exe", "Установщики"}, {"msi", "Установщики"},
+        { QStringLiteral("Установщики"),
+          {"exe", "msi"},
+          false, {} },
 
-        {"mp4", "Видео"}, {"mkv", "Видео"}, {"avi", "Видео"},
-        {"mov", "Видео"}, {"webm", "Видео"},
+        { QStringLiteral("Видео"),
+          {"mp4", "mkv", "avi", "mov", "webm"},
+          false, {} },
 
-        {"mp3", "Аудио"}, {"wav", "Аудио"}, {"flac", "Аудио"},
-        {"ogg", "Аудио"}, {"m4a", "Аудио"},
+        { QStringLiteral("Аудио"),
+          {"mp3", "wav", "flac", "ogg", "m4a"},
+          true,
+          {QStringLiteral("Музыка"), QStringLiteral("Подкасты и аудиокниги"),
+           QStringLiteral("Звуковые эффекты")} },
 
-        {"xls", "Таблицы"}, {"xlsx", "Таблицы"}, {"csv", "Таблицы"},
-        {"ppt", "Презентации"}, {"pptx", "Презентации"},
-        {"doc", "Документы"}, {"docx", "Документы"}, {"odt", "Документы"}, {"rtf", "Документы"},
+        { QStringLiteral("Таблицы"),
+          {"xls", "xlsx", "csv"},
+          false, {} },
 
-        {"cpp", "Код"}, {"h", "Код"}, {"hpp", "Код"}, {"py", "Код"}, {"js", "Код"},
-        {"ts", "Код"}, {"java", "Код"}, {"cs", "Код"}, {"html", "Код"}, {"css", "Код"},
-        {"json", "Код"}, {"xml", "Код"}, {"sql", "Код"}, {"sh", "Код"}, {"bat", "Код"}, {"ps1", "Код"},
+        { QStringLiteral("Презентации"),
+          {"ppt", "pptx"},
+          false, {} },
+
+        { QStringLiteral("3D модели"),
+          {"obj", "fbx", "stl", "blend", "3ds", "dae", "gltf", "glb", "ply", "skp"},
+          true,
+          {QStringLiteral("Игровые ассеты"), QStringLiteral("3D-печать"),
+           QStringLiteral("Референсы и сцены")} },
+
+        { QStringLiteral("Код"),
+          {"cpp", "h", "hpp", "py", "js", "ts", "java", "cs", "html", "css",
+           "json", "xml", "sql", "sh", "bat", "ps1", "qml"},
+          false, {} },
     };
+}
 
-    return byExt.value(ext, QString()); // empty = ambiguous, needs content classification
+static QJsonArray rulesToJson(const QVector<OrganizeRule>& rules)
+{
+    QJsonArray arr;
+    for (const auto& r : rules) {
+        QJsonObject obj;
+        obj[QStringLiteral("category")] = r.category;
+        obj[QStringLiteral("extensions")] = QJsonArray::fromStringList(r.extensions);
+        obj[QStringLiteral("contextAware")] = r.contextAware;
+        obj[QStringLiteral("subcategories")] = QJsonArray::fromStringList(r.subcategories);
+        arr.append(obj);
+    }
+    return arr;
+}
+
+static QVector<OrganizeRule> rulesFromJson(const QJsonArray& arr)
+{
+    QVector<OrganizeRule> rules;
+    for (const auto& val : arr) {
+        const QJsonObject obj = val.toObject();
+        OrganizeRule r;
+        r.category = obj[QStringLiteral("category")].toString();
+        for (const auto& e : obj[QStringLiteral("extensions")].toArray())
+            r.extensions.append(e.toString());
+        r.contextAware = obj[QStringLiteral("contextAware")].toBool();
+        for (const auto& s : obj[QStringLiteral("subcategories")].toArray())
+            r.subcategories.append(s.toString());
+        if (!r.category.isEmpty()) rules.append(r);
+    }
+    return rules;
+}
+
+void FileOrganizer::loadRulesIfNeeded() const
+{
+    if (m_rulesLoaded) return;
+    m_rulesLoaded = true;
+
+    const QVariant stored = DatabaseManager::instance().getConfig(
+        QStringLiteral("file_organizer.rules"));
+    if (stored.isValid() && !stored.toString().isEmpty()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(stored.toString().toUtf8());
+        if (doc.isArray()) {
+            const auto parsed = rulesFromJson(doc.array());
+            if (!parsed.isEmpty()) {
+                m_rulesCache = parsed;
+                return;
+            }
+        }
+    }
+
+    // Nothing stored yet (or it was corrupt) — seed with defaults.
+    m_rulesCache = defaultRules();
+    DatabaseManager::instance().setConfig(
+        QStringLiteral("file_organizer.rules"),
+        QString::fromUtf8(QJsonDocument(rulesToJson(m_rulesCache)).toJson(QJsonDocument::Compact)));
+}
+
+QVector<OrganizeRule> FileOrganizer::rules() const
+{
+    loadRulesIfNeeded();
+    return m_rulesCache;
+}
+
+void FileOrganizer::setRules(const QVector<OrganizeRule>& rules)
+{
+    m_rulesCache = rules;
+    m_rulesLoaded = true;
+    DatabaseManager::instance().setConfig(
+        QStringLiteral("file_organizer.rules"),
+        QString::fromUtf8(QJsonDocument(rulesToJson(rules)).toJson(QJsonDocument::Compact)));
+}
+
+void FileOrganizer::resetRulesToDefault()
+{
+    setRules(defaultRules());
+}
+
+const OrganizeRule* FileOrganizer::ruleForCategory(const QString& category) const
+{
+    for (const auto& r : m_rulesCache) {
+        if (r.category == category) return &r;
+    }
+    return nullptr;
+}
+
+QString FileOrganizer::classifyByExtension(const QString& fileName) const
+{
+    loadRulesIfNeeded();
+    const QString ext = QFileInfo(fileName).suffix().toLower();
+    for (const auto& r : m_rulesCache) {
+        if (r.extensions.contains(ext)) return r.category;
+    }
+    return QString(); // empty = ambiguous, needs content classification
 }
 
 // ============================================================
@@ -112,6 +226,8 @@ QString FileOrganizer::classifyByExtension(const QString& fileName)
 void FileOrganizer::buildPlan(const QString& targetFolder,
                               std::function<void(const OrganizePlan&)> callback)
 {
+    loadRulesIfNeeded();
+
     OrganizePlan plan;
     plan.targetFolder = targetFolder;
     plan.builtAt = QDateTime::currentDateTime();
@@ -120,7 +236,8 @@ void FileOrganizer::buildPlan(const QString& targetFolder,
     const QFileInfoList entries = dir.entryInfoList(
         QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
 
-    QVector<int> ambiguousIndices;
+    QVector<int> catIndices; // need a top-level category from the LLM
+    QVector<int> subIndices; // matched a contextAware rule, need a subcategory
 
     for (const QFileInfo& fi : entries) {
         OrganizeItem item;
@@ -132,15 +249,18 @@ void FileOrganizer::buildPlan(const QString& targetFolder,
         if (!cat.isEmpty()) {
             item.category  = cat;
             item.confident = true;
+            const OrganizeRule* rule = ruleForCategory(cat);
+            if (rule && rule->contextAware && !rule->subcategories.isEmpty())
+                subIndices.append(plan.items.size());
         } else {
             item.category  = QStringLiteral("Нераспознано");
             item.confident = false;
-            ambiguousIndices.append(plan.items.size());
+            catIndices.append(plan.items.size());
         }
         plan.items.append(item);
     }
 
-    if (ambiguousIndices.isEmpty() || !m_api) {
+    if ((catIndices.isEmpty() && subIndices.isEmpty()) || !m_api) {
         if (callback) callback(plan);
         return;
     }
@@ -148,38 +268,53 @@ void FileOrganizer::buildPlan(const QString& targetFolder,
     // Copy plan into heap-owned shared state so the async LLM callback
     // (may fire much later) can still find it.
     auto planPtr = std::make_shared<OrganizePlan>(plan);
-    classifyAmbiguous(ambiguousIndices, *planPtr, [planPtr, callback]() {
+    classifyWithLlm(catIndices, subIndices, *planPtr, [planPtr, callback]() {
         if (callback) callback(*planPtr);
     });
 }
 
-void FileOrganizer::classifyAmbiguous(const QVector<int>& indices, OrganizePlan& plan,
-                                       std::function<void()> onDone)
+void FileOrganizer::classifyWithLlm(const QVector<int>& catIndices, const QVector<int>& subIndices,
+                                    OrganizePlan& plan, std::function<void()> onDone)
 {
-    // Cap the batch so the prompt stays a reasonable size.
+    // Cap the combined batch so the prompt stays a reasonable size.
     static constexpr int MAX_BATCH = 30;
     static constexpr int SNIPPET_CHARS = 600;
 
+    QStringList categoryNames;
+    for (const auto& r : m_rulesCache) categoryNames.append(r.category);
+    categoryNames.append(QStringLiteral("Другое"));
+
     QString prompt = QStringLiteral(
         "[FILE CLASSIFICATION TASK]\n"
-        "For each file below, pick exactly one category from this list:\n"
-        "Документы, Изображения, Архивы, Установщики, Видео, Аудио, Таблицы, "
-        "Презентации, Код, Другое\n"
-        "If you cannot tell, use \"Другое\".\n"
-        "Respond with ONLY a JSON array like "
-        "[{\"file\":\"name.pdf\",\"category\":\"Документы\"}] — no other text.\n\n"
+        "Each file below needs either a \"category\" or a \"subcategory\" — the "
+        "task and the allowed options are given per file. Respond with ONLY a "
+        "JSON array like [{\"file\":\"name.pdf\",\"value\":\"Документы\"}] — one "
+        "entry per file, no other text. Pick exactly one value from that file's "
+        "options list. If you cannot tell, use the last option in the list.\n\n"
         "Files:\n");
 
     int included = 0;
-    for (int idx : indices) {
-        if (included >= MAX_BATCH) break;
+    auto appendFile = [&](int idx, const QString& need, const QStringList& options) {
+        if (included >= MAX_BATCH) return;
         const OrganizeItem& item = plan.items[idx];
         const QString snippet = ContentSearch::isSupportedFormat(item.filePath)
             ? ContentSearch::extractText(item.filePath, SNIPPET_CHARS)
             : QString();
-        prompt += QStringLiteral("- %1: %2\n").arg(item.fileName,
+        prompt += QStringLiteral("- %1 [need: %2, options: %3]: %4\n").arg(
+            item.fileName, need, options.join(QStringLiteral(", ")),
             snippet.isEmpty() ? QStringLiteral("(no readable text)") : snippet.left(SNIPPET_CHARS));
         ++included;
+    };
+
+    for (int idx : catIndices) {
+        if (included >= MAX_BATCH) break;
+        appendFile(idx, QStringLiteral("category"), categoryNames);
+    }
+    for (int idx : subIndices) {
+        if (included >= MAX_BATCH) break;
+        const OrganizeRule* rule = ruleForCategory(plan.items[idx].category);
+        if (!rule) continue;
+        appendFile(idx, QStringLiteral("subcategory"), rule->subcategories);
     }
 
     if (!m_api) { if (onDone) onDone(); return; }
@@ -195,15 +330,19 @@ void FileOrganizer::classifyAmbiguous(const QVector<int>& indices, OrganizePlan&
                 if (doc.isArray()) {
                     for (const auto& val : doc.array()) {
                         const QJsonObject obj = val.toObject();
-                        const QString file = obj[QStringLiteral("file")].toString();
-                        const QString cat  = obj[QStringLiteral("category")].toString();
-                        if (file.isEmpty() || cat.isEmpty()) continue;
+                        const QString file  = obj[QStringLiteral("file")].toString();
+                        const QString value = obj[QStringLiteral("value")].toString();
+                        if (file.isEmpty() || value.isEmpty()) continue;
                         for (auto& item : plan.items) {
-                            if (item.fileName == file) {
-                                item.category  = cat;
-                                item.confident = (cat != QStringLiteral("Другое"));
-                                break;
+                            if (item.fileName != file) continue;
+                            const OrganizeRule* rule = ruleForCategory(item.category);
+                            if (rule && rule->contextAware && rule->subcategories.contains(value)) {
+                                item.subcategory = value;
+                            } else {
+                                item.category  = value;
+                                item.confident = (value != QStringLiteral("Другое"));
                             }
+                            break;
                         }
                     }
                 }
@@ -231,7 +370,9 @@ QString FileOrganizer::applyPlan(const OrganizePlan& plan, SystemController* sys
     for (const auto& item : plan.items) {
         if (!item.confident) continue; // "Нераспознано" — leave alone
 
-        const QString destDir  = QDir(plan.targetFolder).filePath(item.category);
+        QString destDir = QDir(plan.targetFolder).filePath(item.category);
+        if (!item.subcategory.isEmpty())
+            destDir = QDir(destDir).filePath(item.subcategory);
         const QString destPath = QDir(destDir).filePath(item.fileName);
 
         if (!sys->createFolder(destDir)) continue;

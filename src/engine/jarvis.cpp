@@ -52,6 +52,7 @@
 #include "personality_engine.h"
 #include "reflection_engine.h"
 #include "memory_manager.h"
+#include "esp32_hub_manager.h"
 // lang.h НЕ используем через IS_EN — в статической библиотеке gUiLanguage()
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
@@ -98,6 +99,18 @@ Jarvis::Jarvis(QObject* parent)
     };
     applySkillContext();
     connect(m_skills, &SkillManager::skillsChanged, this, applySkillContext);
+
+    // ESP32 physical node — feature-gated by the esp32_hub skill
+    m_esp32Hub = new Esp32HubManager(this);
+    auto syncEsp32 = [this]() {
+        const bool want = m_skills->isFeatureEnabled(QStringLiteral("esp32_hub"));
+        if (want && !m_esp32Hub->isRunning())
+            m_esp32Hub->start();
+        else if (!want && m_esp32Hub->isRunning())
+            m_esp32Hub->stop();
+    };
+    syncEsp32();
+    connect(m_skills, &SkillManager::skillsChanged, this, syncEsp32);
 
     m_claudeApi    = new ClaudeApi(m_memory, this);
     m_geminiApi    = new OllamaApi(this);   // Ollama — локальный LLM для быстрых ответов
@@ -1908,12 +1921,16 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // --- Ветка Claude: код, анализ, файлы, архитектура ---
     if (needsClaude) {
         emit agentSelected(QStringLiteral("🤖 Claude"));
+        if (m_esp32Hub && m_esp32Hub->isConnected())
+            m_esp32Hub->setLed(QStringLiteral("thinking"), 200);
         m_claudeApi->sendMessage(enrichedMessage,
                                  [this, s, hadAttachments](bool success, const QString& response) {
             if (success) {
                 handleClaudeCodeResponse(s, response, hadAttachments);
             } else {
                 emit asyncResponseError(response);
+                if (m_esp32Hub && m_esp32Hub->isConnected())
+                    m_esp32Hub->sendNotification(QStringLiteral("error"), 3000);
             }
         });
         return QString();
@@ -2253,6 +2270,11 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
 
     // Route speech to TTS queue
     VoiceSynthesisManager::instance().say(dual.speechText);
+
+    // ESP32: flash success notification, return LED to idle breathe
+    if (m_esp32Hub && m_esp32Hub->isConnected()) {
+        m_esp32Hub->sendNotification(QStringLiteral("info"), 2000);
+    }
 
     emit asyncResponseReady(fullResponse);
 

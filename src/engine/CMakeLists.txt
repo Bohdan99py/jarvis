@@ -18,6 +18,8 @@ add_library(jarvis_engine OBJECT
     task_board_model.cpp
     training_center_dialog.h
     training_center_dialog.cpp
+    organize_plan_dialog.h
+    organize_plan_dialog.cpp
     chat_history_dialog.h
     chat_history_dialog.cpp
     translation_engine.h

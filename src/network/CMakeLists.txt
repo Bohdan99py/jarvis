@@ -18,6 +18,8 @@ add_library(jarvis_network OBJECT
     mobile_pairing_manager.cpp
     pc_wake_agent.h
     pc_wake_agent.cpp
+    esp32_hub_manager.h
+    esp32_hub_manager.cpp
 )
 
 target_include_directories(jarvis_network PUBLIC

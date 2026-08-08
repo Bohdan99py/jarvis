@@ -24,8 +24,19 @@ struct OrganizeItem {
     QString filePath;
     QString fileName;
     QString category;    // "Документы", "Изображения", ... — target subfolder name
+    QString subcategory; // e.g. "Учёба" — nested under category/ when non-empty
     bool    confident = true; // false → left untouched ("Нераспознано")
     qint64  sizeBytes = 0;
+};
+
+// A user-editable classification rule: which extensions map to which
+// top-level category, and (optionally) which content-derived subcategory
+// labels the LLM may choose among for files matching this rule.
+struct OrganizeRule {
+    QString     category;
+    QStringList extensions;      // lowercase, no leading dot
+    bool        contextAware = false;
+    QStringList subcategories;   // valid labels when contextAware
 };
 
 struct OrganizePlan {
@@ -50,6 +61,14 @@ public:
     void buildPlan(const QString& targetFolder,
                    std::function<void(const OrganizePlan&)> callback);
 
+    // User-editable classification rules — lazily loaded from
+    // DatabaseManager's settings table (JSON blob), seeded with
+    // defaultRules() the first time they're read.
+    QVector<OrganizeRule> rules() const;
+    void setRules(const QVector<OrganizeRule>& rules);
+    void resetRulesToDefault();
+    static QVector<OrganizeRule> defaultRules();
+
     // Executes an already-approved plan via sys's safe primitives.
     // Only items with confident==true are moved. Returns the batch id
     // (empty on total failure) — pass it to undoBatch() to revert.
@@ -70,9 +89,18 @@ signals:
 private:
     explicit FileOrganizer(QObject* parent = nullptr);
 
-    static QString classifyByExtension(const QString& fileName);
-    void classifyAmbiguous(const QVector<int>& indices, OrganizePlan& plan,
-                           std::function<void()> onDone);
+    void loadRulesIfNeeded() const;
+    QString classifyByExtension(const QString& fileName) const;
+    const OrganizeRule* ruleForCategory(const QString& category) const;
+
+    // Single batched LLM call covering both concerns: items with no rule
+    // match need a top-level category; items matched to a contextAware
+    // rule need a subcategory. catIndices/subIndices may overlap in
+    // neither direction (an item is in exactly one of the two lists).
+    void classifyWithLlm(const QVector<int>& catIndices, const QVector<int>& subIndices,
+                         OrganizePlan& plan, std::function<void()> onDone);
 
     ClaudeApi* m_api = nullptr;
+    mutable QVector<OrganizeRule> m_rulesCache;
+    mutable bool m_rulesLoaded = false;
 };

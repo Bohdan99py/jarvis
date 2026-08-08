@@ -1,0 +1,14 @@
+{
+    "id": "esp32_hub",
+    "name": {
+        "ru": "ESP32 Физический Узел",
+        "en": "ESP32 Physical Node"
+    },
+    "description": {
+        "ru": "Подключение ESP32 как физического узла Jarvis: LED-уведомления, touch-кнопка, датчики температуры и Холла, управление по WiFi и Serial.",
+        "en": "ESP32 as a Jarvis physical node: LED notifications, touch button, temperature and Hall sensors, WiFi and Serial control."
+    },
+    "version": "1.0.0",
+    "features": ["esp32_hub"],
+    "default_enabled": false
+}

@@ -56,6 +56,7 @@
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include "file_organizer.h"
+#include "organize_plan_dialog.h"
 #include <QFileDialog>
 #include <QDialog>
 #include <QTextEdit>
@@ -1218,6 +1219,14 @@ void MainWindow::buildMenuBar()
             FileOrganizer::instance().buildPlan(folder, [this](const OrganizePlan& plan) {
                 showOrganizePlanDialog(plan);
             });
+        });
+
+        auto* actConfigureRules = taskMenu->addAction(
+            IS_EN ? QStringLiteral("⚙ Configure Categories...")
+                  : QStringLiteral("⚙ Настроить категории..."));
+        connect(actConfigureRules, &QAction::triggered, this, [this]() {
+            OrganizePlanDialog dlg(m_jarvis, OrganizePlan{}, this, /*initialTab=*/1);
+            dlg.exec();
         });
 
         auto* actUndoOrganize = taskMenu->addAction(
@@ -3821,63 +3830,8 @@ void MainWindow::showOrganizePlanDialog(const OrganizePlan& plan)
         return;
     }
 
-    auto* dlg = new QDialog(this);
-    dlg->setWindowTitle(IS_EN ? QStringLiteral("Organize: %1").arg(plan.targetFolder)
-                              : QStringLiteral("Организация: %1").arg(plan.targetFolder));
-    dlg->setAttribute(Qt::WA_DeleteOnClose);
-    dlg->setMinimumSize(440, 340);
-    auto* layout = new QVBoxLayout(dlg);
-
-    auto* title = new QLabel(IS_EN
-        ? QStringLiteral("📦 Proposed organization (%1 files):").arg(plan.items.size())
-        : QStringLiteral("📦 Предложенная организация (%1 файлов):").arg(plan.items.size()),
-        dlg);
-    layout->addWidget(title);
-
-    for (const auto& pair : plan.categoryCounts()) {
-        const QString& category = pair.first;
-        const int count = pair.second;
-        const QString icon = (category == QStringLiteral("Нераспознано"))
-            ? QStringLiteral("❓") : QStringLiteral("📁");
-        auto* row = new QLabel(QStringLiteral("%1 %2  —  %3")
-            .arg(icon, category,
-                 IS_EN ? QStringLiteral("%1 file(s)").arg(count)
-                       : QStringLiteral("%1 файл(ов)").arg(count)), dlg);
-        layout->addWidget(row);
-    }
-
-    auto* note = new QLabel(IS_EN
-        ? QStringLiteral("\"Нераспознано\" items are left untouched — only confidently "
-                         "classified files are moved. Every move is logged and can be undone.")
-        : QStringLiteral("Файлы категории «Нераспознано» не трогаются — перемещаются только "
-                         "уверенно классифицированные. Каждое перемещение можно отменить."),
-        dlg);
-    note->setWordWrap(true);
-    note->setStyleSheet(QStringLiteral("color: gray; font-size: 11px;"));
-    layout->addWidget(note);
-    layout->addStretch(1);
-
-    auto* btnRow = new QHBoxLayout();
-    auto* applyBtn  = new QPushButton(IS_EN ? QStringLiteral("✅ Apply") : QStringLiteral("✅ Применить"), dlg);
-    auto* cancelBtn = new QPushButton(IS_EN ? QStringLiteral("❌ Cancel") : QStringLiteral("❌ Отмена"), dlg);
-    btnRow->addWidget(applyBtn);
-    btnRow->addWidget(cancelBtn);
-    layout->addLayout(btnRow);
-
-    connect(cancelBtn, &QPushButton::clicked, dlg, &QDialog::close);
-    connect(applyBtn, &QPushButton::clicked, dlg, [this, plan, dlg]() {
-        const QString batchId = m_jarvis->organizeApplyPlan(plan);
-        appendLog(Str::logJarvis(),
-            !batchId.isEmpty()
-                ? (IS_EN ? QStringLiteral("✅ Organized. Undo with \"Undo Last Organize\" if needed.")
-                         : QStringLiteral("✅ Организовано. При необходимости — «Отменить последнюю организацию»."))
-                : (IS_EN ? QStringLiteral("Nothing was moved.")
-                         : QStringLiteral("Ничего не было перемещено.")),
-            Theme::LogColors::system);
-        dlg->close();
-    });
-
-    dlg->show();
+    OrganizePlanDialog dlg(m_jarvis, plan, this);
+    dlg.exec();
 }
 
 // ============================================================

@@ -87,6 +87,16 @@ else()
     message(STATUS "Qt WebEngine: NOT FOUND — falling back to SVG diagram panel")
 endif()
 
+# SerialPort is optional — needed only for ESP32 USB connection
+find_package(Qt6 QUIET COMPONENTS SerialPort)
+if(Qt6SerialPort_FOUND)
+    set(JARVIS_HAS_SERIALPORT TRUE)
+    message(STATUS "Qt SerialPort: FOUND — ESP32 USB serial enabled")
+else()
+    set(JARVIS_HAS_SERIALPORT FALSE)
+    message(STATUS "Qt SerialPort: NOT FOUND — ESP32 USB serial disabled (WiFi still works)")
+endif()
+
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
 # ============================================================
@@ -276,6 +286,11 @@ if(JARVIS_HAS_WEBENGINE)
     target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_WEBENGINE=1)
 endif()
 
+if(JARVIS_HAS_SERIALPORT)
+    target_link_libraries(JarvisCore PUBLIC Qt6::SerialPort)
+    target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_SERIALPORT=1)
+endif()
+
 if(JARVIS_HAS_OPENCV)
     target_include_directories(JarvisCore PUBLIC ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(JarvisCore PUBLIC ${OpenCV_LIBS})
@@ -351,6 +366,7 @@ foreach(_qrc
         "${CMAKE_CURRENT_SOURCE_DIR}/src/common/notification_toast.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/task_board.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/training_center.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/organize_panel.qrc"
 )
     if(EXISTS "${_qrc}")
         target_sources(jarvis PRIVATE "${_qrc}")
