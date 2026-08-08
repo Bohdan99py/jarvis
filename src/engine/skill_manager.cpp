@@ -86,6 +86,38 @@ bool SkillManager::readManifest(const QString& skillDir, SkillInfo& out)
     for (const auto& v : obj.value(QStringLiteral("features")).toArray())
         out.features << v.toString();
 
+    // Иерархия для UI. Форматы:
+    //   "category": "development"                          — только верхний уровень
+    //   "category": "development/unreal"                   — короткая запись через '/'
+    //   "category": { "id": "development",
+    //                 "label": {"ru":"...","en":"..."} }   — с локализованной подписью
+    //   "subcategory": "unreal"  |  { "id": "unreal", "label": {...} }
+    auto parseHier = [&obj](const QString& key,
+                            QString& id,
+                            QString& labelRu, QString& labelEn) {
+        const QJsonValue v = obj.value(key);
+        if (v.isString()) {
+            id = v.toString().trimmed();
+        } else if (v.isObject()) {
+            const QJsonObject o = v.toObject();
+            id = o.value(QStringLiteral("id")).toString().trimmed();
+            const QJsonValue lbl = o.value(QStringLiteral("label"));
+            labelRu = localizedField(lbl, QStringLiteral("ru"));
+            labelEn = localizedField(lbl, QStringLiteral("en"));
+        }
+    };
+    parseHier(QStringLiteral("category"),
+              out.category, out.categoryLabelRu, out.categoryLabelEn);
+    parseHier(QStringLiteral("subcategory"),
+              out.subcategory, out.subcategoryLabelRu, out.subcategoryLabelEn);
+
+    // Разрешаем короткую запись "development/unreal"
+    if (out.subcategory.isEmpty() && out.category.contains(QLatin1Char('/'))) {
+        const int slash = out.category.indexOf(QLatin1Char('/'));
+        out.subcategory = out.category.mid(slash + 1);
+        out.category    = out.category.left(slash);
+    }
+
     out.dirPath = skillDir;
 
     // Знания: prompt.md (имя файла можно переопределить в манифесте)

@@ -1,0 +1,21 @@
+{
+    "id": "work",
+    "name": {
+        "ru": "Рабочий",
+        "en": "Work"
+    },
+    "description": {
+        "ru": "Сосредоточенная работа: IDE-агент включён, ответы короче и по делу, без лирических отступлений. Хорошо для повседневных задач разработки.",
+        "en": "Focused work session: IDE-agent on, answers stay short and to the point, no small talk. Good for everyday development tasks."
+    },
+    "prompt": {
+        "ru": "Пользователь работает — сосредоточенный режим. Держи ответы короткими и по делу. Пропусти вводные фразы и общие рассуждения; сразу к решению или к уточняющему вопросу, если данных не хватает. Юмор и разговорные вставки — минимум. Если запрос кодовый, действуй сразу через доступные [FILE]/[DIFF]/[CMD] блоки, а не через объяснения того, что нужно сделать вручную.",
+        "en": "The user is in a focused work session. Keep answers short and to the point. Skip preambles and open-ended musing; jump straight to the solution or ask a clarifying question if data is missing. Humor and small talk minimal. For code requests, act via the available [FILE]/[DIFF]/[CMD] blocks rather than describing what to do by hand."
+    },
+    "icon": "💼",
+    "accent": "#45A29E",
+    "enable_skills": ["coding"],
+    "disable_skills": ["philosopher"],
+    "exclusive": false,
+    "default_active": false
+}

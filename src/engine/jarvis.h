@@ -19,6 +19,7 @@
 
 #include "command_registry.h"
 #include "skill_manager.h"
+#include "mode_manager.h"
 #include "applauncher.h"
 
 struct DbTask;
@@ -129,6 +130,7 @@ public:
     PersonalityEngine*  personalityEngine()  const { return m_personality; }
     ReflectionEngine*   reflectionEngine()   const { return m_reflection; }
     SkillManager*       skillManager()       const { return m_skills; }
+    ModeManager*        modeManager()        const { return m_modes; }
     Esp32HubManager*    esp32Hub()           const { return m_esp32Hub; }
 
     // FileOrganizer facade — keeps SystemController's full type (defined
@@ -285,6 +287,7 @@ private:
     PersonalityEngine*  m_personality      = nullptr;  // emotional state + genetic trait mutation
     ReflectionEngine*   m_reflection       = nullptr;  // behavioral analysis + morning nudge
     SkillManager*       m_skills           = nullptr;  // модульные скиллы (лего-блоки знаний)
+    ModeManager*        m_modes            = nullptr;  // режимы работы (профили поведения)
     Esp32HubManager*    m_esp32Hub         = nullptr;  // ESP32 physical node (sensors + LED)
     qint64              m_currentUserId = 1;       // active user (multi-user support)
     PendingFileGeneration m_pendingFile;            // автопродолжение больших файлов

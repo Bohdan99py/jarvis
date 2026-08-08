@@ -1,0 +1,21 @@
+{
+    "id": "electronics",
+    "name": {
+        "ru": "Электроника",
+        "en": "Electronics"
+    },
+    "description": {
+        "ru": "Работа с электроникой: схемотехника, KiCad, ESP32/Arduino. Всё игровое и лишнее — выключено, чтобы JARVIS не отвлекался.",
+        "en": "Working with electronics: circuit design, KiCad, ESP32/Arduino. Gamedev and other topical skills are off so JARVIS stays on-topic."
+    },
+    "prompt": {
+        "ru": "Пользователь работает с железом (схема, PCB, микроконтроллер). Подразумевай контекст электроники по умолчанию: любые вопросы про сигналы, ток, напряжение, компоненты, GPIO, прошивку — трактуй как часть текущего проекта. Не задавай «а это для чего?». Держи в голове безопасность (сеть, ток, ESD, тепловые режимы) и упоминай её, когда это уместно, но без нравоучений.",
+        "en": "The user is doing hardware work (schematic, PCB, microcontroller). Assume electronics context by default: anything about signals, current, voltage, components, GPIO, firmware — treat as part of the current project. Don't ask \"what is this for?\". Keep safety in mind (mains, current, ESD, thermal) and mention it when relevant, without moralizing."
+    },
+    "icon": "🔌",
+    "accent": "#FFD740",
+    "enable_skills": ["electronics", "esp32_hub"],
+    "disable_skills": ["unreal_cpp", "unreal_blueprints", "unreal_editor", "philosopher"],
+    "exclusive": false,
+    "default_active": false
+}

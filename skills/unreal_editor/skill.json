@@ -1,0 +1,22 @@
+{
+    "id": "unreal_editor",
+    "name": {
+        "ru": "Unreal Engine — Editor & Pipeline",
+        "en": "Unreal Engine — Editor & Pipeline"
+    },
+    "description": {
+        "ru": "Работа в редакторе Unreal Engine 5: организация Content Browser, World Partition и Data Layers, Nanite/Lumen, освещение и постпроцессинг, Sequencer, импорт ассетов (FBX/glTF, текстуры, аудио), Level Streaming, cook/package/build, работа с Source Control (Perforce/Git LFS).",
+        "en": "Working inside the Unreal Engine 5 editor: Content Browser layout, World Partition and Data Layers, Nanite/Lumen, lighting and post-process, Sequencer, asset import (FBX/glTF, textures, audio), Level Streaming, cook/package/build, and Source Control (Perforce/Git LFS)."
+    },
+    "version": "1.0.0",
+    "features": [],
+    "default_enabled": false,
+    "category": {
+        "id": "development",
+        "label": { "ru": "Разработка", "en": "Development" }
+    },
+    "subcategory": {
+        "id": "unreal",
+        "label": { "ru": "Unreal Engine", "en": "Unreal Engine" }
+    }
+}

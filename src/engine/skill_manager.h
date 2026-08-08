@@ -52,6 +52,17 @@ struct SkillInfo
     QString     dirPath;        // откуда загружен
     QString     promptText;     // содержимое prompt.md (уже обрезано по лимиту)
 
+    // Иерархия для UI (как «Workloads» в Visual Studio):
+    //   category    — верхний уровень: "development" | "productivity" | ""
+    //   subcategory — второй уровень:  "unreal" | "unity" | "godot" | ""
+    // Оба поля опциональны. Пустые -> скилл попадает в корень списка.
+    QString     category;
+    QString     subcategory;
+    QString     categoryLabelRu;    // человекочитаемая подпись верхнего уровня
+    QString     categoryLabelEn;
+    QString     subcategoryLabelRu; // человекочитаемая подпись второго уровня
+    QString     subcategoryLabelEn;
+
     QString displayName(bool english) const
     {
         const QString primary = english ? nameEn : nameRu;
@@ -63,6 +74,22 @@ struct SkillInfo
         const QString primary = english ? descriptionEn : descriptionRu;
         if (!primary.isEmpty()) return primary;
         return english ? descriptionRu : descriptionEn;
+    }
+    QString categoryLabel(bool english) const
+    {
+        const QString primary = english ? categoryLabelEn : categoryLabelRu;
+        if (!primary.isEmpty()) return primary;
+        const QString other = english ? categoryLabelRu : categoryLabelEn;
+        if (!other.isEmpty()) return other;
+        return category;
+    }
+    QString subcategoryLabel(bool english) const
+    {
+        const QString primary = english ? subcategoryLabelEn : subcategoryLabelRu;
+        if (!primary.isEmpty()) return primary;
+        const QString other = english ? subcategoryLabelRu : subcategoryLabelEn;
+        if (!other.isEmpty()) return other;
+        return subcategory;
     }
 };
 

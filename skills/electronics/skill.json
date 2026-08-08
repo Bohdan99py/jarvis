@@ -10,5 +10,9 @@
     },
     "version": "1.0.0",
     "features": [],
-    "default_enabled": true
+    "default_enabled": true,
+    "category": {
+        "id": "electronics",
+        "label": { "ru": "Электроника", "en": "Electronics" }
+    }
 }

@@ -1,0 +1,17 @@
+{
+    "id": "standard",
+    "name": {
+        "ru": "Стандартный",
+        "en": "Standard"
+    },
+    "description": {
+        "ru": "Универсальный режим без специального фокуса. Скиллы остаются в том состоянии, в котором ты их вручную настроил. JARVIS ведёт себя как обычный ассистент.",
+        "en": "Neutral mode with no special focus. Skills stay in whatever state you set manually. JARVIS behaves as a general-purpose assistant."
+    },
+    "icon": "⚙️",
+    "accent": "#66FCF1",
+    "enable_skills": [],
+    "disable_skills": [],
+    "exclusive": false,
+    "default_active": true
+}

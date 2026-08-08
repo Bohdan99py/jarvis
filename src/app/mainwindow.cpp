@@ -53,6 +53,7 @@
 #include "profile_setup_dialog.h"
 #include "user_center_dialog.h"
 #include "skills_dialog.h"
+#include "modes_dialog.h"
 #include "voice_synthesis_manager.h"
 #include "llm_cache_manager.h"
 #include "file_organizer.h"
@@ -727,6 +728,15 @@ void MainWindow::buildMenuBar()
               : QStringLiteral("🧩 Скиллы JARVIS..."));
     connect(actSkills, &QAction::triggered, this, [this]() {
         SkillsDialog dlg(m_jarvis->skillManager(), this);
+        dlg.exec();
+    });
+
+    // ── Режимы работы (профили поведения) ───────────────────
+    auto* actModes = settingsMenu->addAction(
+        IS_EN ? QStringLiteral("🎛 Work Modes...")
+              : QStringLiteral("🎛 Режимы работы..."));
+    connect(actModes, &QAction::triggered, this, [this]() {
+        ModesDialog dlg(m_jarvis, IS_EN, this);
         dlg.exec();
     });
 

@@ -1,0 +1,22 @@
+{
+    "id": "unreal_cpp",
+    "name": {
+        "ru": "Unreal Engine — C++ API",
+        "en": "Unreal Engine — C++ API"
+    },
+    "description": {
+        "ru": "Программирование на C++ в Unreal Engine 5: UObject/AActor/UComponent, UPROPERTY/UFUNCTION-макросы, Gameplay Framework (GameMode/PlayerController/Pawn), Enhanced Input, GAS, репликация, интеграция C++ ↔ Blueprints, работа с UnrealBuildTool и .Build.cs.",
+        "en": "C++ programming in Unreal Engine 5: UObject/AActor/UComponent, UPROPERTY/UFUNCTION macros, Gameplay Framework (GameMode/PlayerController/Pawn), Enhanced Input, GAS, replication, C++ ↔ Blueprints interop, UnrealBuildTool and .Build.cs files."
+    },
+    "version": "1.0.0",
+    "features": [],
+    "default_enabled": false,
+    "category": {
+        "id": "development",
+        "label": { "ru": "Разработка", "en": "Development" }
+    },
+    "subcategory": {
+        "id": "unreal",
+        "label": { "ru": "Unreal Engine", "en": "Unreal Engine" }
+    }
+}

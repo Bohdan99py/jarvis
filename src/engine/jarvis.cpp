@@ -100,6 +100,31 @@ Jarvis::Jarvis(QObject* parent)
     applySkillContext();
     connect(m_skills, &SkillManager::skillsChanged, this, applySkillContext);
 
+    // Режимы работы (профили поведения) — создаём ПОСЛЕ SkillManager,
+    // потому что режим ссылается на id скиллов и умеет их вкл/выкл.
+    // Активный режим на старте применяет свой enable/disable набор
+    // (setEnabled внутри SkillManager сам эмитит skillsChanged, поэтому
+    // applySkillContext() догонит скилл-блоки автоматически).
+    m_modes = new ModeManager(m_skills, this);
+    auto applyModeContext = [this]() {
+        // Используем m_uiEnglish, а не IS_EN — в статической engine-lib
+        // gUiLanguage() лежит в отдельной ODR-копии (см. коммент выше).
+        m_memory->setModeContext(m_modes->promptBlock(m_uiEnglish));
+    };
+    applyModeContext();
+    connect(m_modes, &ModeManager::modeChanged, this, [this, applyModeContext]() {
+        applyModeContext();
+        // Режим мог перетасовать скиллы — освежим и их контекст на всякий
+        // случай (SkillManager::setEnabled уже эмитил skillsChanged, но
+        // если exclusive-режим меняет несколько скиллов подряд, батчевый
+        // повтор дешёвый и безопасный).
+        m_memory->setSkillContext(
+            m_skills->promptBlocks(),
+            m_skills->isFeatureEnabled(SkillManager::featureCodeActions()));
+    });
+    // Первичное применение активного режима к скиллам (если был сохранён).
+    m_modes->reapplyActive();
+
     // ESP32 physical node — feature-gated by the esp32_hub skill
     m_esp32Hub = new Esp32HubManager(this);
     auto syncEsp32 = [this]() {

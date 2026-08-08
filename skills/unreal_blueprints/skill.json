@@ -1,0 +1,22 @@
+{
+    "id": "unreal_blueprints",
+    "name": {
+        "ru": "Unreal Engine — Blueprints",
+        "en": "Unreal Engine — Blueprints"
+    },
+    "description": {
+        "ru": "Визуальное скриптирование в Unreal Engine 5: Blueprint-классы и интерфейсы, Event Graph, Construction Script, Blueprint Function Libraries, макросы, Timelines, коммуникация между BP (Event Dispatcher / Interface / Cast), правильное разделение логики между BP и C++.",
+        "en": "Visual scripting in Unreal Engine 5: Blueprint classes and interfaces, Event Graph, Construction Script, Blueprint Function Libraries, macros, Timelines, BP-to-BP communication (Event Dispatcher / Interface / Cast), and the right split between Blueprints and C++."
+    },
+    "version": "1.0.0",
+    "features": [],
+    "default_enabled": false,
+    "category": {
+        "id": "development",
+        "label": { "ru": "Разработка", "en": "Development" }
+    },
+    "subcategory": {
+        "id": "unreal",
+        "label": { "ru": "Unreal Engine", "en": "Unreal Engine" }
+    }
+}

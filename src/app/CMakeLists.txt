@@ -13,9 +13,12 @@ target_sources(jarvis PRIVATE
     profile_setup_dialog.cpp
     skills_dialog.h
     skills_dialog.cpp
+    modes_dialog.h
+    modes_dialog.cpp
     user_center_dialog.h
     user_center_dialog.cpp
     user_center.qrc
+    modes.qrc
 )
 
 target_include_directories(jarvis PRIVATE

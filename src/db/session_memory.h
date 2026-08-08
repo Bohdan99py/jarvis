@@ -130,6 +130,11 @@ public:
     }
     bool codeActionsEnabled() const { return m_codeActionsEnabled; }
 
+    // Активный режим работы (ModeManager). Пустая строка = режим не выбран.
+    // Блок оформлен как ситуативный контекст от приложения, не как
+    // переопределение личности модели — см. buildSystemPrompt.
+    void setModeContext(const QString& promptBlock) { m_modeContext = promptBlock; }
+
     // Per-turn directives (mood, language, diagram requirements) — set by
     // Jarvis right before each LLM call. They belong to the SYSTEM prompt:
     // injecting persona/behaviour instructions into the user turn makes
@@ -178,6 +183,7 @@ private:
     QString m_taskBoardContext;
     QString m_turnDirectives;
     QString m_skillPromptBlocks;
+    QString m_modeContext;
     // По умолчанию true: до первого setSkillContext (и в сборках без
     // SkillManager) JARVIS ведёт себя как раньше — кодинг разрешён.
     bool    m_codeActionsEnabled = true;

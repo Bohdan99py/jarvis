@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/qml">
+        <file alias="Modes.qml">Modes.qml</file>
+    </qresource>
+</RCC>

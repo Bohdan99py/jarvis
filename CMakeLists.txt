@@ -424,6 +424,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/skills")
     )
 endif()
 
+# Post-build: copy bundled work modes (профили поведения JARVIS)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/modes")
+    add_custom_command(TARGET jarvis POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/modes"
+            "$<TARGET_FILE_DIR:jarvis>/modes"
+            COMMENT "Copying bundled work modes..."
+    )
+endif()
+
 # ============================================================
 # Post-build: copy Vosk DLLs
 # ============================================================

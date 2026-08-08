@@ -10,5 +10,9 @@
     },
     "version": "1.0.0",
     "features": ["esp32_hub"],
-    "default_enabled": false
+    "default_enabled": false,
+    "category": {
+        "id": "electronics",
+        "label": { "ru": "Электроника", "en": "Electronics" }
+    }
 }
