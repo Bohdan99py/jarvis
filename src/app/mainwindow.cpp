@@ -994,51 +994,27 @@ void MainWindow::buildMenuBar()
     auto* trainMenu = menuBar->addMenu(
         IS_EN ? QStringLiteral("🧠 Training") : QStringLiteral("🧠 Обучение"));
 
-    // --- Training Center (QML: stats, app usage, local training, history) ---
-    auto* actTrainStats = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📊 Dataset Statistics")
-              : QStringLiteral("📊 Статистика датасета"));
-    connect(actTrainStats, &QAction::triggered, this, [this]() {
+    // --- Training Center (QML: overview, app usage, local training,
+    // history, synapse graph) — ONE menu entry, not one per tab. It used
+    // to be four separate actions (Dataset Statistics / Train Local Model /
+    // App Usage Patterns / Search chat history) that each opened the exact
+    // same dialog on a different initialTab — pure repetition, since the
+    // dialog's own tab bar already reaches every one of them.
+    auto* actTrainingCenter = trainMenu->addAction(
+        IS_EN ? QStringLiteral("🧠 Training Center...")
+              : QStringLiteral("🧠 Центр обучения..."));
+    connect(actTrainingCenter, &QAction::triggered, this, [this]() {
         TrainingCenterDialog dlg(m_jarvis->currentUserId(), m_passiveListener, m_appLearner, this, 0);
         dlg.exec();
     });
 
     trainMenu->addSeparator();
 
-    // --- Экспорт ---
+    // --- Экспорт (быстрый доступ без открытия диалога) ---
     auto* actExport = trainMenu->addAction(
         IS_EN ? QStringLiteral("📤 Export .jsonl for Fine-Tuning...")
               : QStringLiteral("📤 Экспорт .jsonl для обучения..."));
     connect(actExport, &QAction::triggered, this, &MainWindow::onExportTrainingData);
-
-    // --- One-click обучение через Ollama ---
-    auto* actTrainLocal = trainMenu->addAction(
-        IS_EN ? QStringLiteral("🚀 Train Local Model (Ollama)...")
-              : QStringLiteral("🚀 Обучить модель локально (Ollama)..."));
-    connect(actTrainLocal, &QAction::triggered, this, [this]() {
-        TrainingCenterDialog dlg(m_jarvis->currentUserId(), m_passiveListener, m_appLearner, this, 2);
-        dlg.exec();
-    });
-
-    trainMenu->addSeparator();
-
-    // --- Паттерны использования ПК ---
-    auto* actAppPatterns = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📊 App Usage Patterns...")
-              : QStringLiteral("📊 Паттерны использования..."));
-    connect(actAppPatterns, &QAction::triggered, this, [this]() {
-        TrainingCenterDialog dlg(m_jarvis->currentUserId(), m_passiveListener, m_appLearner, this, 1);
-        dlg.exec();
-    });
-
-    trainMenu->addSeparator();
-    auto* actSearch = trainMenu->addAction(
-        IS_EN ? QStringLiteral("🔍 Search chat history...")
-              : QStringLiteral("🔍 Поиск по истории чатов..."));
-    connect(actSearch, &QAction::triggered, this, [this]() {
-        TrainingCenterDialog dlg(m_jarvis->currentUserId(), m_passiveListener, m_appLearner, this, 3);
-        dlg.exec();
-    });
 
     trainMenu->addSeparator();
 
