@@ -12,6 +12,8 @@ add_library(jarvis_db OBJECT
     memory_consolidation.cpp
     memory_manager.h
     memory_manager.cpp
+    synapse_graph.h
+    synapse_graph.cpp
 )
 
 target_include_directories(jarvis_db PUBLIC

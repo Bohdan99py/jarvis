@@ -3,6 +3,7 @@
 // ============================================================
 #include "llm_cache_manager.h"
 #include "database_manager.h"
+#include "synapse_graph.h"
 
 #include <QCryptographicHash>
 #include <QSqlQuery>
@@ -172,6 +173,13 @@ void LlmCacheManager::saveResponse(qint64 ownerId, const QString& query, const Q
         if (!ins.exec())
             qWarning() << "[LlmCache] FTS sync error:" << ins.lastError().text();
     }
+
+    // Every stored case seeds the associative layer: its concepts become/
+    // reinforce graph nodes, get pairwise-linked to each other (Hebbian:
+    // "fired together in this query"), and are tied to this case's hash so
+    // spreading activation can surface it later for a differently-worded
+    // but conceptually related query (see SynapseGraph::assemble).
+    SynapseGraph::instance().reinforce(ownerId, norm, hash);
 }
 
 // ============================================================
@@ -274,9 +282,10 @@ void LlmCacheManager::logRouterDecision(qint64 ownerId, CaseMatch::Tier tier)
     auto db = DatabaseManager::instance().connection();
     if (!db.isOpen()) return;
 
-    const char* tierStr = tier == CaseMatch::Tier::Exact   ? "Exact"
-                        : tier == CaseMatch::Tier::Similar ? "Similar"
-                                                            : "None";
+    const char* tierStr = tier == CaseMatch::Tier::Exact       ? "Exact"
+                        : tier == CaseMatch::Tier::Similar     ? "Similar"
+                        : tier == CaseMatch::Tier::Associative ? "Associative"
+                                                                : "None";
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
         "INSERT INTO router_log (owner_id, tier) VALUES (:oid, :tier)"));
@@ -309,6 +318,7 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString&
         result.response     = exact;
         result.matchedQuery = norm;
         result.overlap      = 1.0f;
+        SynapseGraph::instance().reinforce(ownerId, norm);
         return finish(result);
     }
 
@@ -332,9 +342,38 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString&
 
     if (best.overlap >= kSimilarThreshold) {
         best.tier = CaseMatch::Tier::Similar;
+        SynapseGraph::instance().reinforce(ownerId, norm);
         return finish(best);
     }
+
+    // 3. Nothing shares enough literal words — try assembling an answer out
+    // of concept-linked fragments instead (spreading activation over
+    // SynapseGraph). This is the "puzzle" fallback: a query that textually
+    // matches nothing can still be conceptually made of pieces seen before.
+    static constexpr float kAssociativeCompletenessFloor = 0.5f;
+    const SynapseGraph::Assembly assembly = SynapseGraph::instance().assemble(ownerId, norm);
+    if (!assembly.fragments.isEmpty() && assembly.completeness >= kAssociativeCompletenessFloor) {
+        const SynapseGraph::Fragment& top = assembly.fragments.first();
+        CaseMatch am;
+        am.tier            = CaseMatch::Tier::Associative;
+        am.response        = top.response;
+        am.matchedQuery    = top.query;
+        am.overlap         = assembly.completeness;
+        am.missingConcepts = assembly.missingConcepts;
+        SynapseGraph::instance().reinforce(ownerId, norm);
+        return finish(am);
+    }
+
     return finish(result);  // Tier::None — nothing close enough, escalate
+}
+
+void LlmCacheManager::reportOutcome(qint64 ownerId, const QString& query, bool wasCorrect)
+{
+    const QString norm = normalizeQuery(query);
+    if (norm.isEmpty()) return;
+
+    if (wasCorrect) SynapseGraph::instance().reinforce(ownerId, norm);
+    else            SynapseGraph::instance().weaken(ownerId, norm);
 }
 
 LlmCacheManager::IndependenceStats LlmCacheManager::independenceStats(qint64 ownerId, int days)

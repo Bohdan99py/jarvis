@@ -36,20 +36,42 @@ public:
 
     // ── Layer-1 confidence router ──────────────────────────
     struct CaseMatch {
-        enum class Tier { Exact, Similar, None };
+        // Associative sits below Similar: it fires only when no cached case
+        // shares enough literal words with the query, but SynapseGraph's
+        // spreading activation still assembled a confident-enough answer
+        // out of concept-linked cases (see synapse_graph.h) — the "puzzle"
+        // tier, for queries phrased nothing like anything seen before.
+        enum class Tier { Exact, Similar, Associative, None };
         Tier    tier = Tier::None;
         QString response;
         QString matchedQuery;
-        float   overlap = 0.0f;  // 0..1 keyword-overlap, for logging/debugging
+        float   overlap = 0.0f;  // 0..1 keyword-overlap (Similar) or puzzle completeness (Associative)
+        // Only populated for Tier::Associative: query concepts that no
+        // activated node/case covered — the "hole in the puzzle". A caller
+        // that wants to spend fewer tokens can ask Claude about just these
+        // instead of the whole query.
+        QStringList missingConcepts;
     };
 
     // Exact hash match -> Tier::Exact. Otherwise ranks candidates (FTS5 if
     // available, LIKE scan as fallback) by keyword overlap against the
-    // query; overlap >= kSimilarThreshold -> Tier::Similar. No candidate
-    // clears the bar -> Tier::None (caller should escalate to Claude).
+    // query; overlap >= kSimilarThreshold -> Tier::Similar. If that also
+    // comes up empty, falls back to SynapseGraph::assemble() — spreading
+    // activation over the concept graph — which can surface a case that
+    // shares no words with the query at all (Tier::Associative). No
+    // candidate anywhere -> Tier::None (caller should escalate to Claude).
     // Only cases belonging to the same ownerId are ever considered — this is
-    // what keeps learning individual per person.
+    // what keeps learning individual per person. Every hit also feeds
+    // SynapseGraph::reinforce() so the concept graph keeps growing from use,
+    // not just from new cases being saved.
     CaseMatch route(qint64 ownerId, const QString& query);
+
+    // Feedback hook for the associative layer: call after a user confirms
+    // or corrects a locally-answered query (see SelfJournal::resolveDoubt
+    // call sites) to close the Hebbian loop — wasCorrect=true strengthens
+    // the concept links this query touched, false weakens them, so a wrong
+    // guess actually becomes less likely to resurface the same way.
+    void reportOutcome(qint64 ownerId, const QString& query, bool wasCorrect);
 
     // Shared with CaseDistiller (Layer 2): fraction of `a`'s significant
     // keywords (len>=3) that also appear in `b`, 0..1.

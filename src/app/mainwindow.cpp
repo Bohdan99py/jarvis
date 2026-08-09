@@ -3429,6 +3429,11 @@ void MainWindow::onSend()
 
             if (isPraise || isScold) {
                 SelfJournal::instance().resolveDoubt(m_pendingDoubtId, isPraise);
+                // Same Hebbian feedback loop as the button path in
+                // onClarificationChoice (see "doubt_feedback:" branch there).
+                if (!m_pendingInput.isEmpty())
+                    LlmCacheManager::instance().reportOutcome(
+                        LlmCacheManager::kDesktopOwnerId, m_pendingInput, isPraise);
                 m_pendingDoubtId = 0;
                 appendLog(Str::logSender(), text, Theme::LogColors::user);
                 appendLog(Str::logJarvis(),
@@ -3910,9 +3915,16 @@ void MainWindow::onClarificationChoice(int choice)
     if (m_pendingSuggestionAction.startsWith(QStringLiteral("doubt_feedback:"))) {
         const qint64 doubtId = m_pendingSuggestionAction.mid(15).toLongLong();
         const bool correct = (choice == 1); // button order: [Correct, Wrong]
+        const QString feedbackQuery = m_pendingInput;  // hideClarification() clears it below
         hideClarification();
         if (doubtId != 0) {
             SelfJournal::instance().resolveDoubt(doubtId, correct);
+            // Close the Hebbian loop: a confirmed/corrected cached answer
+            // strengthens or weakens the concept links SynapseGraph used to
+            // find it, so the same wrong guess is less likely next time.
+            if (!feedbackQuery.isEmpty())
+                LlmCacheManager::instance().reportOutcome(
+                    LlmCacheManager::kDesktopOwnerId, feedbackQuery, correct);
             appendLog(Str::logJarvis(),
                 correct
                     ? (IS_EN ? QStringLiteral("Good to know — I'll trust that one more next time.")

@@ -654,6 +654,48 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=17");
         ver = 17;
     }
+    if (ver < 18) {
+        // Associative memory layer (SynapseGraph) — spreading activation +
+        // Hebbian learning over a concept graph, on top of the keyword-
+        // overlap router above. synapse_nodes = one concept (a normalized
+        // token) per owner; synapse_edges = "these two concepts fired
+        // together" with a weight that grows on success and shrinks on
+        // correction (see SynapseGraph::reinforce/weaken); synapse_case_links
+        // ties concept nodes back to the llm_cache case they came from, so
+        // activation reaching a node surfaces every case built from it, even
+        // when the new query shares no words with the cached one at all.
+        execQuery(R"(CREATE TABLE IF NOT EXISTS synapse_nodes (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id           INTEGER NOT NULL,
+            label              TEXT NOT NULL,
+            activations        INTEGER NOT NULL DEFAULT 1,
+            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            last_activated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(owner_id, label)
+        ))");
+        execQuery(R"(CREATE TABLE IF NOT EXISTS synapse_edges (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id       INTEGER NOT NULL,
+            node_a         INTEGER NOT NULL REFERENCES synapse_nodes(id) ON DELETE CASCADE,
+            node_b         INTEGER NOT NULL REFERENCES synapse_nodes(id) ON DELETE CASCADE,
+            weight         REAL NOT NULL DEFAULT 0.0,
+            co_activations INTEGER NOT NULL DEFAULT 0,
+            updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(owner_id, node_a, node_b)
+        ))");
+        execQuery(R"(CREATE TABLE IF NOT EXISTS synapse_case_links (
+            node_id    INTEGER NOT NULL REFERENCES synapse_nodes(id) ON DELETE CASCADE,
+            case_hash  TEXT NOT NULL,
+            weight     REAL NOT NULL DEFAULT 1.0,
+            PRIMARY KEY (node_id, case_hash)
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_synapse_nodes_owner ON synapse_nodes(owner_id, label)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_synapse_edges_a ON synapse_edges(owner_id, node_a)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_synapse_edges_b ON synapse_edges(owner_id, node_b)");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_synapse_case_links_hash ON synapse_case_links(case_hash)");
+        execQuery("UPDATE schema_version SET version=18");
+        ver = 18;
+    }
     return true;
 }
 

@@ -1,0 +1,309 @@
+[0/1] Re-running CMake...
+-- Qt: found -> C:/Qt/6.11.1/msvc2022_64
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Qt WebEngine: FOUND — interactive diagram panel enabled
+-- Qt SerialPort: FOUND — ESP32 USB serial enabled
+-- Qt version: 6.11.1
+-- Vosk found: C:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/redist/vosk
+-- OpenCV: FOUND in redist/opencv/build/
+-- Vosk DLLs will be copied to bin/ on build
+-- OpenCV runtime will be copied to bin/ on build
+-- Poppler found: C:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/redist/poppler-26.02.0/Library/bin
+-- Tesseract found: C:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/redist/Tesseract-OCR
+-- Configuring done (19.3s)
+-- Generating done (1.4s)
+-- Build files have been written to: C:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build
+[1/13] Automatic MOC and UIC for target JarvisCore
+[2/12] Automatic MOC and UIC for target jarvis_db
+[3/12] Building CXX object src\db\CMakeFiles\jarvis_db.dir\jarvis_db_autogen\mocs_compilation.cpp.obj
+[4/12] Building CXX object src\db\CMakeFiles\jarvis_db.dir\llm_cache_manager.cpp.obj
+[5/12] Building CXX object src\db\CMakeFiles\jarvis_db.dir\synapse_graph.cpp.obj
+[6/12] Building CXX object src\db\CMakeFiles\jarvis_db.dir\database_manager.cpp.obj
+[7/12] Linking CXX static library bin\JarvisCore.lib
+[8/12] Automatic MOC and UIC for target jarvis
+[9/11] Building CXX object CMakeFiles\jarvis.dir\src\app\mainwindow.cpp.obj
+C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\engine\jarvis.h(9): warning C4005: _WIN32_WINNT: ????????? ????????????????
+C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\sdkddkver.h(228): note: ??. ?????????? ??????????? "_WIN32_WINNT"
+C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\app\mainwindow.cpp(2512): warning C4456: ?????????? "actScreenshot" ???????? ?????????? ????????? ??????????
+C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src\app\mainwindow.cpp(1046): note:  ??. ?????????? "actScreenshot"
+[10/11] Linking CXX executable bin\jarvis.exe
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/opencv_world4100d.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libvosk.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/opencv_world4100.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libwinpthread-1.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libgcc_s_seh-1.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libstdc++-6.dll
+C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\build\bin\jarvis.exe 64 bit, debug executable [QML]
+Scanning C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\src:
+QML imports:
+  'QtQuick' C:\Qt\6.11.1\msvc2022_64\qml\QtQuick
+  'QtQml' C:\Qt\6.11.1\msvc2022_64\qml\QtQml
+  'QML' C:\Qt\6.11.1\msvc2022_64\qml\QML
+  'QtQml.Models' C:\Qt\6.11.1\msvc2022_64\qml\QtQml\Models
+  'QtQml.WorkerScript' C:\Qt\6.11.1\msvc2022_64\qml\QtQml\WorkerScript
+  'QtQuick.Layouts' C:\Qt\6.11.1\msvc2022_64\qml\QtQuick\Layouts
+  'QtQuick.Effects' C:\Qt\6.11.1\msvc2022_64\qml\QtQuick\Effects
+Adding in plugin type generic for module: Qt6Gui
+Adding in plugin type iconengines for module: Qt6Gui
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type multimedia for module: Qt6Multimedia
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforminputcontexts for module: Qt6Gui
+Adding Qt6VirtualKeyboard for qtvirtualkeyboardplugind.dll from plugin type: platforminputcontexts
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type position for module: Qt6Positioning
+Adding Qt6SerialPort for qtposition_nmead.dll from plugin type: position
+Adding in plugin type qmltooling for module: Qt6Qml
+Adding Qt6Quick3DUtils for qmldbg_quick3dprofilerd.dll from plugin type: qmltooling
+Adding in plugin type sqldrivers for module: Qt6Sql
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackendd.dll. Use -force-openssl or specify -openssl-root if you want to use it.
+Adding in plugin type vectorimageformats for module: Qt6Quick
+Adding Qt6Lottie Qt6LottieVectorImageGenerator Qt6QuickVectorImageGenerator for qlottievectorimaged.dll from plugin type: vectorimageformats
+Performing additional pass of finding Qt plugins due to updated Qt module list: Qt6Core Qt6Gui Qt6Lottie Qt6LottieVectorImageGenerator Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6Quick3DUtils Qt6QuickEffects Qt6QuickLayouts Qt6QuickVectorImageGenerator Qt6QuickWidgets Qt6SerialPort Qt6Sql Qt6Svg Qt6VirtualKeyboard Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+Adding in plugin type generic for module: Qt6Gui
+Adding in plugin type iconengines for module: Qt6Gui
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type multimedia for module: Qt6Multimedia
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforminputcontexts for module: Qt6Gui
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type position for module: Qt6Positioning
+Adding in plugin type qmltooling for module: Qt6Qml
+Adding in plugin type sqldrivers for module: Qt6Sql
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackendd.dll. Use -force-openssl or specify -openssl-root if you want to use it.
+Adding in plugin type vectorimageformats for module: Qt6Quick
+Direct dependencies: Qt6Core Qt6Gui Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6QuickWidgets Qt6Sql Qt6Svg Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+All dependencies   : Qt6Core Qt6Gui Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6QuickEffects Qt6QuickLayouts Qt6QuickWidgets Qt6Sql Qt6Svg Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+To be deployed     : Qt6Core Qt6Gui Qt6Lottie Qt6LottieVectorImageGenerator Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6Quick3DUtils Qt6QuickEffects Qt6QuickLayouts Qt6QuickVectorImageGenerator Qt6QuickWidgets Qt6SerialPort Qt6Sql Qt6Svg Qt6VirtualKeyboard Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+Skipping system library C:/WINDOWS/system32/icuuc.dll
+Qt6Cored.dll is up to date.
+Qt6Guid.dll is up to date.
+Qt6Lottied.dll is up to date.
+Qt6LottieVectorImageGeneratord.dll is up to date.
+Qt6Multimediad.dll is up to date.
+Qt6MultimediaWidgetsd.dll is up to date.
+Qt6Networkd.dll is up to date.
+Qt6OpenGLd.dll is up to date.
+Qt6Positioningd.dll is up to date.
+Qt6PrintSupportd.dll is up to date.
+Qt6Qmld.dll is up to date.
+Qt6QmlMetad.dll is up to date.
+Qt6QmlModelsd.dll is up to date.
+Qt6QmlWorkerScriptd.dll is up to date.
+Qt6Quickd.dll is up to date.
+Qt6Quick3DUtilsd.dll is up to date.
+Qt6QuickEffectsd.dll is up to date.
+Qt6QuickLayoutsd.dll is up to date.
+Qt6QuickVectorImageGeneratord.dll is up to date.
+Qt6QuickWidgetsd.dll is up to date.
+Qt6SerialPortd.dll is up to date.
+Qt6Sqld.dll is up to date.
+Qt6Svgd.dll is up to date.
+Qt6VirtualKeyboardd.dll is up to date.
+Qt6WebChanneld.dll is up to date.
+Qt6WebEngineCored.dll is up to date.
+Qt6WebEngineWidgetsd.dll is up to date.
+Qt6Widgetsd.dll is up to date.
+dxcompiler.dll is up to date.
+dxil.dll is up to date.
+avcodec-61.dll is up to date.
+avformat-61.dll is up to date.
+avutil-59.dll is up to date.
+swresample-5.dll is up to date.
+swscale-8.dll is up to date.
+qtuiotouchplugind.dll is up to date.
+qsvgicond.dll is up to date.
+qgifd.dll is up to date.
+qicnsd.dll is up to date.
+qicod.dll is up to date.
+qjpegd.dll is up to date.
+qsvgd.dll is up to date.
+qtgad.dll is up to date.
+qtiffd.dll is up to date.
+qwbmpd.dll is up to date.
+qwebpd.dll is up to date.
+ffmpegmediaplugind.dll is up to date.
+windowsmediaplugind.dll is up to date.
+qnetworklistmanagerd.dll is up to date.
+qtvirtualkeyboardplugind.dll is up to date.
+qwindowsd.dll is up to date.
+qtposition_nmead.dll is up to date.
+qtposition_positionpolld.dll is up to date.
+qtposition_winrtd.dll is up to date.
+qmldbg_debuggerd.dll is up to date.
+qmldbg_inspectord.dll is up to date.
+qmldbg_locald.dll is up to date.
+qmldbg_messagesd.dll is up to date.
+qmldbg_natived.dll is up to date.
+qmldbg_nativedebuggerd.dll is up to date.
+qmldbg_previewd.dll is up to date.
+qmldbg_profilerd.dll is up to date.
+qmldbg_quick3dprofilerd.dll is up to date.
+qmldbg_quickeventreplayd.dll is up to date.
+qmldbg_quickprofilerd.dll is up to date.
+qmldbg_serverd.dll is up to date.
+qmldbg_tcpd.dll is up to date.
+qsqlibased.dll is up to date.
+qsqlited.dll is up to date.
+qsqlmimerd.dll is up to date.
+qsqlocid.dll is up to date.
+qsqlodbcd.dll is up to date.
+qsqlpsqld.dll is up to date.
+qmodernwindowsstyled.dll is up to date.
+qcertonlybackendd.dll is up to date.
+qschannelbackendd.dll is up to date.
+qlottievectorimaged.dll is up to date.
+qtquick2plugind.dll is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+Skipping C:\Qt\6.11.1\msvc2022_64\qml\QtQuick\Controls\designer.
+qmlplugind.dll is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+modelsplugind.dll is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+workerscriptplugind.dll is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+qquicklayoutsplugind.dll is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+effectsplugind.dll is up to date.
+plugins.qmltypes is up to date.
+qmldir is up to date.
+Deploying: QtWebEngineProcessd...
+QtWebEngineProcessd.exe is up to date.
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/opencv_world4100d.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libvosk.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/opencv_world4100.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libwinpthread-1.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libgcc_s_seh-1.dll
+Adding local dependencyC:/Users/PCMyPC/Downloads/jarvis-github-project2/jarvis/build/bin/libstdc++-6.dll
+C:\Users\PCMyPC\Downloads\jarvis-github-project2\jarvis\build\bin\jarvis.exe 64 bit, debug executable [QML]
+Adding in plugin type generic for module: Qt6Gui
+Adding in plugin type iconengines for module: Qt6Gui
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type multimedia for module: Qt6Multimedia
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforminputcontexts for module: Qt6Gui
+Adding Qt6VirtualKeyboard for qtvirtualkeyboardplugind.dll from plugin type: platforminputcontexts
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type position for module: Qt6Positioning
+Adding Qt6SerialPort for qtposition_nmead.dll from plugin type: position
+Adding in plugin type qmltooling for module: Qt6Qml
+Adding Qt6Quick3DUtils for qmldbg_quick3dprofilerd.dll from plugin type: qmltooling
+Adding in plugin type sqldrivers for module: Qt6Sql
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackendd.dll. Use -force-openssl or specify -openssl-root if you want to use it.
+Adding in plugin type vectorimageformats for module: Qt6Quick
+Adding Qt6Lottie Qt6LottieVectorImageGenerator Qt6QuickVectorImageGenerator for qlottievectorimaged.dll from plugin type: vectorimageformats
+Performing additional pass of finding Qt plugins due to updated Qt module list: Qt6Core Qt6Gui Qt6Lottie Qt6LottieVectorImageGenerator Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6Quick3DUtils Qt6QuickVectorImageGenerator Qt6QuickWidgets Qt6SerialPort Qt6Sql Qt6Svg Qt6VirtualKeyboard Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+Adding in plugin type generic for module: Qt6Gui
+Adding in plugin type iconengines for module: Qt6Gui
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type multimedia for module: Qt6Multimedia
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforminputcontexts for module: Qt6Gui
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type position for module: Qt6Positioning
+Adding in plugin type qmltooling for module: Qt6Qml
+Adding in plugin type sqldrivers for module: Qt6Sql
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackendd.dll. Use -force-openssl or specify -openssl-root if you want to use it.
+Adding in plugin type vectorimageformats for module: Qt6Quick
+Direct dependencies: Qt6Core Qt6Gui Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6QuickWidgets Qt6Sql Qt6Svg Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+All dependencies   : Qt6Core Qt6Gui Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6QuickWidgets Qt6Sql Qt6Svg Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+To be deployed     : Qt6Core Qt6Gui Qt6Lottie Qt6LottieVectorImageGenerator Qt6Multimedia Qt6MultimediaWidgets Qt6Network Qt6OpenGL Qt6Positioning Qt6PrintSupport Qt6Qml Qt6QmlMeta Qt6QmlModels Qt6QmlWorkerScript Qt6Quick Qt6Quick3DUtils Qt6QuickVectorImageGenerator Qt6QuickWidgets Qt6SerialPort Qt6Sql Qt6Svg Qt6VirtualKeyboard Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets Qt6Widgets
+Skipping system library C:/WINDOWS/system32/icuuc.dll
+Qt6Cored.dll is up to date.
+Qt6Guid.dll is up to date.
+Qt6Lottied.dll is up to date.
+Qt6LottieVectorImageGeneratord.dll is up to date.
+Qt6Multimediad.dll is up to date.
+Qt6MultimediaWidgetsd.dll is up to date.
+Qt6Networkd.dll is up to date.
+Qt6OpenGLd.dll is up to date.
+Qt6Positioningd.dll is up to date.
+Qt6PrintSupportd.dll is up to date.
+Qt6Qmld.dll is up to date.
+Qt6QmlMetad.dll is up to date.
+Qt6QmlModelsd.dll is up to date.
+Qt6QmlWorkerScriptd.dll is up to date.
+Qt6Quickd.dll is up to date.
+Qt6Quick3DUtilsd.dll is up to date.
+Qt6QuickVectorImageGeneratord.dll is up to date.
+Qt6QuickWidgetsd.dll is up to date.
+Qt6SerialPortd.dll is up to date.
+Qt6Sqld.dll is up to date.
+Qt6Svgd.dll is up to date.
+Qt6VirtualKeyboardd.dll is up to date.
+Qt6WebChanneld.dll is up to date.
+Qt6WebEngineCored.dll is up to date.
+Qt6WebEngineWidgetsd.dll is up to date.
+Qt6Widgetsd.dll is up to date.
+dxcompiler.dll is up to date.
+dxil.dll is up to date.
+avcodec-61.dll is up to date.
+avformat-61.dll is up to date.
+avutil-59.dll is up to date.
+swresample-5.dll is up to date.
+swscale-8.dll is up to date.
+qtuiotouchplugind.dll is up to date.
+qsvgicond.dll is up to date.
+qgifd.dll is up to date.
+qicnsd.dll is up to date.
+qicod.dll is up to date.
+qjpegd.dll is up to date.
+qsvgd.dll is up to date.
+qtgad.dll is up to date.
+qtiffd.dll is up to date.
+qwbmpd.dll is up to date.
+qwebpd.dll is up to date.
+ffmpegmediaplugind.dll is up to date.
+windowsmediaplugind.dll is up to date.
+qnetworklistmanagerd.dll is up to date.
+qtvirtualkeyboardplugind.dll is up to date.
+qwindowsd.dll is up to date.
+qtposition_nmead.dll is up to date.
+qtposition_positionpolld.dll is up to date.
+qtposition_winrtd.dll is up to date.
+qmldbg_debuggerd.dll is up to date.
+qmldbg_inspectord.dll is up to date.
+qmldbg_locald.dll is up to date.
+qmldbg_messagesd.dll is up to date.
+qmldbg_natived.dll is up to date.
+qmldbg_nativedebuggerd.dll is up to date.
+qmldbg_previewd.dll is up to date.
+qmldbg_profilerd.dll is up to date.
+qmldbg_quick3dprofilerd.dll is up to date.
+qmldbg_quickeventreplayd.dll is up to date.
+qmldbg_quickprofilerd.dll is up to date.
+qmldbg_serverd.dll is up to date.
+qmldbg_tcpd.dll is up to date.
+qsqlibased.dll is up to date.
+qsqlited.dll is up to date.
+qsqlmimerd.dll is up to date.
+qsqlocid.dll is up to date.
+qsqlodbcd.dll is up to date.
+qsqlpsqld.dll is up to date.
+qmodernwindowsstyled.dll is up to date.
+qcertonlybackendd.dll is up to date.
+qschannelbackendd.dll is up to date.
+qlottievectorimaged.dll is up to date.
+icudtl.dat is up to date.
+qtwebengine_devtools_resources.debug.pak is up to date.
+qtwebengine_resources.debug.pak is up to date.
+qtwebengine_resources_100p.debug.pak is up to date.
+qtwebengine_resources_200p.debug.pak is up to date.
+v8_context_snapshot.debug.bin is up to date.
+en-US.pak is up to date.
