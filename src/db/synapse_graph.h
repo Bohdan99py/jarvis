@@ -76,6 +76,26 @@ public:
         int edgeCount = 0;
     };
 
+    // ── UI introspection — for a "Synapse Graph" monitoring panel ───
+    struct TopNode {
+        QString label;
+        int     activations = 0;   // how many times this concept has fired
+    };
+    struct TopEdge {
+        QString labelA;
+        QString labelB;
+        float   weight         = 0.0f;  // current synapse strength
+        int     coActivations  = 0;     // how many times reinforced/weakened
+    };
+
+    // Most-activated concepts for ownerId, activations desc. Empty graph
+    // (nothing learned yet) returns an empty list, not an error.
+    QList<TopNode> topNodes(qint64 ownerId, int limit = 12) const;
+
+    // Strongest synapses for ownerId, weight desc — the associations the
+    // graph is most confident in right now.
+    QList<TopEdge> topEdges(qint64 ownerId, int limit = 12) const;
+
     // ── Хеббовское обучение ─────────────────────────────────────────
     // Извлекает понятия из text, создаёт/подкрепляет их узлы и усиливает
     // рёбра между КАЖДОЙ парой понятий, встретившихся в этом запросе —

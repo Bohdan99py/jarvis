@@ -8,6 +8,8 @@
 #include "passive_listener.h"
 #include "screenshot_learner.h"
 #include "notification_manager.h"
+#include "synapse_graph.h"
+#include "llm_cache_manager.h"
 #include "lang.h"
 
 #include <QQuickWidget>
@@ -93,6 +95,10 @@ TrainingCenterDialog::TrainingCenterDialog(qint64 userId,
     ctx->setContextProperty(QStringLiteral("trainingActive"), false);
     ctx->setContextProperty(QStringLiteral("trainingLog"), QString());
     ctx->setContextProperty(QStringLiteral("historyResults"), QVariantList());
+    ctx->setContextProperty(QStringLiteral("synapseNodeCount"), QVariant(0));
+    ctx->setContextProperty(QStringLiteral("synapseEdgeCount"), QVariant(0));
+    ctx->setContextProperty(QStringLiteral("synapseTopNodes"), QVariantList());
+    ctx->setContextProperty(QStringLiteral("synapseTopEdges"), QVariantList());
     ctx->setContextProperty(QStringLiteral("trainingCenter"), this);
 
     m_view->setSource(QUrl(QStringLiteral("qrc:/qml/TrainingCenter.qml")));
@@ -107,6 +113,7 @@ void TrainingCenterDialog::refreshStats()
     refreshOverview();
     refreshAppUsage();
     refreshTrainingTab();
+    refreshSynapseGraph();
 }
 
 void TrainingCenterDialog::refreshOverview()
@@ -184,6 +191,43 @@ void TrainingCenterDialog::refreshTrainingTab()
     ctx->setContextProperty(QStringLiteral("modelOptions"), options);
     ctx->setContextProperty(QStringLiteral("selectedModel"), m_selectedModel);
     ctx->setContextProperty(QStringLiteral("maxExamples"), m_maxExamples);
+}
+
+void TrainingCenterDialog::refreshSynapseGraph()
+{
+    QQmlContext* ctx = m_view->rootContext();
+    auto& graph = SynapseGraph::instance();
+    const auto stats = graph.stats(LlmCacheManager::kDesktopOwnerId);
+
+    ctx->setContextProperty(QStringLiteral("synapseNodeCount"), stats.nodeCount);
+    ctx->setContextProperty(QStringLiteral("synapseEdgeCount"), stats.edgeCount);
+
+    QVariantList nodes;
+    const auto topNodes = graph.topNodes(LlmCacheManager::kDesktopOwnerId, 12);
+    int maxActivations = 1;
+    for (const auto& n : topNodes) maxActivations = qMax(maxActivations, n.activations);
+    for (const auto& n : topNodes) {
+        QVariantMap m;
+        m[QStringLiteral("label")]       = n.label;
+        m[QStringLiteral("activations")] = n.activations;
+        m[QStringLiteral("fraction")]    = double(n.activations) / maxActivations;
+        nodes.append(m);
+    }
+    ctx->setContextProperty(QStringLiteral("synapseTopNodes"), nodes);
+
+    QVariantList edges;
+    for (const auto& e : graph.topEdges(LlmCacheManager::kDesktopOwnerId, 12)) {
+        QVariantMap m;
+        m[QStringLiteral("labelA")]        = e.labelA;
+        m[QStringLiteral("labelB")]        = e.labelB;
+        m[QStringLiteral("weight")]        = double(e.weight);
+        // SynapseGraph::kEdgeWeightMax — kept in sync manually since it's
+        // a private tuning constant, not part of the public API surface.
+        m[QStringLiteral("fraction")]      = qMin(1.0, double(e.weight) / 3.0);
+        m[QStringLiteral("coActivations")] = e.coActivations;
+        edges.append(m);
+    }
+    ctx->setContextProperty(QStringLiteral("synapseTopEdges"), edges);
 }
 
 // ============================================================

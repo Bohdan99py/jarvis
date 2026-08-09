@@ -47,7 +47,8 @@ Rectangle {
                     en ? "Overview" : "Обзор",
                     en ? "App Usage" : "Использование",
                     en ? "Local Training" : "Локальное обучение",
-                    en ? "History" : "История"
+                    en ? "History" : "История",
+                    en ? "Synapse Graph" : "Граф синапсов"
                 ]
                 delegate: Rectangle {
                     width: tabText.implicitWidth + 24
@@ -760,6 +761,223 @@ Rectangle {
                                             wrapMode: Text.WordWrap
                                             maximumLineCount: 3
                                             elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ======================================================
+            // Tab 4 — Synapse Graph (SynapseGraph associative memory)
+            // ======================================================
+            Item {
+                anchors.fill: parent
+                visible: root.currentTab === 4
+                opacity: visible ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 180 } }
+
+                Column {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    Row {
+                        width: parent.width
+                        Text {
+                            text: en ? "Concept nodes: " : "Узлов-понятий: "
+                            color: Theme.onSurfaceVariant
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: synapseNodeCount
+                            color: root.cyan
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                        Item { width: 24; height: 1 }
+                        Text {
+                            text: en ? "Synapses: " : "Связей: "
+                            color: Theme.onSurfaceVariant
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: synapseEdgeCount
+                            color: root.teal
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                        Item { width: parent.width - 420; height: 1 }
+                        Rectangle {
+                            width: 90; height: 26; radius: 6
+                            color: sgRefreshArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
+                            border.width: 1
+                            border.color: Theme.outlineStrong
+                            Text {
+                                anchors.centerIn: parent
+                                text: en ? "🔄 Refresh" : "🔄 Обновить"
+                                color: root.cyan
+                                font.pixelSize: 10
+                            }
+                            MouseArea {
+                                id: sgRefreshArea
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: trainingCenter.refreshStats()
+                            }
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+                        height: parent.height - y
+                        spacing: 16
+
+                        // ---- Most-activated concepts ----
+                        Column {
+                            width: (parent.width - 16) / 2
+                            height: parent.height
+                            spacing: 8
+
+                            Text {
+                                text: en ? "Most-fired concepts" : "Самые активные понятия"
+                                color: Theme.success
+                                font.pixelSize: 13
+                                font.bold: true
+                                font.family: "Segoe UI Semibold"
+                            }
+
+                            Flickable {
+                                width: parent.width
+                                height: parent.height - 30
+                                clip: true
+                                contentHeight: nodeCol.height
+                                boundsBehavior: Flickable.StopAtBounds
+
+                                Column {
+                                    id: nodeCol
+                                    width: parent.width
+                                    spacing: 6
+
+                                    Text {
+                                        visible: synapseTopNodes.length === 0
+                                        text: en ? "No concepts learned yet — the graph grows as JARVIS answers things."
+                                                 : "Понятий пока нет — граф растёт по мере того, как JARVIS отвечает."
+                                        color: Theme.onSurfaceVariant
+                                        font.pixelSize: 11
+                                        width: parent.width
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Repeater {
+                                        model: synapseTopNodes
+                                        delegate: Row {
+                                            width: nodeCol.width
+                                            spacing: 10
+                                            Text {
+                                                width: 110
+                                                text: modelData.label
+                                                color: Theme.onSurface
+                                                font.pixelSize: 12
+                                                elide: Text.ElideRight
+                                            }
+                                            Rectangle {
+                                                width: parent.width - 110 - 34
+                                                height: 14
+                                                radius: 4
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                color: Theme.outline
+                                                Rectangle {
+                                                    width: parent.width * modelData.fraction
+                                                    height: parent.height
+                                                    radius: 4
+                                                    color: Theme.success
+                                                    Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                                                }
+                                            }
+                                            Text {
+                                                width: 30
+                                                text: modelData.activations
+                                                color: Theme.onSurfaceVariant
+                                                font.pixelSize: 9
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- Strongest synapses ----
+                        Column {
+                            width: (parent.width - 16) / 2
+                            height: parent.height
+                            spacing: 8
+
+                            Text {
+                                text: en ? "Strongest synapses" : "Самые крепкие связи"
+                                color: root.violet
+                                font.pixelSize: 13
+                                font.bold: true
+                                font.family: "Segoe UI Semibold"
+                            }
+
+                            Flickable {
+                                width: parent.width
+                                height: parent.height - 30
+                                clip: true
+                                contentHeight: edgeCol.height
+                                boundsBehavior: Flickable.StopAtBounds
+
+                                Column {
+                                    id: edgeCol
+                                    width: parent.width
+                                    spacing: 6
+
+                                    Text {
+                                        visible: synapseTopEdges.length === 0
+                                        text: en ? "No associations yet."
+                                                 : "Связей пока нет."
+                                        color: Theme.onSurfaceVariant
+                                        font.pixelSize: 11
+                                    }
+
+                                    Repeater {
+                                        model: synapseTopEdges
+                                        delegate: Column {
+                                            width: edgeCol.width
+                                            spacing: 2
+                                            Text {
+                                                width: parent.width
+                                                text: modelData.labelA + " ↔ " + modelData.labelB
+                                                color: Theme.onSurface
+                                                font.pixelSize: 11
+                                                elide: Text.ElideRight
+                                            }
+                                            Row {
+                                                width: parent.width
+                                                spacing: 8
+                                                Rectangle {
+                                                    width: parent.width - 90
+                                                    height: 10
+                                                    radius: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    color: Theme.outline
+                                                    Rectangle {
+                                                        width: parent.width * modelData.fraction
+                                                        height: parent.height
+                                                        radius: 4
+                                                        color: root.violet
+                                                        Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                                                    }
+                                                }
+                                                Text {
+                                                    width: 82
+                                                    text: modelData.weight.toFixed(2) + " · ×" + modelData.coActivations
+                                                    color: Theme.onSurfaceVariant
+                                                    font.pixelSize: 9
+                                                }
+                                            }
                                         }
                                     }
                                 }

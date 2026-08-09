@@ -354,6 +354,57 @@ SynapseGraph::Assembly SynapseGraph::assemble(
 //  Introspection
 // ============================================================
 
+QList<SynapseGraph::TopNode> SynapseGraph::topNodes(qint64 ownerId, int limit) const
+{
+    QList<TopNode> out;
+    auto db = DatabaseManager::instance().connection();
+    if (!db.isOpen()) return out;
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT label, activations FROM synapse_nodes WHERE owner_id=:oid "
+        "ORDER BY activations DESC LIMIT :lim"));
+    q.bindValue(QStringLiteral(":oid"), ownerId);
+    q.bindValue(QStringLiteral(":lim"), limit);
+    if (!q.exec()) return out;
+
+    while (q.next()) {
+        TopNode n;
+        n.label       = q.value(0).toString();
+        n.activations = q.value(1).toInt();
+        out.append(n);
+    }
+    return out;
+}
+
+QList<SynapseGraph::TopEdge> SynapseGraph::topEdges(qint64 ownerId, int limit) const
+{
+    QList<TopEdge> out;
+    auto db = DatabaseManager::instance().connection();
+    if (!db.isOpen()) return out;
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT na.label, nb.label, e.weight, e.co_activations "
+        "FROM synapse_edges e "
+        "JOIN synapse_nodes na ON na.id = e.node_a "
+        "JOIN synapse_nodes nb ON nb.id = e.node_b "
+        "WHERE e.owner_id=:oid ORDER BY e.weight DESC LIMIT :lim"));
+    q.bindValue(QStringLiteral(":oid"), ownerId);
+    q.bindValue(QStringLiteral(":lim"), limit);
+    if (!q.exec()) return out;
+
+    while (q.next()) {
+        TopEdge e;
+        e.labelA        = q.value(0).toString();
+        e.labelB        = q.value(1).toString();
+        e.weight        = q.value(2).toFloat();
+        e.coActivations = q.value(3).toInt();
+        out.append(e);
+    }
+    return out;
+}
+
 SynapseGraph::GraphStats SynapseGraph::stats(qint64 ownerId) const
 {
     GraphStats s;

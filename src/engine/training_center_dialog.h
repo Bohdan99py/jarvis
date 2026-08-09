@@ -22,8 +22,9 @@ class TrainingCenterDialog : public QDialog
 {
     Q_OBJECT
 public:
-    // initialTab: 0=Overview, 1=App Usage, 2=Local Training, 3=History —
-    // lets each old menu entry land on the tab it used to be its own dialog.
+    // initialTab: 0=Overview, 1=App Usage, 2=Local Training, 3=History,
+    // 4=Synapse Graph — lets each old menu entry land on the tab it used
+    // to be its own dialog.
     explicit TrainingCenterDialog(qint64 userId,
                                   PassiveListener* passive,
                                   ScreenshotLearner* appLearner,
@@ -45,6 +46,7 @@ private:
     void refreshOverview();
     void refreshAppUsage();
     void refreshTrainingTab();
+    void refreshSynapseGraph();
 
     qint64             m_userId;
     PassiveListener*   m_passive    = nullptr;
