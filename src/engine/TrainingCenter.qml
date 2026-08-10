@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import Jarvis.Theme
 
 // ============================================================
@@ -1128,11 +1127,35 @@ Rectangle {
                                                     (synapseTab.selectedNode === nodeItem.index)
                                                         ? -1 : nodeItem.index
                                             }
-                                            ToolTip.visible: hover.hovered
-                                            ToolTip.text: modelData.label
-                                                + (root.en ? "\nfired ×" : "\nсработало ×") + modelData.activations
-                                                + (root.en ? "\nsynapses: " : "\nсвязей: ") + modelData.degree
-                                                + (root.en ? "\nlearned from: " : "\nисточник: ") + modelData.source
+                                            // Своя подсказка вместо Controls.ToolTip: из-за
+                                            // неё файл тянул целый модуль QtQuick.Controls
+                                            // ради одного всплывающего прямоугольника, тогда
+                                            // как все остальные экраны проекта обходятся
+                                            // QtQuick + Jarvis.Theme. Чем меньше модулей
+                                            // нужно развернуть, тем меньше способов получить
+                                            // пустое окно на машине пользователя.
+                                            Rectangle {
+                                                visible: hover.hovered
+                                                z: 100
+                                                x: parent.width + 6
+                                                y: -height / 2 + parent.height / 2
+                                                width: tipText.implicitWidth + 14
+                                                height: tipText.implicitHeight + 10
+                                                radius: Theme.radiusSm
+                                                color: Theme.surface3
+                                                border.width: 1
+                                                border.color: Theme.outlineStrong
+                                                Text {
+                                                    id: tipText
+                                                    anchors.centerIn: parent
+                                                    color: Theme.onSurface
+                                                    font.pixelSize: 10
+                                                    text: modelData.label
+                                                        + (root.en ? "\nfired ×" : "\nсработало ×") + modelData.activations
+                                                        + (root.en ? "\nsynapses: " : "\nсвязей: ") + modelData.degree
+                                                        + (root.en ? "\nlearned from: " : "\nисточник: ") + modelData.source
+                                                }
+                                            }
                                         }
 
                                         Text {

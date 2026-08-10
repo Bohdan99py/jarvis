@@ -32,7 +32,12 @@ if "%QT_DIR%"=="" (
 )
 
 set BUILD_INSTALLER=%2
-set BUILD_DIR=build
+REM Отдельный каталог от повседневной сборки. Раньше здесь стоял тот же
+REM "build", что использует CLion/Ninja, и CMake отказывался работать:
+REM "generator Visual Studio 17 2022 does not match the generator used
+REM previously: Ninja" — то есть релиз нельзя было собрать, не снеся
+REM рабочую сборку, а после релиза она пересобиралась с нуля.
+set BUILD_DIR=build_release
 set RELEASE_DIR=%BUILD_DIR%\release_package
 set REDIST_DIR=redist
 
@@ -53,8 +58,14 @@ echo [1/5] Configuring CMake...
 
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
+REM Ninja, а не "Visual Studio 17 2022": генератор с зашитым номером версии
+REM отказывается работать на любой другой установленной студии ("could not
+REM find any instance of Visual Studio"), а компилятор всё равно берётся из
+REM окружения vcvars, которое этот скрипт требует. Ninja же одинаково
+REM работает на VS 17/18 и совпадает с тем, чем собирается проект каждый
+REM день, так что релиз не расходится со сборкой разработчика.
 cmake -S . -B "%BUILD_DIR%" ^
-    -G "Visual Studio 17 2022" -A x64 ^
+    -G Ninja ^
     -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
     -DCMAKE_BUILD_TYPE=Release
 
@@ -62,14 +73,14 @@ if errorlevel 1 (
     echo [ERROR] CMake configuration failed!
     echo.
     echo Make sure you have:
-    echo   - Visual Studio 2022 with C++ workload
+    echo   - Run this from a Developer Command Prompt ^(vcvars64^)
     echo   - Qt 6.x installed at %QT_DIR%
     exit /b 1
 )
 
 echo [2/5] Building Release...
 
-cmake --build "%BUILD_DIR%" --config Release --parallel
+cmake --build "%BUILD_DIR%" --parallel
 if errorlevel 1 (
     echo [ERROR] Build failed!
     exit /b 1
@@ -119,8 +130,19 @@ if not exist "%WINDEPLOYQT%" (
     goto :skip_deploy
 )
 
+REM --qmldir ОБЯЗАТЕЛЕН. Экраны JARVIS написаны на QML, но лежат внутри
+REM .qrc и попадают прямо в бинарник — снаружи windeployqt их не видит и
+REM без этого ключа не разворачивает НИ ОДНОГО QML-модуля. Qt6Quick.dll
+REM при этом копируется как обычная зависимость, поэтому сборка выглядит
+REM целой, а в установленной программе каталога qml\ просто нет: любой
+REM `import QtQuick` падает, и каждое QML-окно (Work Modes, Training
+REM Center, User Center, Organize, Task Board, Vision Center) открывается
+REM пустым прямоугольником. Указываем исходники — по ним сканируются
+REM импорты и подтягиваются QtQuick, QtQuick.Controls, QtQuick.Layouts,
+REM QtQuick.Effects и их плагины.
 "%WINDEPLOYQT%" "%RELEASE_DIR%\Jarvis.exe" ^
     --release ^
+    --qmldir "%CD%\src" ^
     --no-translations ^
     --no-opengl-sw ^
     --no-system-d3d-compiler ^

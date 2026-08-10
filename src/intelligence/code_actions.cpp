@@ -453,9 +453,16 @@ CodeAction CodeActions::doCreateKiCadSchematic(CodeAction action) const
         p.componentType = c.value(QStringLiteral("type")).toString();
         p.reference     = c.value(QStringLiteral("ref")).toString();
         p.value         = c.value(QStringLiteral("value")).toString();
-        p.x             = c.value(QStringLiteral("x")).toDouble();
-        p.y             = c.value(QStringLiteral("y")).toDouble();
         p.rotationDeg   = c.value(QStringLiteral("rotation")).toInt(0);
+        // Координаты необязательны. Проверяем НАЛИЧИЕ ключей, а не
+        // значения: x=0 — это законная точка листа, и по одному лишь
+        // нулю "не задано" от "задано в нуле" не отличить.
+        p.positionGiven = c.contains(QStringLiteral("x"))
+                       && c.contains(QStringLiteral("y"));
+        if (p.positionGiven) {
+            p.x = c.value(QStringLiteral("x")).toDouble();
+            p.y = c.value(QStringLiteral("y")).toDouble();
+        }
         placements.append(p);
     }
 
@@ -471,6 +478,10 @@ CodeAction CodeActions::doCreateKiCadSchematic(CodeAction action) const
         wire.to.pin            = to.value(QStringLiteral("pin")).toString();
         wires.append(wire);
     }
+
+    // Расставляем всё, для чего координаты не пришли — по связям, той же
+    // силовой моделью, что раскладывает граф понятий.
+    KiCadSchematicBuilder::autoPlace(placements, wires);
 
     AppLauncher launcher;
     const QString kicadRoot = launcher.kicadInstallRoot();

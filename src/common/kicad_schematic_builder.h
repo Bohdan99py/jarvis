@@ -26,6 +26,10 @@ struct KiCadPlacement {
     double  x = 0.0;
     double  y = 0.0;
     int     rotationDeg = 0;
+    // false — координаты не заданы, их посчитает autoPlace(). Отличать
+    // "не задано" от "задано как 0" по самому значению нельзя: 0,0 —
+    // легальная точка на листе.
+    bool    positionGiven = false;
 };
 
 // A wire endpoint identified by WHICH component pin it connects to, not a
@@ -52,6 +56,30 @@ public:
     // installRoot: see KiCadSymbolCache — needed to resolve real symbol
     // definitions for the lib_symbols block.
     explicit KiCadSchematicBuilder(const QString& installRoot);
+
+    // ── Автораскладка ────────────────────────────────────────────────
+    // Заполняет x/y тем элементам, у которых positionGiven == false.
+    //
+    // Схема — это граф: детали суть узлы, провода суть рёбра. Поэтому
+    // раскладывается она тем же способом, что и граф понятий в Training
+    // Center — силовой моделью Фрухтермана–Рейнгольда: связанные детали
+    // притягиваются, несвязанные расталкиваются, и топология сама
+    // превращается в геометрию. Раньше координаты в миллиметрах должна
+    // была придумывать модель, а это ровно тот случай, когда «почти
+    // правильно» означает наложившиеся друг на друга символы и провода
+    // поперёк всего листа.
+    //
+    // Отличия от раскладки графа продиктованы тем, что читатель схемы
+    // ждёт конвенций, а не просто непересекающихся линий:
+    //   • результат прибивается к сетке 1.27 мм — вне сетки KiCad не
+    //     считает пины соединёнными;
+    //   • питание (GND/VCC) не участвует в общем расталкивании, а
+    //     ставится вплотную к своей детали: GND под ней, VCC над.
+    //
+    // Детерминированно: одинаковый нетлист даёт одинаковый лист, иначе
+    // повторная генерация той же схемы выглядела бы как другая схема.
+    static void autoPlace(QList<KiCadPlacement>& placements,
+                          const QList<KiCadWire>& wires);
 
     KiCadBuildResult build(const QList<KiCadPlacement>& placements,
                            const QList<KiCadWire>& wires);

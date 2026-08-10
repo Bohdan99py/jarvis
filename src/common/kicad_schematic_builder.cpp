@@ -7,6 +7,8 @@
 #include <QSet>
 #include <QtMath>
 #include <cmath>
+#include <QHash>
+#include <algorithm>
 
 KiCadSchematicBuilder::KiCadSchematicBuilder(const QString& installRoot)
     : m_symbolCache(installRoot)
@@ -238,4 +240,140 @@ KiCadBuildResult KiCadSchematicBuilder::build(const QList<KiCadPlacement>& place
     result.success = true;
     result.content = content;
     return result;
+}
+
+// ============================================================
+//  Автораскладка — схема как граф
+// ============================================================
+
+void KiCadSchematicBuilder::autoPlace(QList<KiCadPlacement>& placements,
+                                      const QList<KiCadWire>& wires)
+{
+    if (placements.isEmpty()) return;
+
+    // Лист A4 в KiCad — 297x210 мм; держимся внутри рамки с полями,
+    // чтобы символы и их подписи не вылезали за край.
+    constexpr double kLeft = 40.0, kRight = 250.0;
+    constexpr double kTop  = 35.0, kBottom = 175.0;
+    constexpr double kGrid = 1.27;   // шаг сетки KiCad
+    constexpr int    kIterations = 400;
+
+    auto snap = [](double v) { return std::round(v / kGrid) * kGrid; };
+
+    QHash<QString, int> indexByRef;
+    for (int i = 0; i < placements.size(); ++i)
+        indexByRef.insert(placements[i].reference, i);
+
+    // Питание раскладывается не силами, а по конвенции — см. ниже.
+    QVector<bool> isPower(placements.size(), false);
+    for (int i = 0; i < placements.size(); ++i)
+        isPower[i] = KiCadSymbolCache::isPowerSymbol(placements[i].componentType);
+
+    // Индексы деталей, которые действительно расставляем силовой моделью.
+    QVector<int> movable;
+    for (int i = 0; i < placements.size(); ++i)
+        if (!isPower[i] && !placements[i].positionGiven) movable.append(i);
+
+    if (!movable.isEmpty()) {
+        const int n = movable.size();
+        QVector<QPointF> pos(n);
+        // Стартуем с окружности, а не со случайных точек: одинаковый
+        // нетлист обязан давать одинаковый лист.
+        for (int i = 0; i < n; ++i) {
+            const double a = 2.0 * M_PI * i / n;
+            pos[i] = QPointF(0.5 + 0.30 * std::cos(a), 0.5 + 0.30 * std::sin(a));
+        }
+
+        QHash<int, int> slotOf;   // индекс в placements -> индекс в pos
+        for (int k = 0; k < n; ++k) slotOf.insert(movable[k], k);
+
+        // Рёбра между подвижными деталями. Провода к питанию здесь не
+        // участвуют — иначе каждый GND стягивал бы к себе пол-схемы.
+        QVector<QPair<int, int>> edges;
+        for (const KiCadWire& w : wires) {
+            const auto a = indexByRef.constFind(w.from.componentRef);
+            const auto b = indexByRef.constFind(w.to.componentRef);
+            if (a == indexByRef.constEnd() || b == indexByRef.constEnd()) continue;
+            if (!slotOf.contains(*a) || !slotOf.contains(*b)) continue;
+            if (*a == *b) continue;
+            edges.append({ slotOf.value(*a), slotOf.value(*b) });
+        }
+
+        const double k = std::sqrt(1.0 / n);
+        QVector<QPointF> disp(n);
+
+        for (int iter = 0; iter < kIterations; ++iter) {
+            const double temp = 0.08 * (1.0 - double(iter) / kIterations) + 0.0005;
+            disp.fill(QPointF(0.0, 0.0));
+
+            for (int i = 0; i < n; ++i) {
+                for (int j = i + 1; j < n; ++j) {
+                    double dx = pos[i].x() - pos[j].x();
+                    double dy = pos[i].y() - pos[j].y();
+                    double len = std::sqrt(dx * dx + dy * dy);
+                    if (len < 1e-6) { dx = 1e-3 * (i + 1); dy = 1e-3 * (j + 1); len = std::sqrt(dx*dx + dy*dy); }
+                    const double f = (k * k) / len;
+                    disp[i] += QPointF(dx / len * f, dy / len * f);
+                    disp[j] -= QPointF(dx / len * f, dy / len * f);
+                }
+            }
+
+            for (const auto& e : edges) {
+                double dx = pos[e.first].x() - pos[e.second].x();
+                double dy = pos[e.first].y() - pos[e.second].y();
+                const double len = std::max(std::sqrt(dx * dx + dy * dy), 1e-6);
+                const double f = (len * len) / k;
+                disp[e.first]  -= QPointF(dx / len * f, dy / len * f);
+                disp[e.second] += QPointF(dx / len * f, dy / len * f);
+            }
+
+            for (int i = 0; i < n; ++i) {
+                const double len = std::sqrt(disp[i].x() * disp[i].x() + disp[i].y() * disp[i].y());
+                if (len > 1e-9) {
+                    const double step = std::min(len, temp);
+                    pos[i] += QPointF(disp[i].x() / len * step, disp[i].y() / len * step);
+                }
+                pos[i].setX(std::clamp(pos[i].x(), 0.0, 1.0));
+                pos[i].setY(std::clamp(pos[i].y(), 0.0, 1.0));
+            }
+        }
+
+        for (int slot = 0; slot < n; ++slot) {
+            KiCadPlacement& p = placements[movable[slot]];
+            p.x = snap(kLeft + pos[slot].x() * (kRight - kLeft));
+            p.y = snap(kTop  + pos[slot].y() * (kBottom - kTop));
+            p.positionGiven = true;
+        }
+    }
+
+    // Питание — по конвенции чтения схемы: GND под своей деталью, VCC над.
+    // Ставится после основной раскладки, потому что зависит от её итога.
+    constexpr double kPowerOffset = 7.62;   // 6 шагов сетки — символ не наезжает на деталь
+    for (int i = 0; i < placements.size(); ++i) {
+        if (!isPower[i] || placements[i].positionGiven) continue;
+
+        int anchor = -1;
+        for (const KiCadWire& w : wires) {
+            if (w.from.componentRef == placements[i].reference)
+                anchor = indexByRef.value(w.to.componentRef, -1);
+            else if (w.to.componentRef == placements[i].reference)
+                anchor = indexByRef.value(w.from.componentRef, -1);
+            if (anchor >= 0 && anchor != i) break;
+            anchor = -1;
+        }
+
+        const bool isGnd = placements[i].componentType.trimmed().toLower()
+                               == QStringLiteral("gnd");
+        if (anchor >= 0) {
+            placements[i].x = placements[anchor].x;
+            placements[i].y = snap(placements[anchor].y
+                                   + (isGnd ? kPowerOffset : -kPowerOffset));
+        } else {
+            // Ни к чему не подключено — ставим у края, чтобы было видно,
+            // что символ висит в воздухе, а не прятать его в середине.
+            placements[i].x = snap(kLeft);
+            placements[i].y = snap(isGnd ? kBottom : kTop);
+        }
+        placements[i].positionGiven = true;
+    }
 }

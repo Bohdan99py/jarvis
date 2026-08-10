@@ -8,9 +8,13 @@ DisableProgramGroupPage=yes
 WizardStyle=modern
 Compression=lzma
 SolidCompression=yes
-OutputDir=build\installer
+; Пути ниже (release_package\...) относительны SourceDir, а не корня
+; проекта. Без явного SourceDir они разрешались в <корень>\release_package,
+; которого не существует — сборка лежит в каталоге релизной сборки.
+SourceDir=build_release
+OutputDir=installer
 OutputBaseFilename=Jarvis_Setup_v3.6.3
-SetupIconFile=assets\jarvis.ico
+SetupIconFile=..\assets\jarvis.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -36,6 +40,10 @@ Source: "release_package\jarvis.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release_package\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "release_package\haarcascade_frontalface_default.xml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "release_package\*.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; QML-модули. Без этой строки qml\ не попадал в установку, даже когда
+; windeployqt его создавал, и все QML-экраны открывались пустыми —
+; см. комментарий про --qmldir в scripts\build_release.bat.
+Source: "release_package\qml\*"; DestDir: "{app}\qml"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "release_package\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "release_package\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "release_package\imageformats\*"; DestDir: "{app}\imageformats"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
