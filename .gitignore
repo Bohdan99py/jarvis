@@ -40,3 +40,4 @@ redist/
 
 # API key (NEVER commit this!)
 # embedded_key.h
+build_synapse_test.log

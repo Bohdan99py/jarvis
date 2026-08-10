@@ -290,6 +290,21 @@ void TrainingCenterDialog::refreshSynapseGraph()
     const auto view = graph.graphView(LlmCacheManager::kDesktopOwnerId, 40);
     const auto pos  = computeLayout(view);
 
+    // Where each node should appear FROM. brain-map spawns a new node at an
+    // already-born neighbour's position, which is what makes the network look
+    // like it grows out of itself rather than fading in as a finished
+    // picture. Same idea here, but resolved once against the precomputed
+    // layout instead of a live physics loop: the earliest-indexed neighbour
+    // (nodes are ordered by activation, so that is the more established
+    // concept) becomes the origin, and the node travels from there to its
+    // real position.
+    QVector<int> spawnFrom(view.nodes.size(), -1);
+    for (const auto& e : view.edges) {
+        const int lo = qMin(e.a, e.b);
+        const int hi = qMax(e.a, e.b);
+        if (spawnFrom[hi] < 0) spawnFrom[hi] = lo;
+    }
+
     QVariantList nodes;
     QHash<QString, int> sourceCounts;
     for (int i = 0; i < view.nodes.size(); ++i) {
@@ -311,6 +326,11 @@ void TrainingCenterDialog::refreshSynapseGraph()
         // carry the structure — well-connected or frequently fired — are
         // labelled at rest; the rest name themselves on hover.
         m[QStringLiteral("major")]       = (n.degree >= 3 || heat >= 0.5);
+        // Growth origin — its own position when nothing anchors it, so an
+        // unanchored node simply scales up in place.
+        const int from = spawnFrom[i];
+        m[QStringLiteral("fromX")]       = from >= 0 ? pos[from].x : pos[i].x;
+        m[QStringLiteral("fromY")]       = from >= 0 ? pos[from].y : pos[i].y;
         nodes.append(m);
         sourceCounts[n.source]++;
     }
@@ -339,6 +359,11 @@ void TrainingCenterDialog::refreshSynapseGraph()
     QVariantList edges;
     for (const auto& e : view.edges) {
         QVariantMap m;
+        // Endpoint indices travel alongside the coordinates so the view can
+        // answer "what is this concept wired to" without re-deriving
+        // adjacency from float positions.
+        m[QStringLiteral("a")]      = e.a;
+        m[QStringLiteral("b")]      = e.b;
         m[QStringLiteral("x1")]     = pos[e.a].x;
         m[QStringLiteral("y1")]     = pos[e.a].y;
         m[QStringLiteral("x2")]     = pos[e.b].x;

@@ -802,6 +802,40 @@ Rectangle {
                     return srcDialogue
                 }
 
+                // ── Focus: "what is this concept wired to" ───────────────
+                // Hover is transient, a click sticks (Esc / clicking empty
+                // space clears it) — reading a graph is mostly this question,
+                // and answering it by eye fails as soon as lines cross.
+                property int hoveredNode:  -1
+                property int selectedNode: -1
+                readonly property int focusNode: selectedNode >= 0 ? selectedNode : hoveredNode
+
+                // index -> {neighbourIndex: true}, built once per data change
+                // rather than scanned per node per frame.
+                readonly property var adjacency: {
+                    const adj = {}
+                    for (let i = 0; i < synapseGraphEdges.length; ++i) {
+                        const e = synapseGraphEdges[i]
+                        if (adj[e.a] === undefined) adj[e.a] = {}
+                        if (adj[e.b] === undefined) adj[e.b] = {}
+                        adj[e.a][e.b] = true
+                        adj[e.b][e.a] = true
+                    }
+                    return adj
+                }
+
+                function isLit(index) {
+                    if (focusNode < 0) return true
+                    if (focusNode === index) return true
+                    const n = adjacency[focusNode]
+                    return n !== undefined && n[index] === true
+                }
+
+                function edgeLit(a, b) {
+                    if (focusNode < 0) return true
+                    return focusNode === a || focusNode === b
+                }
+
                 Column {
                     anchors.fill: parent
                     spacing: 10
@@ -912,11 +946,26 @@ Rectangle {
                                         height: 1 + 2.5 * modelData.norm
                                         transformOrigin: Item.Left
                                         rotation: Math.atan2(py2 - py1, px2 - px1) * 180 / Math.PI
+
+                                        readonly property bool lit:
+                                            synapseTab.edgeLit(modelData.a, modelData.b)
+
                                         // Alpha on the leaf colour, not opacity
                                         // on a subtree — no offscreen pass.
-                                        color: Qt.rgba(Theme.accentMuted.r, Theme.accentMuted.g,
-                                                       Theme.accentMuted.b,
-                                                       0.18 + 0.55 * modelData.norm)
+                                        // Unrelated synapses drop to a trace
+                                        // rather than vanishing: the shape of
+                                        // the whole network stays readable
+                                        // behind the highlighted part.
+                                        color: Qt.rgba(
+                                            lit ? Theme.accent.r : Theme.accentMuted.r,
+                                            lit ? Theme.accent.g : Theme.accentMuted.g,
+                                            lit ? Theme.accent.b : Theme.accentMuted.b,
+                                            synapseTab.focusNode < 0
+                                                ? 0.18 + 0.55 * modelData.norm
+                                                : (lit ? 0.85 : 0.05))
+                                        Behavior on color {
+                                            ColorAnimation { duration: Theme.motionFast }
+                                        }
 
                                         // Signal travelling down the strongest
                                         // synapses. Only the top band animates,
@@ -953,27 +1002,69 @@ Rectangle {
 
                                         readonly property real diameter: 11 + 21 * modelData.heat
                                         readonly property color tint: synapseTab.sourceColor(modelData.source)
+                                        readonly property bool lit: synapseTab.isLit(nodeItem.index)
+                                        readonly property bool dimmed:
+                                            synapseTab.focusNode >= 0 && !lit
 
-                                        x: modelData.x * graphContent.width - width / 2
-                                        y: modelData.y * graphContent.height - diameter / 2
+                                        // Grows out of the neighbour that anchors it,
+                                        // then settles into its own position — the
+                                        // network builds outward from what it already
+                                        // knows instead of fading in finished.
+                                        readonly property real homeX:
+                                            modelData.x * graphContent.width - width / 2
+                                        readonly property real homeY:
+                                            modelData.y * graphContent.height - diameter / 2
+
+                                        x: modelData.fromX * graphContent.width - width / 2
+                                        y: modelData.fromY * graphContent.height - diameter / 2
                                         width: Math.max(diameter, label.implicitWidth)
                                         height: diameter + 14
 
-                                        // Staggered grow-in: the network assembles
-                                        // itself instead of appearing all at once.
                                         opacity: 0
                                         scale: 0.4
-                                        OpacityAnimator on opacity {
-                                            running: true
-                                            from: 0; to: 1
-                                            duration: 260
-                                            easing.type: Easing.OutCubic
+
+                                        // Staggered by index so growth ripples outward
+                                        // from the most-established concepts.
+                                        Component.onCompleted: settle.start()
+                                        ParallelAnimation {
+                                            id: settle
+                                            NumberAnimation {
+                                                target: nodeItem; property: "x"
+                                                to: nodeItem.homeX
+                                                duration: 520 + (nodeItem.index % 8) * 60
+                                                easing.type: Easing.OutCubic
+                                            }
+                                            NumberAnimation {
+                                                target: nodeItem; property: "y"
+                                                to: nodeItem.homeY
+                                                duration: 520 + (nodeItem.index % 8) * 60
+                                                easing.type: Easing.OutCubic
+                                            }
+                                            OpacityAnimator {
+                                                target: nodeItem
+                                                from: 0; to: 1
+                                                duration: 300
+                                                easing.type: Easing.OutCubic
+                                            }
+                                            ScaleAnimator {
+                                                target: nodeItem
+                                                from: 0.4; to: 1
+                                                duration: 340 + (nodeItem.index % 8) * 45
+                                                easing.type: Easing.OutBack
+                                            }
                                         }
-                                        ScaleAnimator on scale {
-                                            running: true
-                                            from: 0.4; to: 1
-                                            duration: 340 + (nodeItem.index % 8) * 45
-                                            easing.type: Easing.OutBack
+
+                                        // Re-anchor if the window resizes after the
+                                        // entrance animation has already finished.
+                                        Binding {
+                                            target: nodeItem; property: "x"
+                                            value: nodeItem.homeX
+                                            when: !settle.running && nodeItem.opacity > 0
+                                        }
+                                        Binding {
+                                            target: nodeItem; property: "y"
+                                            value: nodeItem.homeY
+                                            when: !settle.running && nodeItem.opacity > 0
                                         }
 
                                         Rectangle {
@@ -985,8 +1076,11 @@ Rectangle {
                                             color: "transparent"
                                             border.width: 1
                                             border.color: Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
-                                                                  nodeItem.tint.b, 0.35)
-                                            visible: modelData.major || hover.hovered
+                                                                  nodeItem.tint.b,
+                                                                  nodeItem.dimmed ? 0.06 : 0.35)
+                                            visible: (modelData.major || hover.hovered
+                                                      || synapseTab.focusNode === nodeItem.index)
+                                                     && !nodeItem.dimmed
                                             // Breathing ring on the hottest
                                             // concepts — the "this one is alive"
                                             // cue, paused when off-screen.
@@ -1007,19 +1101,38 @@ Rectangle {
                                             radius: width / 2
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             y: 0
-                                            color: hover.hovered
-                                                ? nodeItem.tint
-                                                : Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
-                                                          nodeItem.tint.b, 0.75)
+                                            // Dimming is alpha on this leaf, not opacity
+                                            // on the node subtree — same look, no
+                                            // offscreen composite per node.
+                                            color: Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
+                                                           nodeItem.tint.b,
+                                                           nodeItem.dimmed ? 0.12
+                                                                           : (hover.hovered ? 1.0 : 0.75))
                                             border.width: 1
                                             border.color: Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
-                                                                  nodeItem.tint.b, 0.9)
+                                                                  nodeItem.tint.b,
+                                                                  nodeItem.dimmed ? 0.15 : 0.9)
+                                            Behavior on color {
+                                                ColorAnimation { duration: Theme.motionFast }
+                                            }
 
-                                            HoverHandler { id: hover }
+                                            HoverHandler {
+                                                id: hover
+                                                onHoveredChanged: synapseTab.hoveredNode =
+                                                    hovered ? nodeItem.index
+                                                            : (synapseTab.hoveredNode === nodeItem.index
+                                                               ? -1 : synapseTab.hoveredNode)
+                                            }
+                                            TapHandler {
+                                                onTapped: synapseTab.selectedNode =
+                                                    (synapseTab.selectedNode === nodeItem.index)
+                                                        ? -1 : nodeItem.index
+                                            }
                                             ToolTip.visible: hover.hovered
                                             ToolTip.text: modelData.label
                                                 + (root.en ? "\nfired ×" : "\nсработало ×") + modelData.activations
                                                 + (root.en ? "\nsynapses: " : "\nсвязей: ") + modelData.degree
+                                                + (root.en ? "\nlearned from: " : "\nисточник: ") + modelData.source
                                         }
 
                                         Text {
@@ -1028,10 +1141,17 @@ Rectangle {
                                             anchors.top: dot.bottom
                                             anchors.topMargin: 2
                                             text: modelData.label
-                                            // Minor concepts stay unlabelled until hovered:
-                                            // forty permanent labels is a wall of text, and
-                                            // the structure is carried by the connected few.
-                                            visible: modelData.major || hover.hovered
+                                            // Level of detail by APPARENT size, the way
+                                            // brain-map gates labels on zoom × radius:
+                                            // forty permanent labels is a wall of text at
+                                            // rest, but zooming in should reveal the small
+                                            // concepts rather than keep hiding them. Focus
+                                            // and hover always win.
+                                            visible: !nodeItem.dimmed
+                                                     && (hover.hovered
+                                                         || synapseTab.focusNode === nodeItem.index
+                                                         || modelData.major
+                                                         || graphContent.scale * nodeItem.diameter > 26)
                                             color: hover.hovered ? nodeItem.tint : Theme.onSurfaceVariant
                                             font.pixelSize: hover.hovered ? 10 : 9
                                             font.bold: modelData.major
@@ -1054,9 +1174,12 @@ Rectangle {
                                                * (wheel.angleDelta.y > 0 ? 1.12 : 1 / 1.12)
                                     graphContent.scale = Math.max(0.5, Math.min(3.0, next))
                                 }
+                                // Clicking empty space clears a stuck focus, the
+                                // counterpart to Esc in brain-map.
+                                onClicked: synapseTab.selectedNode = -1
                             }
 
-                            // ---- Fit / reset ----
+                            // ---- Fit ----
                             Rectangle {
                                 anchors.left: parent.left
                                 anchors.top: parent.top
@@ -1069,7 +1192,7 @@ Rectangle {
                                 border.color: Theme.outline
                                 Text {
                                     anchors.centerIn: parent
-                                    text: root.en ? "⤢ Fit" : "⤢ Сброс"
+                                    text: root.en ? "⤢ Fit" : "⤢ Вписать"
                                     color: Theme.onSurfaceVariant
                                     font.pixelSize: 10
                                 }
@@ -1077,10 +1200,39 @@ Rectangle {
                                     id: fitArea
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
+                                    // Actually fits, rather than resetting zoom to
+                                    // 1.0 and calling it fitting: the layout rarely
+                                    // fills its unit square evenly, so scale comes
+                                    // from the real bounding box of the nodes and the
+                                    // content is then centred on that box's middle.
                                     onClicked: {
-                                        graphContent.scale = 1.0
-                                        graphContent.x = 0
-                                        graphContent.y = 0
+                                        if (synapseGraphNodes.length === 0) {
+                                            graphContent.scale = 1.0
+                                            graphContent.x = 0
+                                            graphContent.y = 0
+                                            return
+                                        }
+                                        let minX = 1, maxX = 0, minY = 1, maxY = 0
+                                        for (let i = 0; i < synapseGraphNodes.length; ++i) {
+                                            const n = synapseGraphNodes[i]
+                                            minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x)
+                                            minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y)
+                                        }
+                                        // Margin in normalized units leaves room for
+                                        // labels, which sit below their node.
+                                        const pad = 0.06
+                                        const spanX = Math.max(0.05, (maxX - minX) + pad * 2)
+                                        const spanY = Math.max(0.05, (maxY - minY) + pad * 2)
+                                        const k = Math.max(0.5, Math.min(3.0,
+                                                       Math.min(1 / spanX, 1 / spanY)))
+                                        graphContent.scale = k
+                                        // Content scales about its centre, so shifting
+                                        // the bbox centre onto that point is a plain
+                                        // scaled offset from 0.5, 0.5.
+                                        const cx = (minX + maxX) / 2
+                                        const cy = (minY + maxY) / 2
+                                        graphContent.x = (0.5 - cx) * graphContent.width * k
+                                        graphContent.y = (0.5 - cy) * graphContent.height * k
                                     }
                                 }
                             }
