@@ -32,6 +32,8 @@ add_library(jarvis_engine OBJECT
     bug_reporter.cpp
     self_update_reflector.h
     self_update_reflector.cpp
+    vision_center_dialog.h
+    vision_center_dialog.cpp
 )
 # task_board.qrc / training_center.qrc are intentionally NOT listed here —
 # see the top-level CMakeLists.txt comment where they're attached to the
@@ -45,6 +47,7 @@ target_include_directories(jarvis_engine PUBLIC
 target_link_libraries(jarvis_engine
     PUBLIC  jarvis_common jarvis_db jarvis_intelligence
             Qt6::Core Qt6::Network Qt6::Widgets Qt6::Sql
+            Qt6::Quick Qt6::QuickWidgets Qt6::Qml
     PRIVATE jarvis_llm jarvis_voice jarvis_platform jarvis_network
             jarvis_media jarvis_modules jarvis_plugins
             advapi32 psapi PowrProf

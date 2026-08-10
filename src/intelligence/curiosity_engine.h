@@ -205,10 +205,19 @@ private:
     qint64              m_pendingOpinionId = 0; // set when category == OpinionRevision
     bool                m_answerHold       = false; // see setAnswerHold()
 
-    static constexpr int MIN_IDLE_SECONDS = 300;
-    static constexpr int MIN_MESSAGES_BETWEEN = 8;
-    static constexpr int MAX_QUESTIONS_PER_SESSION = 5;
-    static constexpr int COOLDOWN_MINUTES = 45;
+    // Пороги проактивности. Раньше они складывались в почти полное
+    // молчание: 5 минут простоя И 8 сообщений с прошлого вопроса И 45 минут
+    // кулдауна, при опросе раз в 90 минут — на практике инициатива почти
+    // никогда не проходила все четыре условия одновременно.
+    //
+    // Ослаблены, но не сняты: смысл ограничений не в редкости самой по
+    // себе, а в том, чтобы не перебивать работу (за это по-прежнему
+    // отвечает shouldInterrupt()/evaluateAttention() — во время игры и
+    // глубокого кодинга Джарвис молчит независимо от этих чисел).
+    static constexpr int MIN_IDLE_SECONDS = 120;
+    static constexpr int MIN_MESSAGES_BETWEEN = 3;
+    static constexpr int MAX_QUESTIONS_PER_SESSION = 12;
+    static constexpr int COOLDOWN_MINUTES = 15;
     // Fallback window for free-text answers with no explicit Telegram
     // reply_to_message match (see consumeAnswer). Deliberately modest: an
     // explicit reply-to-this-message match (m_pendingMessageId) has no time

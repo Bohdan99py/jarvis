@@ -1,7 +1,7 @@
 #pragma once
 // -------------------------------------------------------
 // ollama_api.h — Клиент Ollama (OpenAI-compatible endpoint)
-// Заменяет GeminiApi для локального LLM роутинга.
+// Локальный LLM-роутинг через Ollama.
 // -------------------------------------------------------
 
 #include <QObject>
@@ -46,7 +46,7 @@ public:
     QString host()  const { return m_host;  }
     QString model() const { return m_model; }
 
-    // Совместимость с интерфейсом GeminiApi — всегда "подключён" если Ollama запущена
+    // Всегда "подключён", если Ollama запущена
     bool hasApiKey() const { return true; }
     void setApiKey(const QString&) {}   // не нужен, оставлен для совместимости
 

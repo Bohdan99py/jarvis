@@ -1359,7 +1359,6 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
                 "Configure these from the desktop app:\n"
                 "  *Models & Intelligence* menu\n\n"
                 "• Claude API: primary LLM\n"
-                "• Gemini API: backup/alternative\n"
                 "• Ollama: local offline model\n"
                 "• Agent Mode: routes chat → Ollama, code → Claude");
         } else {
@@ -1368,7 +1367,6 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
                 "Настраивается через десктоп-приложение:\n"
                 "  меню *Модели и ИИ*\n\n"
                 "• Claude API: основная LLM\n"
-                "• Gemini API: резервная\n"
                 "• Ollama: локальная офлайн-модель\n"
                 "• Агент-режим: чат → Ollama, код → Claude");
         }

@@ -6,7 +6,7 @@
 // ПОЧЕМУ ЭТОТ ФАЙЛ СУЩЕСТВУЕТ:
 //   Раньше каждый модуль (database_manager, voice_input,
 //   passive_listener, session_memory, user_profile,
-//   action_predictor, claude_api, gemini_api, project_indexer,
+//   action_predictor, claude_api, project_indexer,
 //   screenshot_learner, learned_commands, mainwindow...) сам
 //   вызывал QStandardPaths::writableLocation(AppDataLocation),
 //   и кое-где ещё вручную доклеивал разные суффиксы

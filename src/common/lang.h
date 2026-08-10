@@ -31,7 +31,6 @@ inline QString menuExit()           { return IS_EN ? "Exit"             : "Вы�
 // --- Menu: Settings ---
 inline QString menuSettings()       { return IS_EN ? "Settings"                 : "Настройки"; }
 inline QString menuApiKey()         { return IS_EN ? "Claude API key..."         : "Claude API-ключ..."; }
-inline QString menuGeminiKey()      { return IS_EN ? "Gemini API key..."         : "Gemini API-ключ..."; }
 inline QString menuAgentMode()      { return IS_EN ? "Agent mode"               : "Режим агентов"; }
 inline QString menuVibeCoding()     { return IS_EN ? "Vibecoding mode"           : "Вайбкодинг режим"; }
 inline QString menuKeepAttach()     { return IS_EN ? "Keep attachments"          : "Держать прикрепления"; }
@@ -61,9 +60,6 @@ inline QString menuCommands()       { return IS_EN ? "Command list"    : "Спи
 // --- Dialogs ---
 inline QString dlgApiKeyTitle()     { return IS_EN ? "Claude API Key"             : "API-ключ Claude"; }
 inline QString dlgApiKeyLabel()     { return IS_EN ? "Enter your Anthropic API key:" : "Введите ваш Anthropic API-ключ:"; }
-inline QString dlgGeminiKeyTitle()  { return IS_EN ? "Gemini API Key"             : "Gemini API-ключ"; }
-inline QString dlgGeminiKeyLabel()  { return IS_EN ? "Enter your Google Gemini API key\n(free key at aistudio.google.com):"
-                                                   : "Введите ваш Google Gemini API-ключ\n(бесплатный ключ на aistudio.google.com):"; }
 inline QString dlgChooseFolder()    { return IS_EN ? "Select project folder"     : "Выберите папку проекта"; }
 inline QString dlgRestartNeeded()   { return IS_EN ? "Language changed. Some UI elements will update on next launch."
                                                    : "Язык изменён. Часть элементов обновится при следующем запуске."; }
@@ -107,13 +103,8 @@ inline QString logError()           { return IS_EN ? "ERROR"  : "ОШИБКА"; 
 
 // --- Agent info ---
 inline QString agentClaude()        { return IS_EN ? "🤖 Claude (code)"    : "🤖 Claude (код)"; }
-inline QString agentGemini()        { return IS_EN ? "💬 Gemini (chat)"    : "💬 Gemini (чат)"; }
-inline QString agentModeOn()        { return IS_EN ? "Multi-agent mode ON. Coding → Claude, Chat → Gemini."
-                                                   : "Мультиагентный режим ВКЛ. Код → Claude, Беседа → Gemini."; }
 inline QString agentModeOff()       { return IS_EN ? "Multi-agent mode OFF. All queries → Claude."
                                                    : "Мультиагентный режим ВЫКЛ. Все запросы → Claude."; }
-inline QString agentNoGeminiKey()   { return IS_EN ? "Gemini key not set. Configure it in Settings → Gemini API key."
-                                                   : "Ключ Gemini не установлен. Настройки → Gemini API-ключ."; }
 
 // --- API status ---
 inline QString apiClaudeConnected() { return IS_EN ? "Claude API connected. Attach files via 📎 or drag & drop."
@@ -121,7 +112,6 @@ inline QString apiClaudeConnected() { return IS_EN ? "Claude API connected. Atta
 inline QString apiNoKey()           { return IS_EN ? "Enter a command or 'help'. For AI mode: apikey <your-key>"
                                                    : "Введите команду или «помощь». Для AI-режима: apikey <ваш-ключ>"; }
 inline QString apiKeySaved()        { return IS_EN ? "API key locked in. Claude API connected — at your service." : "API-ключ сохранён. Claude API подключён."; }
-inline QString apiGeminiKeySaved()  { return IS_EN ? "Gemini key saved. Ready to route." : "Gemini ключ сохранён."; }
 
 // --- Vibecoding ---
 inline QString vibeModeOn()         { return IS_EN ? "Vibecoding ON. I'll pull the code from the index or attachments."
@@ -155,8 +145,8 @@ inline QString updDownloaded()      { return IS_EN ? "Update downloaded. Launchi
 // --- About ---
 inline QString aboutText()          {
     return IS_EN
-        ? "J.A.R.V.I.S. — Just A Rather Very Intelligent System\n\nVersion: v%1\nEngines: Claude API + Gemini API\nAuthor: Bohdan99py"
-        : "J.A.R.V.I.S. — Personal AI Assistant\n\nВерсия: v%1\nДвижки: Claude API + Gemini API\nАвтор: Bohdan99py";
+        ? "J.A.R.V.I.S. — Just A Rather Very Intelligent System\n\nVersion: v%1\nEngines: Claude API + Ollama\nAuthor: Bohdan99py"
+        : "J.A.R.V.I.S. — Personal AI Assistant\n\nВерсия: v%1\nДвижки: Claude API + Ollama\nАвтор: Bohdan99py";
 }
 
 // --- What's New ---

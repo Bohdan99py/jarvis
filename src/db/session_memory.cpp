@@ -573,7 +573,7 @@ QString SessionMemory::buildHistoryContext(const QString& userQuery) const
         matches.append(s);
     }
 
-    // --- 5. Формируем контекст для Claude/Gemini ---
+    // --- 5. Формируем контекст для Claude ---
     QString context;
     context += QStringLiteral("\n\n--- Журнал сессий (автоматически от JARVIS) ---\n");
     if (!periodLabel.isEmpty()) {

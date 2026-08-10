@@ -34,18 +34,41 @@ void JarvisTheme::setReducedMotion(bool on)
 
 void JarvisTheme::registerQmlTypes()
 {
-    // Синглтон-инстанс, а не тип: значения общие для всего приложения,
-    // и C++-сторона (QSS, HTML сообщений) читает ровно тот же объект.
-    // Владение остаётся за статическим instance() — QML не удалит.
+    // Один общий объект на всё приложение: и QSS-сторона, и QML читают
+    // ровно те же значения. Владение остаётся за статическим instance() —
+    // QML не удалит.
     QQmlEngine::setObjectOwnership(&JarvisTheme::instance(),
                                    QQmlEngine::CppOwnership);
     QQmlEngine::setObjectOwnership(&JarvisType::instance(),
                                    QQmlEngine::CppOwnership);
 
-    qmlRegisterSingletonInstance("Jarvis.Theme", 1, 0, "Theme",
-                                 &JarvisTheme::instance());
-    qmlRegisterSingletonInstance("Jarvis.Theme", 1, 0, "Type",
-                                 &JarvisType::instance());
+    // Регистрируем ЧЕРЕЗ КОЛЛБЭК, а не через qmlRegisterSingletonInstance.
+    //
+    // qmlRegisterSingletonInstance намертво привязывает объект к первому
+    // движку, который его запросил. У нас движков много: каждый
+    // QQuickWidget (Modes, TrainingCenter, UserCenter, OrganizePanel,
+    // TaskBoard, VisionCenter) и QQuickView тоста создают свой
+    // собственный QQmlEngine. Со второго экрана Qt выдавал
+    //   "Singleton registered by registerSingletonInstance must only be
+    //    accessed from one engine"
+    //   qmlRegisterSingletonType(): "Theme" is not available because the
+    //    callback function returns a null pointer.
+    // и Theme становился null. Дальше КАЖДОЕ `color: Theme.bg` тихо
+    // получало undefined — экран открывался чёрным прямоугольником без
+    // единого сообщения об ошибке.
+    //
+    // Форма с коллбэком таких ограничений не имеет: она вызывается по
+    // разу на движок и каждому отдаёт один и тот же C++-объект.
+    qmlRegisterSingletonType<JarvisTheme>(
+        "Jarvis.Theme", 1, 0, "Theme",
+        [](QQmlEngine*, QJSEngine*) -> QObject* {
+            return &JarvisTheme::instance();
+        });
+    qmlRegisterSingletonType<JarvisType>(
+        "Jarvis.Theme", 1, 0, "Type",
+        [](QQmlEngine*, QJSEngine*) -> QObject* {
+            return &JarvisType::instance();
+        });
 
     // Восстанавливаем пользовательский выбор «уменьшить анимацию».
     JarvisTheme::instance().m_reducedMotion =

@@ -368,6 +368,7 @@ foreach(_qrc
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/task_board.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/training_center.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/organize_panel.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/vision_center.qrc"
 )
     if(EXISTS "${_qrc}")
         target_sources(jarvis PRIVATE "${_qrc}")

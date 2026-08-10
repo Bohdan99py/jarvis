@@ -138,7 +138,7 @@ inline QVector<Capability> activeCapabilities()
     QVector<Capability> caps = {
         { QStringLiteral("core"),
           QStringLiteral("Core Intelligence"),
-          QStringLiteral("Multi-LLM routing (Claude/Ollama/Gemini), "
+          QStringLiteral("Multi-LLM routing (Claude/Ollama), "
                          "intent analysis, offline behavior patterns") },
         { QStringLiteral("voice_pipeline"),
           QStringLiteral("Voice Pipeline"),

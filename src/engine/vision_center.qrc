@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/qml">
+        <file alias="VisionCenter.qml">VisionCenter.qml</file>
+    </qresource>
+</RCC>

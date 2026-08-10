@@ -19,7 +19,6 @@
 #include "search_router.h"
 #include "fileviewer.h"
 #include "ollama_api.h"
-#include "gemini_api.h"
 #include "learned_commands.h"
 #include "screen_agent.h"
 #include "bug_reporter.h"
@@ -37,6 +36,7 @@
 #include "user_profile.h"
 #include "curiosity_engine.h"
 #include "system_manifest.h"
+#include "vision_center_dialog.h"
 #include "proactive_reminder_manager.h"
 #include "user_profile_extended.h"
 #include "memory_consolidation.h"
@@ -808,27 +808,6 @@ void MainWindow::buildMenuBar()
         // После exec() dlg деструктор удалит manager, который сам отключит свои сигналы
     });
     settingsMenu->addSeparator();
-    auto* actGeminiKey = settingsMenu->addAction(
-        IS_EN ? QStringLiteral("Gemini API key...") : QStringLiteral("Ключ Gemini API..."));
-    connect(actGeminiKey, &QAction::triggered, this, [this]() {
-        bool ok;
-        const QString key = QInputDialog::getText(
-            this,
-            IS_EN ? QStringLiteral("Gemini API Key") : QStringLiteral("Ключ Gemini API"),
-            IS_EN ? QStringLiteral("Enter your Google Gemini API key\n(free at aistudio.google.com):")
-                  : QStringLiteral("Введите ключ Google Gemini API\n(бесплатно на aistudio.google.com):"),
-            QLineEdit::Password,
-            m_jarvis->geminiBackup() ? m_jarvis->geminiBackup()->apiKey() : QString(),
-            &ok);
-        if (ok && !key.trimmed().isEmpty()) {
-            if (m_jarvis->geminiBackup())
-                m_jarvis->geminiBackup()->setApiKey(key.trimmed());
-            appendLog(Str::logSystem(),
-                      IS_EN ? QStringLiteral("Gemini API key saved.")
-                            : QStringLiteral("Ключ Gemini API сохранён."),
-                      Theme::LogColors::system);
-        }
-    });
 
     auto* actOllamaModel = settingsMenu->addAction(
         IS_EN ? QStringLiteral("Ollama model...") : QStringLiteral("Модель Ollama..."));
@@ -1024,6 +1003,18 @@ void MainWindow::buildMenuBar()
         dlg.exec();
     });
 
+    // --- Vision Center: кого узнаю, что вижу ---
+    // Стоит рядом с Центром обучения намеренно: распознавание лиц — это
+    // такое же обучение, просто через камеру, и раньше единственным входом
+    // в него были настройки «охранной камеры», где его никто не искал.
+    auto* actVisionCenter = trainMenu->addAction(
+        IS_EN ? QStringLiteral("👁 Vision Center...")
+              : QStringLiteral("👁 Центр зрения..."));
+    connect(actVisionCenter, &QAction::triggered, this, [this]() {
+        VisionCenterDialog dlg(m_jarvis->securityCamera(), this, 0);
+        dlg.exec();
+    });
+
     trainMenu->addSeparator();
 
     // --- Экспорт (быстрый доступ без открытия диалога) ---
@@ -1041,13 +1032,11 @@ void MainWindow::buildMenuBar()
     connect(actScreenshot, &QAction::triggered, this, [this]() {
         if (!m_screenAgent) return;
 
-        // Берём API ключ — сначала Claude, потом Gemini
-        QString apiKey = m_jarvis->claudeApi()->apiKey();
-        if (apiKey.isEmpty()) apiKey = m_jarvis->geminiBackup() ? m_jarvis->geminiBackup()->apiKey() : QString();
+        const QString apiKey = m_jarvis->claudeApi()->apiKey();
         if (apiKey.isEmpty()) {
             appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("📸 Need Claude or Gemini API key for screenshot analysis")
-                      : QStringLiteral("📸 Нужен ключ Claude или Gemini API для анализа скриншота"),
+                IS_EN ? QStringLiteral("📸 Need a Claude API key for screenshot analysis")
+                      : QStringLiteral("📸 Нужен ключ Claude API для анализа скриншота"),
                 Theme::LogColors::error);
             return;
         }
@@ -1089,8 +1078,7 @@ void MainWindow::buildMenuBar()
                 m_screenshotTimer->setInterval(5 * 60 * 1000);
                 connect(m_screenshotTimer, &QTimer::timeout, this, [this]() {
                     if (!m_screenAgent) return;
-                    QString apiKey = m_jarvis->claudeApi()->apiKey();
-                    if (apiKey.isEmpty()) apiKey = m_jarvis->geminiBackup() ? m_jarvis->geminiBackup()->apiKey() : QString();
+                    const QString apiKey = m_jarvis->claudeApi()->apiKey();
                     if (apiKey.isEmpty()) return;
                     m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
                         if (desc.isEmpty() || !m_passiveListener) return;
@@ -2662,7 +2650,7 @@ This is intentional — it's how JARVIS learns your style.<br>
 You can delete it anytime. JARVIS will pretend to forget.</p>
 
 <h4>🧠 AI Services</h4>
-<p>When using Claude or Gemini, your messages are sent to their respective APIs.
+<p>When using Claude, your messages are sent to its API.
 This is how AI works. If you wanted full privacy — you should have talked to a rock.</p>
 
 <h4>⚠️ Important Warning</h4>
@@ -2692,7 +2680,7 @@ R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.<
 Вы можете удалить базу в любой момент. JARVIS сделает вид, что забыл.</p>
 
 <h4>🧠 ИИ-сервисы</h4>
-<p>При использовании Claude или Gemini ваши сообщения отправляются на их серверы.
+<p>При использовании Claude ваши сообщения отправляются на его серверы.
 Так работает ИИ. Если хотели полной приватности — нужно было разговаривать с камнем.</p>
 
 <h4>⚠️ Важное предупреждение</h4>
@@ -2885,7 +2873,6 @@ R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.<
 <h4 style='color:%2;'>AI Backends (pick any or all)</h4>
 <table border='0' cellpadding='4'>
 <tr><td style='color:%3;'><b>Claude</b></td><td>Best quality for code & reasoning (~$1-3/mo) — console.anthropic.com</td></tr>
-<tr><td style='color:%3;'><b>Gemini</b></td><td>Free tier, built-in key — aistudio.google.com</td></tr>
 <tr><td style='color:%3;'><b>Ollama</b></td><td>100% offline local LLM — ollama.com → <code>ollama pull qwen2.5:3b</code></td></tr>
 </table>
 <p>Enable <b>Agent Mode</b> (Settings menu) to auto-route: casual → Ollama (free), code → Claude.</p>
@@ -2897,7 +2884,7 @@ shifts its persona between <b>Developer</b> (terse, technical), <b>Creative</b> 
 <h4 style='color:%2;'>What works offline vs. online</h4>
 <table border='0' cellpadding='4'>
 <tr><td style='color:%3;'><b>Always offline</b></td><td>Voice input (Vosk), system commands, response cache, behavior patterns, activity tracking, virtual keyboard, PC control</td></tr>
-<tr><td style='color:%3;'><b>Needs internet</b></td><td>Claude API, Gemini API, auto-updater, Screenshot Vision</td></tr>
+<tr><td style='color:%3;'><b>Needs internet</b></td><td>Claude API, auto-updater, Screenshot Vision</td></tr>
 <tr><td style='color:%3;'><b>Optional local</b></td><td>Ollama (runs on your GPU/CPU, no internet)</td></tr>
 </table>
 <p style='color:%4;background:rgba(68,255,68,0.06);padding:8px;border-radius:6px;'>
@@ -2950,7 +2937,7 @@ shifts its persona between <b>Developer</b> (terse, technical), <b>Creative</b> 
 </table>
 <h4 style='color:%2;'>Conversation & History</h4>
 <table border='0' cellpadding='4' style='width:100%%;'>
-<tr><td style='color:%1;white-space:nowrap;'><b>Any question</b></td><td>Routes to Claude (code/complex) or Ollama/Gemini (casual chat)</td></tr>
+<tr><td style='color:%1;white-space:nowrap;'><b>Any question</b></td><td>Routes to Claude (code/complex) or Ollama (casual chat)</td></tr>
 <tr><td style='color:%1;'><b>"recall what happened..."</b></td><td>Search session journal by date or topic keyword</td></tr>
 <tr><td style='color:%1;'><b>apikey</b> &lt;key&gt;</td><td>Set or update your Claude API key</td></tr>
 <tr><td style='color:%1;'><b>help</b></td><td>Show the quick reference guide in chat</td></tr>
@@ -3077,7 +3064,6 @@ This data stays local and helps JARVIS understand which tools you use at differe
 <h4 style='color:%2;'>API keys</h4>
 <table border='0' cellpadding='4' style='width:100%%;'>
 <tr><td style='color:%1;white-space:nowrap;'><b>Claude</b></td><td>console.anthropic.com → API Keys → Create Key</td></tr>
-<tr><td style='color:%1;'><b>Gemini</b></td><td>aistudio.google.com → Get API key (free tier)</td></tr>
 <tr><td style='color:%1;'><b>Ollama</b></td><td>ollama.com → install → <code>ollama pull qwen2.5:3b</code></td></tr>
 </table>
 <h4 style='color:%2;'>Recommended Ollama models</h4>
@@ -3091,7 +3077,7 @@ This data stays local and helps JARVIS understand which tools you use at differe
 <p><b>Settings → Agent Mode</b> enables intelligent routing:<br>
 Simple questions / chitchat → <b>Ollama</b> (offline, free, instant)<br>
 Code analysis / complex reasoning → <b>Claude API</b> (best quality)<br>
-If Ollama is unavailable → <b>Gemini</b> (free fallback) → Claude (last resort)</p>
+If Ollama is unavailable → Claude (last resort)</p>
 <h4 style='color:%2;'>Audio modes</h4>
 <p>Click the speaker icon in the bottom bar to cycle:</p>
 <table border='0' cellpadding='4'>
@@ -3122,8 +3108,7 @@ Easy to backup, easy to delete to start fresh. Session memory is in
 <h4 style='color:%2;'>No AI response</h4>
 <ul>
 <li>Check API key: <b>Settings → Claude API key...</b></li>
-<li>Try <b>Settings → Agent Mode</b> to enable Ollama or Gemini fallback</li>
-<li>Gemini works with a free API key as a backup</li>
+<li>Try <b>Settings → Agent Mode</b> to enable the Ollama fallback</li>
 <li>Check your internet connection for cloud-based models</li>
 </ul>
 <h4 style='color:%2;'>Application not found</h4>
@@ -4252,6 +4237,10 @@ void MainWindow::onAttachmentsConsumed()
 
 void MainWindow::setThinkingState(bool thinking)
 {
+    // Спиннер сам запускает и останавливает свою анимацию по показу/скрытию,
+    // поэтому здесь достаточно видимости.
+    if (m_spinner) m_spinner->setVisible(thinking);
+
     if (thinking) {
         m_dot->setStyleSheet(QStringLiteral("color: #aa66ff; font-size: 18px;"));
         m_status->setText(Str::statusThinking());
@@ -4486,6 +4475,13 @@ void MainWindow::buildUI()
     m_dot = new QLabel(QStringLiteral("●"), this);
     m_dot->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 18px;"));
 
+    // Крутится, только когда Джарвис действительно занят. Стоит рядом с
+    // точкой, а не вместо неё: точка — состояние («в сети», «говорит»),
+    // вращение — работа прямо сейчас.
+    m_spinner = new SpinnerWidget(this);
+    m_spinner->setColor(QColor(0xAA, 0x66, 0xFF));
+    m_spinner->setVisible(false);
+
     m_status = new QLabel(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"), this);
     m_status->setObjectName(QStringLiteral("statusText"));
 
@@ -4495,6 +4491,8 @@ void MainWindow::buildUI()
     topBar->addWidget(spacer);
     topBar->addWidget(m_agentLabel);
     topBar->addSpacing(8);
+    topBar->addWidget(m_spinner);
+    topBar->addSpacing(4);
     topBar->addWidget(m_dot);
     topBar->addWidget(m_status);
     vbox->addLayout(topBar);
@@ -5355,14 +5353,11 @@ QString MainWindow::buildWelcomeHtml() const
 
     // ── LLM status ────────────────────────────────────────
     const bool claudeOk = m_jarvis->claudeApi() && m_jarvis->claudeApi()->hasApiKey();
-    const bool geminiOk = m_jarvis->geminiBackup() && m_jarvis->geminiBackup()->hasApiKey();
     QString llmLine;
     if (claudeOk)
         llmLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Claude API Online");
     else
         llmLine = QStringLiteral("<span style='color:#ff4444;'>&#9679;</span> Claude API — no key");
-    if (geminiOk)
-        llmLine += QStringLiteral(" &nbsp;|&nbsp; <span style='color:#4a9a6a;'>&#9679;</span> Gemini Fallback Ready");
 
     // ── Database status ───────────────────────────────────
     const auto& db = DatabaseManager::instance();

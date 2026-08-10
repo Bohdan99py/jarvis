@@ -29,7 +29,7 @@ struct DbChatMessage {
     qint64    userId      = 1;        // FK → users.id
     QString   role;                   // "user" | "assistant" | "system"
     QString   content;
-    QString   model = QStringLiteral("claude"); // "claude"|"gemini"|"groq"|"local" —
+    QString   model = QStringLiteral("claude"); // "claude"|"groq"|"local" —
                                        // must not stay a null QString: that
                                        // binds as SQL NULL and violates
                                        // chat_history.model's NOT NULL,
@@ -119,7 +119,7 @@ struct DbTrainingLog {
     qint64    userId       = 1;
     QString   userMessage;             // вопрос пользователя
     QString   aiResponse;              // полный ответ JARVIS
-    QString   model;                   // "claude" | "gemini" | "local"
+    QString   model;                   // "claude" | "local"
     QString   sessionId;
     int       rating       = 1;        // 1 = 👍, в будущем можно 1-5
     QDateTime createdAt;

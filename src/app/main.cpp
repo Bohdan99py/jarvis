@@ -60,6 +60,17 @@ int main(int argc, char* argv[])
 
     QApplication app(argc, argv);
 
+    // Меню и тултипы появляются с затуханием, а не мгновенным щелчком.
+    // Это встроенные эффекты Qt, а не собственная анимация: они применяются
+    // ко ВСЕМ меню приложения сразу, включая те, что будут созданы позже,
+    // тогда как ручная анимация пришлось бы вешать на каждое меню отдельно
+    // и она бы разъезжалась с новыми.
+    QApplication::setEffectEnabled(Qt::UI_AnimateMenu,    true);
+    QApplication::setEffectEnabled(Qt::UI_FadeMenu,       true);
+    QApplication::setEffectEnabled(Qt::UI_AnimateCombo,   true);
+    QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, true);
+    QApplication::setEffectEnabled(Qt::UI_FadeTooltip,    true);
+
     // Дизайн-токены регистрируем до создания любого QQuickWidget —
     // иначе QML-экраны стартуют с неразрешённым import Jarvis.Theme.
     // Базовый шрифт берём из той же шкалы, что и QML: один источник

@@ -28,7 +28,6 @@ class KeyEmulator;
 class SessionMemory;
 class ClaudeApi;
 class OllamaApi;
-class GeminiApi;
 class ActionPredictor;
 class AutoUpdater;
 class ProjectIndexer;
@@ -115,8 +114,7 @@ public:
     // constructing their own, so one real motion event can't produce two
     // independent alerts from two cameras watching the same webcam.
     SecurityCamera*     securityCamera()     const { return m_securityCamera; }
-    OllamaApi*          ollamaApi()          const { return m_geminiApi; }  // m_geminiApi хранит OllamaApi
-    GeminiApi*          geminiBackup()       const { return m_geminiBackup; }
+    OllamaApi*          ollamaApi()          const { return m_ollamaApi; }  // m_ollamaApi хранит OllamaApi
     ActionPredictor*    actionPredictor()    const { return m_predictor; }
     AutoUpdater*        autoUpdater()        const { return m_updater; }
     ProjectIndexer*     projectIndexer()     const { return m_indexer; }
@@ -146,7 +144,7 @@ public:
     void setCurrentUserId(qint64 id) { m_currentUserId = id; }
     qint64 currentUserId() const     { return m_currentUserId; }
 
-    // Мультиагентный режим: true = Claude для кода, Gemini для бесед
+    // Мультиагентный режим: true = Claude для кода, Ollama для бесед
     void setMultiAgentMode(bool enabled);
     bool multiAgentMode() const { return m_multiAgentMode; }
 
@@ -195,7 +193,6 @@ signals:
     void speakingChanged(bool speaking);
     void asyncResponseReady(const QString& response);
     void asyncResponseError(const QString& error);
-    void geminiError(const QString& error);  // причина fallback на Claude — видна в UI
     void suggestionAvailable(const QString& description, const QString& action);
     void attachmentsConsumed();
     void agentSelected(const QString& agentName);
@@ -215,7 +212,26 @@ private:
 
     // === Системные команды реестра ===
     QString cmdSetApiKey(const QString& input);
-    QString cmdSetGeminiKey(const QString& input);
+    QString cmdSetOllamaModel(const QString& input);
+
+    // Пытается ответить из локальной памяти при отказе сети.
+    // true — ответ отдан (asyncResponseReady), ошибку показывать не нужно.
+    bool    emitOfflineAnswer(const QString& query);
+
+    // ── Ответ без сети ───────────────────────────────────────────────
+    // Локальные слои (кэш кейсов, граф синапсов, поведенческие паттерны)
+    // работают ДО обращения к сети и с жёсткими порогами: пока интернет
+    // есть, лучше уйти в Claude, чем выдать слабое совпадение. Когда сеть
+    // отвалилась, эта же логика повторяется с ослабленными порогами —
+    // слабый ответ по делу полезнее строки "Network error", а выбора всё
+    // равно нет. Пустая строка = локально не нашлось ничего.
+    QString buildOfflineAnswer(const QString& query) const;
+
+    // Единая точка обработки сбоя API: сначала пробует ответить локально
+    // (с явной пометкой, что это офлайн и ответ может быть неточным), и
+    // только если нечего — отдаёт ошибку, но с перечнем того, что
+    // работает без сети, а не с сырым текстом сбоя.
+    void respondOfflineOrError(const QString& query, const QString& apiError);
     QString cmdRememberFact(const QString& input);
     QString cmdRecallFact(const QString& input);
     QString cmdShowMemory(const QString& input);
@@ -264,8 +280,7 @@ private:
     KeyEmulator*        m_keyEmulator  = nullptr;
     SessionMemory*      m_memory       = nullptr;
     ClaudeApi*          m_claudeApi    = nullptr;
-    OllamaApi*          m_geminiApi    = nullptr;   // Ollama — локальный LLM
-    GeminiApi*          m_geminiBackup = nullptr;   // Gemini — fallback если Ollama недоступна
+    OllamaApi*          m_ollamaApi    = nullptr;   // Ollama — локальный LLM
     ActionPredictor*    m_predictor    = nullptr;
     QString             m_lastFeedbackAction;
     AutoUpdater*        m_updater      = nullptr;

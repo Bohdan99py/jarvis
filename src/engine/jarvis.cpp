@@ -7,7 +7,6 @@
 #include "session_memory.h"
 #include "claude_api.h"
 #include "ollama_api.h"
-#include "gemini_api.h"
 #include "action_predictor.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
@@ -138,8 +137,7 @@ Jarvis::Jarvis(QObject* parent)
     connect(m_skills, &SkillManager::skillsChanged, this, syncEsp32);
 
     m_claudeApi    = new ClaudeApi(m_memory, this);
-    m_geminiApi    = new OllamaApi(this);   // Ollama — локальный LLM для быстрых ответов
-    m_geminiBackup = new GeminiApi(m_memory, this); // Gemini — fallback если Ollama недоступна
+    m_ollamaApi    = new OllamaApi(this);   // Ollama — локальный LLM для быстрых ответов
     m_predictor    = new ActionPredictor(m_memory, this);
     m_keyEmulator  = new KeyEmulator(this);
     m_pcCommands   = new PcCommandRegistry(m_keyEmulator, this);
@@ -343,7 +341,10 @@ Jarvis::Jarvis(QObject* parent)
     {
         auto& curiosity = CuriosityEngine::instance();
         curiosity.setActivityTracker(m_activity);
-        curiosity.start(90);
+        // Проверка раз в 20 минут вместо 90: сам вопрос всё равно проходит
+        // через кулдаун и модель внимания, но раз в 90 минут окно простоя
+        // почти всегда закрывалось раньше, чем таймер до него доходил.
+        curiosity.start(20);
         connect(&curiosity, &CuriosityEngine::proactiveDialogue, this,
                 [this](const QString& message, CuriosityEngine::ProactiveCategory) {
             // The question MUST land in session memory, not just on screen.
@@ -537,7 +538,7 @@ void Jarvis::registerCommands()
 
     m_registry.registerCommand(
         {QStringLiteral("ollamamodel "), QStringLiteral("модель ")},
-        [this](const QString& s) { return cmdSetGeminiKey(s); },
+        [this](const QString& s) { return cmdSetOllamaModel(s); },
         QStringLiteral("ollamamodel <name> — select Ollama model (e.g. llama3, mistral)"),
         /*prefixMatch=*/true
     );
@@ -1916,7 +1917,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // Обогащение: автопоиск из индекса + прикрепления пользователя +
     // журнал сессий (если запрос похож на "вспомни что было ...").
     // Контекст проекта нужен только тем запросам, что и так идут в Claude —
-    // для простой болталки в Ollama/Gemini он только тратит токены впустую.
+    // для простой болталки в Ollama он только тратит токены впустую.
     QString enrichedMessage = s;
     if (needsClaude) {
         const QString projectContext = buildProjectContext(s);
@@ -2002,7 +2003,7 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                                  [this, s, hadAttachments](bool success, const QString& response) {
             if (success) {
                 handleClaudeCodeResponse(s, response, hadAttachments);
-            } else {
+            } else if (!emitOfflineAnswer(s)) {
                 emit asyncResponseError(response);
                 if (m_esp32Hub && m_esp32Hub->isConnected())
                     m_esp32Hub->sendNotification(QStringLiteral("error"), 3000);
@@ -2011,73 +2012,28 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         return QString();
     }
 
-    // --- Ветка "болталка": Ollama → Gemini (встроенный ключ) → Claude (last resort) ---
-    auto tryGeminiThenClaude = [this, s, enrichedMessage, hadAttachments]() {
-        if (m_geminiBackup && m_geminiBackup->hasApiKey()) {
-            emit agentSelected(QStringLiteral("♊ Gemini"));
-            m_geminiBackup->sendMessage(enrichedMessage,
-                [this, s, enrichedMessage, hadAttachments](bool ok2, const QString& resp2) {
-                if (ok2) {
-                    m_memory->addMessage(QStringLiteral("assistant"), resp2);
-                    m_memory->updateContext(s, resp2);
-                    m_predictor->recordSequence(s);
-                    m_activity->extractKnowledge(m_currentUserId, s, resp2);
-                    // Auto-cache conversational response for offline
-                    if (resp2.length() <= 2000 && !resp2.contains(QStringLiteral("```"))) {
-                        DbBehaviorPattern cached;
-                        cached.userId   = 1;
-                        cached.trigger  = s.toLower().simplified();
-                        cached.response = resp2.left(1000);
-                        cached.context  = QStringLiteral("{}");
-                        cached.confidence = 0.7f;
-                        DatabaseManager::instance().upsertPattern(cached);
-                    }
-                    // Smart framing for conversational responses
-                    QString framedResp2 = resp2;
-                    if (resp2.length() > 300) {
-                        framedResp2 = QStringLiteral("💬 ")
-                            + (m_uiEnglish ? QStringLiteral("Here's what I think:\n\n")
-                                           : QStringLiteral("Вот что я думаю:\n\n"))
-                            + resp2;
-                    }
-                    emit asyncResponseReady(framedResp2);
-                } else {
-                    // Диагностика: причина видна в консоли CLion и в UI
-                    qDebug() << "[Gemini] Error → Claude fallback:" << resp2;
-                    emit geminiError(resp2);
-                    emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
-                    m_claudeApi->sendMessage(enrichedMessage,
-                        [this, s, hadAttachments](bool ok3, const QString& resp3) {
-                        if (ok3) {
-                            handleClaudeCodeResponse(s, resp3, hadAttachments);
-                        } else {
-                            emit asyncResponseError(resp3);
-                        }
-                    });
-                }
-            });
-        } else {
-            qDebug() << "[Gemini] No API key → Claude directly";
-            emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
-            m_claudeApi->sendMessage(enrichedMessage,
-                [this, s, hadAttachments](bool ok, const QString& resp) {
-                if (ok) {
-                    handleClaudeCodeResponse(s, resp, hadAttachments);
-                } else {
-                    emit asyncResponseError(resp);
-                }
-            });
-        }
+    // --- Ветка "болталка": Ollama → Claude (last resort) ---
+    // Цепочка двухуровневая: локальная Ollama, затем Claude.
+    auto fallbackToClaude = [this, s, enrichedMessage, hadAttachments]() {
+        emit agentSelected(QStringLiteral("🤖 Claude (fallback)"));
+        m_claudeApi->sendMessage(enrichedMessage,
+            [this, s, hadAttachments](bool ok, const QString& resp) {
+            if (ok) {
+                handleClaudeCodeResponse(s, resp, hadAttachments);
+            } else if (!emitOfflineAnswer(s)) {
+                emit asyncResponseError(resp);
+            }
+        });
     };
 
     if (m_multiAgentMode) {
         // Ollama явно включена пользователем и доступна — приоритет ей
         // (полностью бесплатно, локально, без сети).
-        emit agentSelected(QStringLiteral("🦙 ") + m_geminiApi->model());
-        m_geminiApi->setSystemPrompt(m_memory->buildSystemPrompt());
-        m_geminiApi->sendMessage(enrichedMessage,
+        emit agentSelected(QStringLiteral("🦙 ") + m_ollamaApi->model());
+        m_ollamaApi->setSystemPrompt(m_memory->buildSystemPrompt());
+        m_ollamaApi->sendMessage(enrichedMessage,
                                  [this, s, enrichedMessage, hadAttachments,
-                                  tryGeminiThenClaude](bool success, const QString& response) {
+                                  fallbackToClaude](bool success, const QString& response) {
             if (success) {
                 m_memory->addMessage(QStringLiteral("assistant"), response);
                 m_memory->updateContext(s, response);
@@ -2103,23 +2059,100 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
                 }
                 emit asyncResponseReady(framedResponse);
             } else {
-                // Ollama перестала отвечать посреди сессии → Gemini → Claude
-                tryGeminiThenClaude();
+                // Ollama перестала отвечать посреди сессии → Claude
+                fallbackToClaude();
             }
         });
         return QString();
     }
 
-    // Ollama не включена/не проверена — идём сразу в Gemini (бесплатно,
-    // встроенный ключ, без необходимости поднимать локальный сервер),
-    // и только если её тоже нет — в Claude.
-    tryGeminiThenClaude();
+    // Ollama не включена/не проверена — идём сразу в Claude.
+    fallbackToClaude();
     return QString();
 }
 
 // ============================================================
 // Обработка ответа Claude
 // ============================================================
+
+// ============================================================
+// Офлайн-ответ: что можно сказать, когда сети нет
+// ============================================================
+//
+// Раньше при отказе API десктоп просто показывал текст ошибки — при том
+// что Джарвис к этому моменту помнит сотни разобранных случаев, граф
+// понятий и локальные паттерны. Отвечать "нет сети" на вопрос, ответ на
+// который лежит в собственной памяти, — это не отсутствие возможности, а
+// незаданный вопрос к себе.
+//
+// Тот же путь у Telegram-шлюза уже был (см. обработчик asyncResponseError
+// в j2j_telegram_gateway.cpp); здесь он появляется у ПК-чата.
+//
+// Ответ всегда помечен как локальный: пользователь должен видеть, что это
+// память, а не свежий ответ модели — иначе устаревший кэш неотличим от
+// актуального ответа.
+bool Jarvis::emitOfflineAnswer(const QString& query)
+{
+    if (query.trimmed().isEmpty()) return false;
+
+    const auto match = LlmCacheManager::instance()
+                           .route(LlmCacheManager::kDesktopOwnerId, query);
+    if (match.tier == LlmCacheManager::CaseMatch::Tier::None
+        || match.response.trimmed().isEmpty())
+        return false;
+
+    QString header;
+    switch (match.tier) {
+    case LlmCacheManager::CaseMatch::Tier::Exact:
+        header = m_uiEnglish
+            ? QStringLiteral("📴 Offline — I've answered this exact thing before:")
+            : QStringLiteral("📴 Нет сети — но это я уже отвечал дословно:");
+        break;
+    case LlmCacheManager::CaseMatch::Tier::Similar:
+        header = m_uiEnglish
+            ? QStringLiteral("📴 Offline — closest thing I remember (\"%1\"):")
+                  .arg(match.matchedQuery)
+            : QStringLiteral("📴 Нет сети — вот самое близкое, что помню («%1»):")
+                  .arg(match.matchedQuery);
+        break;
+    case LlmCacheManager::CaseMatch::Tier::Associative:
+        // Собрано из кусочков по графу понятий, а не найдено целиком —
+        // и об этом честно говорится, включая чего в пазле не хватило.
+        header = m_uiEnglish
+            ? QStringLiteral("📴 Offline — assembled from related things I know:")
+            : QStringLiteral("📴 Нет сети — собрал из связанного, что знаю:");
+        break;
+    case LlmCacheManager::CaseMatch::Tier::None:
+        return false;
+    }
+
+    QString body = header + QStringLiteral("\n\n") + match.response;
+
+    if (!match.missingConcepts.isEmpty()) {
+        body += QStringLiteral("\n\n")
+              + (m_uiEnglish
+                    ? QStringLiteral("⚠️ No local memory covers: ")
+                    : QStringLiteral("⚠️ Локальной памяти не хватило по: "))
+              + match.missingConcepts.join(QStringLiteral(", "))
+              + (m_uiEnglish
+                    ? QStringLiteral(" — ask me again when the network is back.")
+                    : QStringLiteral(" — спроси заново, когда будет сеть."));
+    }
+
+    m_memory->addMessage(QStringLiteral("assistant"), match.response);
+    m_memory->updateContext(query, match.response);
+
+    emit agentSelected(m_uiEnglish ? QStringLiteral("🧠 Local memory")
+                                   : QStringLiteral("🧠 Локальная память"));
+    emit asyncResponseReady(body);
+
+    JarvisResponse dual = JarvisResponse::parse(match.response);
+    VoiceSynthesisManager::instance().say(dual.speechText);
+
+    qDebug() << "[Jarvis] Offline answer served, tier=" << int(match.tier)
+             << "overlap=" << match.overlap;
+    return true;
+}
 
 void Jarvis::handleClaudeResponse(const QString& response)
 {
@@ -2764,7 +2797,7 @@ void Jarvis::setMultiAgentMode(bool enabled)
 bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock) const
 {
     // Возвращает true  → запрос идёт в Claude (код, файлы, сложные задачи)
-    // Возвращает false → запрос идёт в Ollama/Gemini (болталка, простые вопросы)
+    // Возвращает false → запрос идёт в Ollama (болталка, простые вопросы)
     //
     // Принцип: по умолчанию → лёгкая модель.
     // В Claude только если явно нужен код/анализ/файлы.
@@ -2837,25 +2870,25 @@ bool Jarvis::routeToClaude(const QString& input, const QString& attachmentBlock)
     // пользователя слабым ответом от Ollama на сложный вопрос.
     if (trimmed.length() > 120) return true;
 
-    // Всё остальное (короткие приветствия, простые вопросы, беседа) → Ollama/Gemini
+    // Всё остальное (короткие приветствия, простые вопросы, беседа) → Ollama
     return false;
 }
 
 // ============================================================
-// Gemini API-ключ
+// Модель Ollama
 // ============================================================
 
-QString Jarvis::cmdSetGeminiKey(const QString& input)
+QString Jarvis::cmdSetOllamaModel(const QString& input)
 {
     // Переиспользован под управление Ollama-моделью
     QString model = extractArg(input, {QStringLiteral("ollamamodel "),
                                         QStringLiteral("модель ")});
     if (model.isEmpty()) {
-        return QStringLiteral("Current Ollama model: ") + m_geminiApi->model()
+        return QStringLiteral("Current Ollama model: ") + m_ollamaApi->model()
              + QStringLiteral("\nTo switch: ollamamodel <name>\n"
                "Available models: ollama list (in terminal)");
     }
-    m_geminiApi->setModel(model);
+    m_ollamaApi->setModel(model);
     return QStringLiteral("Ollama model set: ") + model;
 }
 
@@ -2998,7 +3031,7 @@ QString Jarvis::cmdHelp(const QString&)
         "<tr><td colspan='2' style='padding:6px 0 4px; color:#45A29E; font-weight:bold;'>"
         "Conversation</td></tr>")
         + row(QStringLiteral("Any question"),
-              QStringLiteral("Routes to Claude (code/complex) or Ollama/Gemini (casual)"))
+              QStringLiteral("Routes to Claude (code/complex) or Ollama (casual)"))
         + row(QStringLiteral("\"recall what happened...\""),
               QStringLiteral("Search session journal by date or topic"))
         + QStringLiteral("</table>"));
@@ -3010,7 +3043,7 @@ QString Jarvis::cmdHelp(const QString&)
         "• Voice recognition (Vosk) • Behavior pattern matching • Response cache • "
         "Virtual keyboard • PC control commands • Activity tracking<br><br>"
         "<b>Requires internet:</b><br>"
-        "• Claude API (code analysis, complex reasoning) • Gemini API (conversational fallback) • "
+        "• Claude API (code analysis, complex reasoning) • "
         "Auto-updater (GitHub Releases) • Screenshot Vision analysis<br><br>"
         "<b>Optional local LLM (Ollama):</b><br>"
         "Enable Agent Mode in Settings to route casual conversation through a local model "

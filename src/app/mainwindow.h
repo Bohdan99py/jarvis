@@ -5,7 +5,7 @@
 //   - Убран m_vibeCodingMode и всё связанное с вайбкодингом
 //   - Добавлен LearnedCommands (самообучение)
 //   - Добавлен ScreenAgent (зрение + клики)
-//   - Добавлен Gemini API key в меню Settings
+//   - Добавлен API key в меню Settings
 // -------------------------------------------------------
 
 #include <QMainWindow>
@@ -45,6 +45,7 @@ class QDropEvent;
 #include "audio_manager.h"
 #include "theme_manager.h"
 #include "visual_insights_widget.h"
+#include "spinner_widget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -151,6 +152,7 @@ private:
     QLabel*                 m_dot        = nullptr;
     QLabel*                 m_status     = nullptr;
     QLabel*                 m_agentLabel = nullptr;
+    SpinnerWidget*          m_spinner    = nullptr;
     QTimer*                 m_pulseTimer = nullptr;
     bool                    m_pulse      = false;
 

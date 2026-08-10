@@ -20,7 +20,6 @@ bool CommandRegistry::isSystemCommand(const QString& lower)
     static const QStringList systemKeywords = {
         // Ключи API
         QStringLiteral("apikey"),
-        QStringLiteral("geminikey"),
         QStringLiteral("ollamakey"),
         // Помощь
         QStringLiteral("помощь"),
