@@ -5,6 +5,8 @@
 #include "screenshot_learner.h"
 #include "curiosity_engine.h"
 #include "activity_tracker.h"
+#include "synapse_graph.h"
+#include "llm_cache_manager.h"
 #include "jarvis_paths.h"
 
 #include <QSqlQuery>
@@ -284,6 +286,28 @@ void ScreenshotLearner::onCapture()
         int duration = static_cast<int>(m_lastChangeTime.secsTo(now));
         if (duration >= MIN_DURATION_SEC) {
             recordCurrentApp();
+
+            // Завершённый эпизод работы уходит в ту же ассоциативную память,
+            // что и разговоры. Раньше SynapseGraph подкреплялся только из
+            // LlmCacheManager, то есть исключительно текстом через LLM: всё,
+            // что Джарвис узнавал НАБЛЮДАЯ (какое приложение, какое окно, как
+            // долго), оставалось в своей таблице и связью не становилось.
+            // Здесь понятия приходят вместе — приложение, категория работы и
+            // токены заголовка окна (имя файла, проекта, текст ошибки), —
+            // поэтому между ними возникают рёбра, и час в KiCad и заданный
+            // назавтра вопрос про футпринт приходят в один и тот же узел.
+            //
+            // Именно на смене приложения, а не на каждом снимке: один эпизод
+            // должен подкрепить связь один раз, иначе вес растёт от того, что
+            // окно просто было открыто.
+            const QString episode = m_lastAppName
+                + QStringLiteral(" ")
+                + ActivityTracker::categorizeApp(processName, m_lastWindowTitle)
+                + QStringLiteral(" ")
+                + m_lastWindowTitle;
+            SynapseGraph::instance().reinforce(
+                LlmCacheManager::kDesktopOwnerId, episode, QString(),
+                QString::fromLatin1(SynapseGraph::kSourceWatched));
         }
         m_lastChangeTime = now;
     }

@@ -252,6 +252,23 @@ Jarvis::Jarvis(QObject* parent)
                            .arg(node, title));
     });
     m_mesh->start();
+    // Reported, not assumed: the mesh is live because start() ran here, and
+    // the peer count is re-reported as peers come and go, so Jarvis never
+    // offers to delegate work to a network he isn't on.
+    SystemManifest::setRuntimeState(QStringLiteral("j2j_mesh"), true,
+                                    QStringLiteral("listening, no peers yet"));
+    {
+        auto reportPeers = [this]() {
+            const int n = m_mesh->peerCount();
+            SystemManifest::setRuntimeState(QStringLiteral("j2j_mesh"), true,
+                n > 0 ? QStringLiteral("%1 peer(s) linked").arg(n)
+                      : QStringLiteral("listening, no peers yet"));
+        };
+        connect(m_mesh, &J2JMeshConnector::peerAuthorized, this,
+                [reportPeers](const QString&, const QString&) { reportPeers(); });
+        connect(m_mesh, &J2JMeshConnector::peerLost, this,
+                [reportPeers](const QString&) { reportPeers(); });
+    }
 
     // Translation engine: FR/EN/RU translation + audio pipeline
     m_translator = new TranslationEngine(this);
@@ -317,14 +334,10 @@ Jarvis::Jarvis(QObject* parent)
         syncProjectInfoToMemory();
     }
 
-    // System Manifest: inject capabilities into LLM context
+    // System Manifest: inject capabilities into LLM context. Probed from
+    // real runtime state, so what Jarvis claims about himself tracks what is
+    // actually loaded — see SystemManifest::activeCapabilities().
     m_memory->setCapabilitiesContext(SystemManifest::buildCapabilitiesContext());
-    // (Removed: an "upgrade notification" used to post here on every version
-    // bump, but its text was a hardcoded blurb about one specific past
-    // release — only the version numbers actually varied, so it claimed
-    // the same "what's new" regardless of what changed. SystemManifest::
-    // buildUpgradeNotification()/checkAndUpdateVersion() are left in place
-    // unused in case a real per-version changelog replaces this later.)
 
     // Proactive Curiosity Engine — context-aware idle dialogue
     {
@@ -333,6 +346,15 @@ Jarvis::Jarvis(QObject* parent)
         curiosity.start(90);
         connect(&curiosity, &CuriosityEngine::proactiveDialogue, this,
                 [this](const QString& message, CuriosityEngine::ProactiveCategory) {
+            // The question MUST land in session memory, not just on screen.
+            // It used to only be emitted for display, so the conversation
+            // history sent to the LLM had no record that Jarvis had asked
+            // anything — the user's reply arrived as a contextless opener
+            // ("Yes, the sandwich with chicken") and the model answered as
+            // if it came out of nowhere. Writing it here means a reply is
+            // read against the question it answers, whether it comes 10
+            // seconds or an hour later.
+            m_memory->addMessage(QStringLiteral("assistant"), message);
             emit asyncResponseReady(message);
         });
     }
@@ -341,8 +363,21 @@ Jarvis::Jarvis(QObject* parent)
     {
         auto& mc = MemoryConsolidation::instance();
         mc.startBackgroundConsolidation(15);
+
+        // Self-knowledge: the drive's real presence, reported by the thing
+        // that actually talks to it, and re-reported whenever it changes —
+        // so "I have a 4TB tier" is never claimed while it's unplugged.
+        auto reportDrive = [](bool connected) {
+            SystemManifest::setRuntimeState(
+                QStringLiteral("memory_consolidation"), true,
+                connected ? QStringLiteral("external tier online, background consolidation every 15 min")
+                          : QStringLiteral("external drive offline — running from local SSD cache only"));
+        };
+        reportDrive(mc.isExternalAvailable());
+
         connect(&mc, &MemoryConsolidation::driveStatusChanged, this,
-                [this](bool connected) {
+                [this, reportDrive](bool connected) {
+            reportDrive(connected);
             const QString msg = connected
                 ? QStringLiteral("📀 External memory pool connected — consolidation active.")
                 : QStringLiteral("📀 External memory pool disconnected — operating from local cache.");
@@ -1171,12 +1206,27 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // since PC and Telegram are the same person.
     if (CuriosityEngine::instance().hasPendingQuestion()) {
         if (CuriosityEngine::instance().consumeAnswer(chatId, s, replyToMessageId)) {
-            m_memory->addMessage(QStringLiteral("user"), s);
-            const QString ack = m_uiEnglish
-                ? QStringLiteral("Got it, thanks! 👍")
-                : QStringLiteral("Понял, спасибо! 👍");
-            m_memory->addMessage(QStringLiteral("assistant"), ack);
-            return ack;
+            // A bare yes/no carries nothing to respond TO — acknowledge it and
+            // stop. Anything more substantial ("Yes, the sandwich with chicken")
+            // deserves an actual reply, so it falls through to normal handling
+            // instead of dead-ending in a canned thank-you. The question is in
+            // session memory (see the proactiveDialogue hookup), so whatever
+            // answers reads it as the answer to that question.
+            static const QStringList kBareAcks = {
+                QStringLiteral("да"),  QStringLiteral("нет"),
+                QStringLiteral("yes"), QStringLiteral("no"),
+                QStringLiteral("ага"), QStringLiteral("угу"),
+                QStringLiteral("yep"), QStringLiteral("nope"),
+            };
+            const QString bare = s.trimmed().toLower();
+            if (kBareAcks.contains(bare)) {
+                m_memory->addMessage(QStringLiteral("user"), s);
+                const QString ack = m_uiEnglish
+                    ? QStringLiteral("Got it, thanks! 👍")
+                    : QStringLiteral("Понял, спасибо! 👍");
+                m_memory->addMessage(QStringLiteral("assistant"), ack);
+                return ack;
+            }
         }
     }
 

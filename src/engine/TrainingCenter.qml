@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Jarvis.Theme
 
 // ============================================================
@@ -770,137 +771,366 @@ Rectangle {
                 }
             }
 
+
             // ======================================================
             // Tab 4 — Synapse Graph (SynapseGraph associative memory)
+            //
+            // The network itself, not a ranked list of it: concepts as
+            // nodes, Hebbian synapses as lines, both positioned by the
+            // force-directed layout computed in C++. Node size and colour
+            // are activation count; line thickness is synapse weight — so
+            // clusters on screen are literally the associations Jarvis has
+            // learned to fire together.
             // ======================================================
             Item {
+                id: synapseTab
                 anchors.fill: parent
                 visible: root.currentTab === 4
                 opacity: visible ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 180 } }
 
+                // One colour per learning channel — the grouping comes from
+                // synapse_nodes.source, so the picture says where each piece
+                // of knowledge came from rather than only how hot it is.
+                readonly property color srcDialogue: Theme.accent
+                readonly property color srcWatched:  Theme.warning
+                readonly property color srcFact:     Theme.info
+
+                function sourceColor(source) {
+                    if (source === "watched") return srcWatched
+                    if (source === "fact")    return srcFact
+                    return srcDialogue
+                }
+
                 Column {
                     anchors.fill: parent
                     spacing: 10
 
+                    // ---- Stat header ----
                     Row {
                         width: parent.width
+                        height: 26
+                        spacing: 6
+
                         Text {
-                            text: en ? "Concept nodes: " : "Узлов-понятий: "
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.en ? "Concept nodes: " : "Узлов-понятий: "
                             color: Theme.onSurfaceVariant
                             font.pixelSize: 12
                         }
                         Text {
+                            anchors.verticalCenter: parent.verticalCenter
                             text: synapseNodeCount
                             color: root.cyan
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                             font.bold: true
                         }
-                        Item { width: 24; height: 1 }
+                        Item { width: 20; height: 1 }
                         Text {
-                            text: en ? "Synapses: " : "Связей: "
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.en ? "Synapses: " : "Связей: "
                             color: Theme.onSurfaceVariant
                             font.pixelSize: 12
                         }
                         Text {
+                            anchors.verticalCenter: parent.verticalCenter
                             text: synapseEdgeCount
                             color: root.teal
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                             font.bold: true
                         }
-                        Item { width: parent.width - 420; height: 1 }
-                        Rectangle {
-                            width: 90; height: 26; radius: 6
-                            color: sgRefreshArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                            border.width: 1
-                            border.color: Theme.outlineStrong
-                            Text {
-                                anchors.centerIn: parent
-                                text: en ? "🔄 Refresh" : "🔄 Обновить"
-                                color: root.cyan
-                                font.pixelSize: 10
-                            }
-                            MouseArea {
-                                id: sgRefreshArea
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: trainingCenter.refreshStats()
-                            }
+                        Item { width: 20; height: 1 }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.en ? "· drawing top " + synapseGraphNodes.length
+                                          : "· на схеме топ-" + synapseGraphNodes.length
+                            color: Theme.onSurfaceDim
+                            font.pixelSize: 10
                         }
                     }
 
+                    // ---- Graph + side panel ----
                     Row {
                         width: parent.width
                         height: parent.height - y
-                        spacing: 16
+                        spacing: 12
 
-                        // ---- Most-activated concepts ----
-                        Column {
-                            width: (parent.width - 16) / 2
+                        // ============ The network ============
+                        Rectangle {
+                            id: graphViewport
+                            width: parent.width - 232
                             height: parent.height
-                            spacing: 8
+                            radius: Theme.radiusMd
+                            color: Theme.surface1
+                            border.width: 1
+                            border.color: Theme.outline
+                            clip: true
 
                             Text {
-                                text: en ? "Most-fired concepts" : "Самые активные понятия"
-                                color: Theme.success
-                                font.pixelSize: 13
-                                font.bold: true
-                                font.family: "Segoe UI Semibold"
+                                anchors.centerIn: parent
+                                width: parent.width - 60
+                                visible: synapseGraphNodes.length === 0
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                text: root.en
+                                    ? "No associations yet.\nThe network draws itself as Jarvis answers things — concepts that fire together grow a synapse between them."
+                                    : "Связей пока нет.\nСхема рисует себя сама, пока Джарвис отвечает: понятия, срабатывающие вместе, отращивают между собой синапс."
+                                color: Theme.onSurfaceVariant
+                                font.pixelSize: 11
+                                lineHeight: 1.4
                             }
 
-                            Flickable {
-                                width: parent.width
-                                height: parent.height - 30
-                                clip: true
-                                contentHeight: nodeCol.height
-                                boundsBehavior: Flickable.StopAtBounds
+                            // Pan/zoom surface. The content item is what moves;
+                            // the viewport clips it.
+                            Item {
+                                id: graphContent
+                                width: graphViewport.width
+                                height: graphViewport.height
+                                transformOrigin: Item.Center
+
+                                // ---- Synapses ----
+                                // Straight lines are rotated Rectangles rather
+                                // than Shape/Canvas geometry: one batched
+                                // scene-graph node each, nothing repainted on
+                                // the UI thread.
+                                Repeater {
+                                    model: synapseGraphEdges
+                                    delegate: Rectangle {
+                                        id: synapseLine
+                                        required property var modelData
+
+                                        readonly property real px1: modelData.x1 * graphContent.width
+                                        readonly property real py1: modelData.y1 * graphContent.height
+                                        readonly property real px2: modelData.x2 * graphContent.width
+                                        readonly property real py2: modelData.y2 * graphContent.height
+                                        readonly property real len: Math.sqrt((px2 - px1) * (px2 - px1)
+                                                                            + (py2 - py1) * (py2 - py1))
+
+                                        x: px1
+                                        y: py1 - height / 2
+                                        width: len
+                                        height: 1 + 2.5 * modelData.norm
+                                        transformOrigin: Item.Left
+                                        rotation: Math.atan2(py2 - py1, px2 - px1) * 180 / Math.PI
+                                        // Alpha on the leaf colour, not opacity
+                                        // on a subtree — no offscreen pass.
+                                        color: Qt.rgba(Theme.accentMuted.r, Theme.accentMuted.g,
+                                                       Theme.accentMuted.b,
+                                                       0.18 + 0.55 * modelData.norm)
+
+                                        // Signal travelling down the strongest
+                                        // synapses. Only the top band animates,
+                                        // and only while the tab is on screen.
+                                        Rectangle {
+                                            visible: synapseLine.modelData.norm > 0.6
+                                            width: 3
+                                            height: parent.height
+                                            radius: height / 2
+                                            color: Theme.accent
+                                            SequentialAnimation on x {
+                                                running: synapseTab.visible
+                                                         && synapseLine.modelData.norm > 0.6
+                                                loops: Animation.Infinite
+                                                NumberAnimation {
+                                                    from: 0
+                                                    to: Math.max(0, synapseLine.len - 3)
+                                                    duration: 1400 + 900 * (1 - synapseLine.modelData.norm)
+                                                    easing.type: Easing.InOutSine
+                                                }
+                                                PauseAnimation { duration: 700 }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ---- Concepts ----
+                                Repeater {
+                                    model: synapseGraphNodes
+                                    delegate: Item {
+                                        id: nodeItem
+                                        required property var modelData
+                                        required property int index
+
+                                        readonly property real diameter: 11 + 21 * modelData.heat
+                                        readonly property color tint: synapseTab.sourceColor(modelData.source)
+
+                                        x: modelData.x * graphContent.width - width / 2
+                                        y: modelData.y * graphContent.height - diameter / 2
+                                        width: Math.max(diameter, label.implicitWidth)
+                                        height: diameter + 14
+
+                                        // Staggered grow-in: the network assembles
+                                        // itself instead of appearing all at once.
+                                        opacity: 0
+                                        scale: 0.4
+                                        OpacityAnimator on opacity {
+                                            running: true
+                                            from: 0; to: 1
+                                            duration: 260
+                                            easing.type: Easing.OutCubic
+                                        }
+                                        ScaleAnimator on scale {
+                                            running: true
+                                            from: 0.4; to: 1
+                                            duration: 340 + (nodeItem.index % 8) * 45
+                                            easing.type: Easing.OutBack
+                                        }
+
+                                        Rectangle {
+                                            id: halo
+                                            anchors.centerIn: dot
+                                            width: nodeItem.diameter + 12
+                                            height: width
+                                            radius: width / 2
+                                            color: "transparent"
+                                            border.width: 1
+                                            border.color: Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
+                                                                  nodeItem.tint.b, 0.35)
+                                            visible: modelData.major || hover.hovered
+                                            // Breathing ring on the hottest
+                                            // concepts — the "this one is alive"
+                                            // cue, paused when off-screen.
+                                            SequentialAnimation on scale {
+                                                running: synapseTab.visible && halo.visible
+                                                loops: Animation.Infinite
+                                                NumberAnimation { from: 1.0; to: 1.22; duration: 1300
+                                                                  easing.type: Easing.InOutSine }
+                                                NumberAnimation { from: 1.22; to: 1.0; duration: 1300
+                                                                  easing.type: Easing.InOutSine }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            id: dot
+                                            width: nodeItem.diameter
+                                            height: nodeItem.diameter
+                                            radius: width / 2
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            y: 0
+                                            color: hover.hovered
+                                                ? nodeItem.tint
+                                                : Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
+                                                          nodeItem.tint.b, 0.75)
+                                            border.width: 1
+                                            border.color: Qt.rgba(nodeItem.tint.r, nodeItem.tint.g,
+                                                                  nodeItem.tint.b, 0.9)
+
+                                            HoverHandler { id: hover }
+                                            ToolTip.visible: hover.hovered
+                                            ToolTip.text: modelData.label
+                                                + (root.en ? "\nfired ×" : "\nсработало ×") + modelData.activations
+                                                + (root.en ? "\nsynapses: " : "\nсвязей: ") + modelData.degree
+                                        }
+
+                                        Text {
+                                            id: label
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            anchors.top: dot.bottom
+                                            anchors.topMargin: 2
+                                            text: modelData.label
+                                            // Minor concepts stay unlabelled until hovered:
+                                            // forty permanent labels is a wall of text, and
+                                            // the structure is carried by the connected few.
+                                            visible: modelData.major || hover.hovered
+                                            color: hover.hovered ? nodeItem.tint : Theme.onSurfaceVariant
+                                            font.pixelSize: hover.hovered ? 10 : 9
+                                            font.bold: modelData.major
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Drag to pan, wheel to zoom. Below the nodes in
+                            // declaration order would swallow hover, so it sits
+                            // behind them via z.
+                            MouseArea {
+                                anchors.fill: parent
+                                z: -1
+                                drag.target: graphContent
+                                drag.axis: Drag.XAndYAxis
+                                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                onWheel: (wheel) => {
+                                    const next = graphContent.scale
+                                               * (wheel.angleDelta.y > 0 ? 1.12 : 1 / 1.12)
+                                    graphContent.scale = Math.max(0.5, Math.min(3.0, next))
+                                }
+                            }
+
+                            // ---- Fit / reset ----
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.margins: 8
+                                width: 54
+                                height: 24
+                                radius: Theme.radiusSm
+                                color: fitArea.pressed ? Theme.outlineStrong : Theme.surface2
+                                border.width: 1
+                                border.color: Theme.outline
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: root.en ? "⤢ Fit" : "⤢ Сброс"
+                                    color: Theme.onSurfaceVariant
+                                    font.pixelSize: 10
+                                }
+                                MouseArea {
+                                    id: fitArea
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        graphContent.scale = 1.0
+                                        graphContent.x = 0
+                                        graphContent.y = 0
+                                    }
+                                }
+                            }
+
+                            // ---- Legend: how Jarvis came to know each thing ----
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 8
+                                width: legendCol.implicitWidth + 18
+                                height: legendCol.implicitHeight + 16
+                                radius: Theme.radiusSm
+                                color: Qt.rgba(Theme.surface2.r, Theme.surface2.g,
+                                               Theme.surface2.b, 0.85)
+                                border.width: 1
+                                border.color: Theme.outline
+                                visible: synapseGraphNodes.length > 0
 
                                 Column {
-                                    id: nodeCol
-                                    width: parent.width
-                                    spacing: 6
+                                    id: legendCol
+                                    anchors.centerIn: parent
+                                    spacing: 5
 
                                     Text {
-                                        visible: synapseTopNodes.length === 0
-                                        text: en ? "No concepts learned yet — the graph grows as JARVIS answers things."
-                                                 : "Понятий пока нет — граф растёт по мере того, как JARVIS отвечает."
-                                        color: Theme.onSurfaceVariant
-                                        font.pixelSize: 11
-                                        width: parent.width
-                                        wrapMode: Text.WordWrap
+                                        text: root.en ? "LEARNED FROM" : "ОТКУДА ЗНАЮ"
+                                        color: Theme.onSurfaceDim
+                                        font.pixelSize: 8
+                                        font.bold: true
                                     }
 
                                     Repeater {
-                                        model: synapseTopNodes
+                                        model: synapseLegend
                                         delegate: Row {
-                                            width: nodeCol.width
-                                            spacing: 10
-                                            Text {
-                                                width: 110
-                                                text: modelData.label
-                                                color: Theme.onSurface
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                            }
+                                            required property var modelData
+                                            spacing: 6
                                             Rectangle {
-                                                width: parent.width - 110 - 34
-                                                height: 14
-                                                radius: 4
+                                                width: 7; height: 7; radius: 3.5
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                color: Theme.outline
-                                                Rectangle {
-                                                    width: parent.width * modelData.fraction
-                                                    height: parent.height
-                                                    radius: 4
-                                                    color: Theme.success
-                                                    Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-                                                }
+                                                color: synapseTab.sourceColor(modelData.source)
                                             }
                                             Text {
-                                                width: 30
-                                                text: modelData.activations
+                                                text: modelData.label
                                                 color: Theme.onSurfaceVariant
                                                 font.pixelSize: 9
+                                            }
+                                            Text {
+                                                text: modelData.count
+                                                color: Theme.onSurfaceDim
+                                                font.pixelSize: 9
+                                                font.bold: true
                                             }
                                         }
                                     }
@@ -908,23 +1138,44 @@ Rectangle {
                             }
                         }
 
-                        // ---- Strongest synapses ----
+                        // ============ Strongest associations ============
                         Column {
-                            width: (parent.width - 16) / 2
+                            width: 220
                             height: parent.height
                             spacing: 8
 
-                            Text {
-                                text: en ? "Strongest synapses" : "Самые крепкие связи"
-                                color: root.violet
-                                font.pixelSize: 13
-                                font.bold: true
-                                font.family: "Segoe UI Semibold"
+                            Row {
+                                width: parent.width
+                                Text {
+                                    text: root.en ? "Strongest links" : "Крепчайшие связи"
+                                    color: root.violet
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    font.family: "Segoe UI Semibold"
+                                }
+                                Item { width: parent.width - 150; height: 1 }
+                                Rectangle {
+                                    width: 26; height: 20; radius: Theme.radiusSm
+                                    color: sgRefreshArea.pressed ? Theme.outlineStrong : Theme.surface2
+                                    border.width: 1
+                                    border.color: Theme.outline
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "🔄"
+                                        font.pixelSize: 10
+                                    }
+                                    MouseArea {
+                                        id: sgRefreshArea
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: trainingCenter.refreshStats()
+                                    }
+                                }
                             }
 
                             Flickable {
                                 width: parent.width
-                                height: parent.height - 30
+                                height: parent.height - 34
                                 clip: true
                                 contentHeight: edgeCol.height
                                 boundsBehavior: Flickable.StopAtBounds
@@ -932,50 +1183,55 @@ Rectangle {
                                 Column {
                                     id: edgeCol
                                     width: parent.width
-                                    spacing: 6
+                                    spacing: 7
 
                                     Text {
                                         visible: synapseTopEdges.length === 0
-                                        text: en ? "No associations yet."
-                                                 : "Связей пока нет."
+                                        text: root.en ? "Nothing linked yet." : "Пока ничего не связано."
                                         color: Theme.onSurfaceVariant
-                                        font.pixelSize: 11
+                                        font.pixelSize: 10
                                     }
 
                                     Repeater {
                                         model: synapseTopEdges
                                         delegate: Column {
+                                            required property var modelData
                                             width: edgeCol.width
-                                            spacing: 2
+                                            spacing: 3
+
                                             Text {
                                                 width: parent.width
                                                 text: modelData.labelA + " ↔ " + modelData.labelB
                                                 color: Theme.onSurface
-                                                font.pixelSize: 11
+                                                font.pixelSize: 10
                                                 elide: Text.ElideRight
                                             }
                                             Row {
                                                 width: parent.width
-                                                spacing: 8
+                                                spacing: 6
                                                 Rectangle {
-                                                    width: parent.width - 90
-                                                    height: 10
-                                                    radius: 4
+                                                    width: parent.width - 62
+                                                    height: 4
+                                                    radius: 2
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     color: Theme.outline
                                                     Rectangle {
-                                                        width: parent.width * modelData.fraction
+                                                        width: parent.width * Math.min(1, modelData.weight / 3.0)
                                                         height: parent.height
-                                                        radius: 4
+                                                        radius: 2
                                                         color: root.violet
-                                                        Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                                                        Behavior on width {
+                                                            NumberAnimation { duration: 420
+                                                                              easing.type: Easing.OutCubic }
+                                                        }
                                                     }
                                                 }
                                                 Text {
-                                                    width: 82
-                                                    text: modelData.weight.toFixed(2) + " · ×" + modelData.coActivations
-                                                    color: Theme.onSurfaceVariant
-                                                    font.pixelSize: 9
+                                                    width: 56
+                                                    text: modelData.weight.toFixed(2)
+                                                        + " ×" + modelData.coActivations
+                                                    color: Theme.onSurfaceDim
+                                                    font.pixelSize: 8
                                                 }
                                             }
                                         }

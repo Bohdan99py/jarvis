@@ -88,8 +88,27 @@ public:
     // much time has passed — an explicit Telegram reply is the caller
     // saying "this is that answer," not a guess. Otherwise falls back to
     // the PENDING_ANSWER_WINDOW_MINUTES timestamp check.
+    //
+    // explicitReply: the caller KNOWS this is the answer because the user
+    // acted on an answer affordance (the desktop reply bar), not because a
+    // timer guessed. Bypasses both the staleness window and the
+    // short-answer heuristic — the desktop has no Telegram-style
+    // reply_to_message, so without this the 15-minute window was its only
+    // recognition path, and a reply typed 30 minutes later was silently
+    // routed to the LLM as a contextless new topic.
     bool consumeAnswer(qint64 chatId, const QString& answerText,
-                       qint64 replyToMessageId = 0);
+                       qint64 replyToMessageId = 0,
+                       bool explicitReply = false);
+
+    // The question currently awaiting an answer (empty if none) — for UI
+    // that wants to show the user what they're replying to.
+    QString pendingQuestion() const;
+
+    // While held, a pending question never expires. Set by a UI that is
+    // actively showing an answer affordance: the question stays answerable
+    // for as long as the user can still see it, instead of vanishing
+    // underneath the very prompt inviting them to answer it.
+    void setAnswerHold(bool hold);
 
     // Set by the gateway once it knows the Telegram message_id of the
     // question just posted (see J2JTelegramGateway::sendProactiveQuestion).
@@ -184,6 +203,7 @@ private:
     qint64              m_pendingDoubtId   = 0; // set when category == DoubtVerification
     qint64              m_pendingMessageId = 0; // Telegram message_id of the posted question
     qint64              m_pendingOpinionId = 0; // set when category == OpinionRevision
+    bool                m_answerHold       = false; // see setAnswerHold()
 
     static constexpr int MIN_IDLE_SECONDS = 300;
     static constexpr int MIN_MESSAGES_BETWEEN = 8;

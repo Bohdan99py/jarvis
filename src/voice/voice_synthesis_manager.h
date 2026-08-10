@@ -49,7 +49,9 @@ private:
 
     void processQueue();
     void speakViaSapi(const QString& text);
+    bool speakViaPiper(const QString& text);
     void tryLoadPiperModels();
+    QString findPiperExe() const;
 
     QQueue<QString>   m_queue;
     QMutex            m_queueMutex;
@@ -61,7 +63,9 @@ private:
     std::atomic<bool> m_stopRequested{false};
 
     std::atomic<bool> m_piperReady{false};
-    QString           m_piperModelPath;
+    QString           m_piperExePath;
+    QString           m_piperModelPathRu;
+    QString           m_piperModelPathEn;
 
     static constexpr int TTS_RATE   = 1;
     static constexpr int TTS_VOLUME = 100;

@@ -36,6 +36,7 @@
 #include "activity_tracker.h"
 #include "user_profile.h"
 #include "curiosity_engine.h"
+#include "system_manifest.h"
 #include "proactive_reminder_manager.h"
 #include "user_profile_extended.h"
 #include "memory_consolidation.h"
@@ -149,6 +150,10 @@ MainWindow::MainWindow(QWidget* parent)
     CuriosityEngine::instance().setUiEnglish(english);
 
     m_audioManager = new AudioManager(this);
+
+    // Non-blocking: scans models/tts for Piper voices and falls back
+    // to SAPI silently if piper.exe or no models are found.
+    VoiceSynthesisManager::instance().loadModelsAsync();
 
     // Restore last active user
     {
@@ -350,13 +355,20 @@ MainWindow::MainWindow(QWidget* parent)
     // Telegram reply would be. chatId 0 = desktop, which consumeAnswer
     // always matches regardless of which chat the question was pending for.
     connect(&CuriosityEngine::instance(), &CuriosityEngine::questionPosted,
-            this, [](const QString& question, const QStringList& options) {
+            this, [this](const QString& question, const QStringList& options) {
         NotificationManager::instance().askQuestion(
             QStringLiteral("J.A.R.V.I.S."), question,
-            [](const QString& answer) {
-                CuriosityEngine::instance().consumeAnswer(0, answer);
+            [this](const QString& answer) {
+                CuriosityEngine::instance().consumeAnswer(0, answer, 0, /*explicitReply=*/true);
+                hideAnswerPrompt();
             },
             options);
+
+        // The toast is transient; the answer bar is not. A toast the user
+        // scrolls past or ignores for half an hour used to leave no way to
+        // answer at all — the bar keeps the question answerable in the chat
+        // itself until they either reply or dismiss it.
+        showAnswerPrompt(question);
     });
 
     // ── Task deadlines & reminders → notification ──
@@ -439,6 +451,10 @@ MainWindow::MainWindow(QWidget* parent)
     });
     // Wire ScreenshotLearner → CuriosityEngine for visual context
     CuriosityEngine::instance().setScreenshotLearner(m_appLearner);
+
+    // (Watched work — app, window title, category — feeds SynapseGraph from
+    // ScreenshotLearner::onCapture, where all three are available together;
+    // the app name alone would create a node with nothing to link it to.)
 
     // Запускаем ПОСЛЕ полной инициализации окна
     QTimer::singleShot(3000, this, [this]() {
@@ -1290,6 +1306,11 @@ void MainWindow::buildMenuBar()
             PairingSession session = pairing->generatePairingPin(
                 QStringLiteral("Developer"));
             pairing->startGatewayPolling();
+            // Reported by the code that actually starts the polling — until
+            // this runs, mobile sync is genuinely not available and the
+            // manifest says so.
+            SystemManifest::setRuntimeState(QStringLiteral("mobile_sync"), true,
+                QStringLiteral("gateway polling active, awaiting pairing"));
 
             QString deepLink = pairing->buildDeepLinkUri(session);
 
@@ -3365,6 +3386,20 @@ void MainWindow::onSend()
 
     m_input->clear();
 
+    // ── 0.1 Ответ на вопрос, который задал сам Джарвис ────────────
+    // Панель ответа на экране = пользователь явно отвечает на названный
+    // вопрос, независимо от того, сколько прошло времени. Записываем
+    // ответ здесь (с ним же уходят побочные эффекты категорий вопроса —
+    // DoubtVerification, OpinionRevision), а само сообщение НЕ
+    // перехватываем: пусть идёт обычным путём и Джарвис ответит по
+    // смыслу. Вопрос уже лежит в памяти сессии, поэтому модель видит
+    // ветку "вопрос → ответ", а не реплику из ниоткуда.
+    const bool answeringQuestion = !m_answerQuestion.isEmpty();
+    if (answeringQuestion) {
+        CuriosityEngine::instance().consumeAnswer(0, text, 0, /*explicitReply=*/true);
+        hideAnswerPrompt();
+    }
+
     // ── 0.2 Praise/scold: typed confirm/deny for the last uncertain
     // answer ───────────────────────────────────────────────────────
     // Safety net alongside the clarify-bar buttons (see
@@ -3372,7 +3407,10 @@ void MainWindow::onSend()
     // user just talks instead of clicking. Only fires on a short reply
     // within a few minutes of the doubt being raised, so it can't
     // swallow an unrelated later message.
-    if (m_pendingDoubtId != 0
+    // answeringQuestion wins: a "да" aimed at Jarvis's own question must not
+    // be re-read as praise for some earlier uncertain answer.
+    if (!answeringQuestion
+        && m_pendingDoubtId != 0
         && m_pendingDoubtSetAt.secsTo(QDateTime::currentDateTime()) <= 15 * 60)
     {
         static const QStringList praiseMarkers = {
@@ -3880,6 +3918,62 @@ void MainWindow::hideClarification()
     anim->start(QAbstractAnimation::DeleteWhenStopped);
     m_pendingInput.clear();
     m_pendingDoubtId = 0;
+}
+
+// ============================================================
+// Панель "ты отвечаешь на вопрос Джарвиса"
+// ============================================================
+
+void MainWindow::showAnswerPrompt(const QString& question)
+{
+    if (!m_answerBar || question.isEmpty()) return;
+
+    m_answerQuestion = question;
+
+    // Заголовок отделён от текста вопроса: пользователю нужно узнать
+    // СВОЙ вопрос, а не читать его заново целиком — поэтому длинный
+    // вопрос обрезаем, полный остаётся в подсказке.
+    const QString shown = question.length() > 90
+        ? question.left(88) + QStringLiteral("…")
+        : question;
+    m_answerText->setText(
+        (IS_EN ? QStringLiteral("Answering: ") : QStringLiteral("Отвечаешь на: "))
+        + QStringLiteral("<i>") + shown.toHtmlEscaped() + QStringLiteral("</i>"));
+    m_answerText->setToolTip(question);
+
+    // Пока панель на экране — вопрос не должен истечь по таймеру.
+    CuriosityEngine::instance().setAnswerHold(true);
+
+    m_answerBar->setMaximumHeight(0);
+    m_answerBar->setVisible(true);
+    auto* anim = new QPropertyAnimation(m_answerBar, "maximumHeight", this);
+    anim->setDuration(JarvisTheme::instance().motionBase());
+    anim->setStartValue(0);
+    anim->setEndValue(44);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void MainWindow::hideAnswerPrompt()
+{
+    if (!m_answerBar) return;
+
+    m_answerQuestion.clear();
+    // Снятие удержания возвращает обычное истечение по таймеру: вопрос,
+    // который пользователь закрыл не ответив, не должен висеть вечно.
+    CuriosityEngine::instance().setAnswerHold(false);
+
+    if (!m_answerBar->isVisible()) return;
+
+    auto* anim = new QPropertyAnimation(m_answerBar, "maximumHeight", this);
+    anim->setDuration(JarvisTheme::instance().motionFast());
+    anim->setStartValue(m_answerBar->height());
+    anim->setEndValue(0);
+    anim->setEasingCurve(QEasingCurve::InCubic);
+    connect(anim, &QPropertyAnimation::finished, m_answerBar, [this]() {
+        m_answerBar->setVisible(false);
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void MainWindow::onClarificationChoice(int choice)
@@ -4706,6 +4800,51 @@ void MainWindow::buildUI()
     clarifyVBox->addLayout(clarifyTopRow);
     clarifyVBox->addWidget(clarifyBtnWidget);
     vbox->addWidget(m_clarifyBar);
+
+    // === Панель ответа на вопрос Джарвиса ===
+    // Держится на экране, пока пользователь не ответит или не закроет её:
+    // ровно эта видимость и есть гарантия, что следующее сообщение уйдёт
+    // как ответ на названный вопрос, а не как новая тема.
+    m_answerBar = new QWidget(this);
+    m_answerBar->setVisible(false);
+    m_answerBar->setStyleSheet(
+        QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: %3px;")
+            .arg(JarvisTheme::css(JarvisTheme::instance().surface1()),
+                 JarvisTheme::css(JarvisTheme::instance().accentMuted()))
+            .arg(JarvisTheme::instance().radiusSm()));
+
+    auto* answerRow = new QHBoxLayout(m_answerBar);
+    answerRow->setContentsMargins(10, 6, 10, 6);
+    answerRow->setSpacing(8);
+
+    auto* answerIcon = new QLabel(QStringLiteral("↩"), m_answerBar);
+    answerIcon->setStyleSheet(
+        QStringLiteral("color: %1; font-size: 15px; border: none; background: transparent;")
+            .arg(JarvisTheme::css(JarvisTheme::instance().accent())));
+
+    m_answerText = new QLabel(m_answerBar);
+    m_answerText->setWordWrap(true);
+    m_answerText->setStyleSheet(
+        QStringLiteral("color: %1; font-size: 12px; border: none; background: transparent;")
+            .arg(JarvisTheme::css(JarvisTheme::instance().onSurfaceVariant())));
+
+    auto* answerDismiss = new QPushButton(QStringLiteral("✕"), m_answerBar);
+    answerDismiss->setFixedSize(22, 22);
+    answerDismiss->setCursor(Qt::PointingHandCursor);
+    answerDismiss->setToolTip(IS_EN ? QStringLiteral("Not answering that")
+                                    : QStringLiteral("Не отвечаю на это"));
+    answerDismiss->setStyleSheet(
+        QStringLiteral("QPushButton { background: transparent; color: %1; "
+                       "border: none; font-size: 14px; } "
+                       "QPushButton:hover { color: %2; }")
+            .arg(JarvisTheme::css(JarvisTheme::instance().onSurfaceDim()),
+                 JarvisTheme::css(JarvisTheme::instance().error())));
+    connect(answerDismiss, &QPushButton::clicked, this, [this]() { hideAnswerPrompt(); });
+
+    answerRow->addWidget(answerIcon);
+    answerRow->addWidget(m_answerText, 1);
+    answerRow->addWidget(answerDismiss);
+    vbox->addWidget(m_answerBar);
 
     // === Панель прикреплений ===
     m_attachBar = new QWidget(this);

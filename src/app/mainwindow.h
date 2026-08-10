@@ -116,6 +116,17 @@ private:
     void showClarification(const QString& question, const QStringList& options);
     void hideClarification();
 
+    // ── "You're answering Jarvis's question" bar ──────────────
+    // Jarvis asks things on his own initiative (CuriosityEngine). Desktop
+    // chat has no reply-to-message gesture, so without a visible marker the
+    // only way a reply could be recognised as an answer was a 15-minute
+    // timer — miss it and the reply reached the LLM as a brand-new topic
+    // with no sign a question had ever been asked. This bar names the
+    // question being answered and routes the next message to it explicitly,
+    // for as long as it stays on screen.
+    void showAnswerPrompt(const QString& question);
+    void hideAnswerPrompt();
+
     // Автономная организация файлов (FileOrganizer) — показывает план
     // и выполняет его только после подтверждения пользователем.
     void showOrganizePlanDialog(const OrganizePlan& plan);
@@ -162,6 +173,13 @@ private:
     QLabel*                 m_clarifyText    = nullptr;
     QHBoxLayout*            m_clarifyBtnLay  = nullptr;
     QString                 m_pendingInput;
+
+    // Answer bar (see showAnswerPrompt). m_answerQuestion is the question
+    // text it is currently offering to answer — non-empty exactly while the
+    // bar is up, and the flag onSend checks to route a message as an answer.
+    QWidget*                m_answerBar      = nullptr;
+    QLabel*                 m_answerText     = nullptr;
+    QString                 m_answerQuestion;
 
     // Praise/scold feedback for the last uncertain local/cached answer
     // (see Intent::doubtId). Two redundant paths resolve the same doubt:

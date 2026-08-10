@@ -88,6 +88,34 @@ public:
         int     coActivations  = 0;     // how many times reinforced/weakened
     };
 
+    // ── Connected subgraph for drawing the network ──────────────────
+    // topNodes()/topEdges() rank independently, so an edge from one can
+    // easily reference a node absent from the other — fine for two side-by-
+    // side lists, useless for a picture. graphView() returns a set that is
+    // internally consistent: the strongest nodes, plus only those synapses
+    // whose BOTH endpoints are in that set, with edges addressing nodes by
+    // index so a renderer needs no id lookups.
+    struct ViewNode {
+        qint64  id          = 0;
+        QString label;
+        int     activations = 0;
+        int     degree      = 0;   // synapses touching this node, within the view
+        QString source;            // which channel first taught it — see kSource*
+    };
+    struct ViewEdge {
+        int   a             = -1;  // index into GraphView::nodes
+        int   b             = -1;
+        float weight        = 0.0f;
+        int   coActivations = 0;
+    };
+    struct GraphView {
+        QList<ViewNode> nodes;
+        QList<ViewEdge> edges;
+        int   maxActivations = 0;    // for normalizing node size
+        float maxWeight      = 0.0f; // for normalizing edge thickness
+    };
+    GraphView graphView(qint64 ownerId, int maxNodes = 40) const;
+
     // Most-activated concepts for ownerId, activations desc. Empty graph
     // (nothing learned yet) returns an empty list, not an error.
     QList<TopNode> topNodes(qint64 ownerId, int limit = 12) const;
@@ -107,7 +135,18 @@ public:
     // (saveResponse) и при каждом успешном попадании роутера (Exact/
     // Similar/Associative) — так граф растёт и от новых, и от повторно
     // используемых знаний.
-    void reinforce(qint64 ownerId, const QString& text, const QString& caseHash = QString());
+    // ── Каналы обучения ──────────────────────────────────────────────
+    // Записывается в synapse_nodes.source при ПЕРВОМ появлении понятия и
+    // отвечает на вопрос "откуда я это знаю". Узлы — нормализованные
+    // токены без собственной категории, поэтому канал происхождения —
+    // единственная группировка, выведенная из данных, а не придуманная.
+    static constexpr const char* kSourceDialogue = "dialogue"; // сказано в чате/голосом
+    static constexpr const char* kSourceWatched  = "watched";  // увидено в работе за ПК
+    static constexpr const char* kSourceFact     = "fact";     // усвоенный факт / коррекция
+
+    void reinforce(qint64 ownerId, const QString& text,
+                   const QString& caseHash = QString(),
+                   const QString& source = QString::fromLatin1(kSourceDialogue));
 
     // Обратная связь "это было неверно" (например пользователь нажал
     // "Неверно" на уточнение по doubtId) — ослабляет связи между
@@ -135,7 +174,8 @@ public:
 private:
     explicit SynapseGraph(QObject* parent = nullptr);
 
-    qint64 findOrCreateNode(qint64 ownerId, const QString& label);
+    qint64 findOrCreateNode(qint64 ownerId, const QString& label,
+                            const QString& source = QString::fromLatin1(kSourceDialogue));
     void   linkEdge(qint64 ownerId, qint64 nodeA, qint64 nodeB, float delta);
     void   linkCase(qint64 nodeId, const QString& caseHash, float weight);
     QList<ActivatedNode> spreadActivation(qint64 ownerId, const QStringList& seedConcepts) const;

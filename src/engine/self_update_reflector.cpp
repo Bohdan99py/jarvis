@@ -9,6 +9,7 @@
 #include "self_journal.h"
 #include "pdf_distiller.h"
 #include "user_profile_extended.h"
+#include "system_manifest.h"
 
 #include <QSqlQuery>
 #include <QSqlDatabase>
@@ -278,152 +279,36 @@ QString SelfUpdateReflector::generateChangelogFromGit(const QString& version) co
 
 QList<ModuleCapability> SelfUpdateReflector::activeModules() const
 {
+    // This used to be its own hand-written list of 12 modules, parallel to
+    // SystemManifest's list of the same system — with different ids for the
+    // same things ("voice_input" vs "voice_pipeline", "telegram" vs
+    // "telegram_gateway"), a hardcoded active=true on every entry, and a
+    // comment claiming runtime introspection. Two hand-maintained
+    // descriptions of one machine drift apart by default; the manual is now
+    // a rendering of the single registry, and `active` is whatever that
+    // registry probed or was told.
     QList<ModuleCapability> modules;
+    const auto caps = SystemManifest::activeCapabilities();
+    modules.reserve(caps.size());
 
-    // Core systems — always active
-    modules.append({
-        QStringLiteral("brain"), QStringLiteral("Intent Classifier (Brain)"),
-        QStringLiteral("🧠"),
-        QStringLiteral("Analyzes every input to determine intent (Search, Open, Ask, Modify) "
-                       "and domain (Project, Filesystem, Web, Chat). Includes conversational "
-                       "filter for small-talk, philosophy, and greetings."),
-        QStringLiteral("Any natural language input — JARVIS routes automatically."),
-        true
-    });
+    for (const SystemManifest::Capability& c : caps) {
+        // Live state belongs with the description in the manual — "Two-Tier
+        // Memory" reads very differently with "external drive offline" after
+        // it, and that is exactly the sort of thing a user opens the manual
+        // to find out.
+        QString description = c.description;
+        if (!c.state.isEmpty())
+            description += QStringLiteral(" — currently: ") + c.state;
 
-    modules.append({
-        QStringLiteral("action_predictor"), QStringLiteral("Action Predictor + Ethics"),
-        QStringLiteral("⚡"),
-        QStringLiteral("Predicts next actions from usage patterns. Includes binary ethics "
-                       "scoring (-1.0 to +1.0) with hardcoded safety rules and learned "
-                       "weights from user feedback."),
-        QStringLiteral("Automatic — suggestions appear after commands. "
-                       "Reply 'yes'/'no' to feedback prompts to train weights."),
-        true
-    });
-
-    modules.append({
-        QStringLiteral("user_profile"), QStringLiteral("Behavioral Profile"),
-        QStringLiteral("📊"),
-        QStringLiteral("Learns work patterns: which commands you use in which scenario "
-                       "(GameDev, Art, Gaming, Browsing) at which time of day. "
-                       "Decays old patterns at 3%/day."),
-        QStringLiteral("'profile' — show learned patterns. Automatic learning from usage."),
-        true
-    });
-
-    // Extended profile
-    {
-        auto& prof = UserProfileExtended::instance();
-        const bool hasProfile = !prof.nickname().isEmpty();
         modules.append({
-            QStringLiteral("user_profile_ext"), QStringLiteral("Identity & Preferences"),
-            QStringLiteral("👤"),
-            QStringLiteral("Multi-user identity system with nickname, active hours, "
-                           "development style, UI accent color, and mesh network role. "
-                           "Thread-safe SQLite persistence with confidence scoring."),
-            QStringLiteral("Set via Settings menu or answer JARVIS's calibration questions."),
-            hasProfile
+            c.id,
+            c.label,
+            c.icon.isEmpty() ? QStringLiteral("•") : c.icon,
+            description,
+            c.commands,
+            c.active
         });
     }
-
-    // Curiosity Engine
-    modules.append({
-        QStringLiteral("curiosity_engine"), QStringLiteral("Proactive Curiosity Engine"),
-        QStringLiteral("💭"),
-        QStringLiteral("Initiates context-aware questions during idle periods. "
-                       "Categories: Philosophy, WellBeing, ProjectCheckIn, TechCuriosity, "
-                       "TimeAwareness, VisualContextual, DoubtVerification, PersonalProfiling. "
-                       "Respects attention cost: never interrupts gaming or deep coding."),
-        QStringLiteral("Automatic — questions appear via Telegram or in-app during idle."),
-        CuriosityEngine::instance().isRunning()
-    });
-
-    // Memory Consolidation
-    {
-        auto& mc = MemoryConsolidation::instance();
-        modules.append({
-            QStringLiteral("memory_consolidation"), QStringLiteral("Two-Tier Memory"),
-            QStringLiteral("💾"),
-            QStringLiteral("Tier 1 (External Drive): raw screenshots, build logs, source snapshots. "
-                           "Tier 2 (Local SSD): distilled semantic summaries, always available. "
-                           "Background consolidation every 15 minutes. Graceful disconnect handling."),
-            QStringLiteral("Automatic — connect external drive to D:/Jarvis/ to enable Tier 1."),
-            mc.isExternalAvailable()
-        });
-    }
-
-    // PDF Distiller
-    {
-        modules.append({
-            QStringLiteral("pdf_distiller"), QStringLiteral("PDF Knowledge Distiller"),
-            QStringLiteral("📚"),
-            QStringLiteral("Background scanner for D:/Jarvis/knowledge_base/. Extracts text "
-                           "from PDFs via Poppler, chunks into semantic units, scores confidence. "
-                           "Low-confidence chunks tagged as Unverified_Doubt for human verification."),
-            QStringLiteral("Drop PDFs into D:/Jarvis/knowledge_base/ — processing is automatic."),
-            PdfDistiller::instance().totalChunks() > 0
-        });
-    }
-
-    // Self-Journal
-    {
-        const int doubts = SelfJournal::instance().unresolvedDoubtCount();
-        modules.append({
-            QStringLiteral("self_journal"), QStringLiteral("Self-Reflection Journal"),
-            QStringLiteral("📓"),
-            QString(QStringLiteral("Records what JARVIS learned, verified, and doubts. "
-                           "Writes structured Markdown to D:/Jarvis/self_journal.md. "
-                           "Currently %1 unresolved doubts.")).arg(doubts),
-            QStringLiteral("Automatic after each learning cycle. View at D:/Jarvis/self_journal.md."),
-            true
-        });
-    }
-
-    // Voice Input
-    modules.append({
-        QStringLiteral("voice_input"), QStringLiteral("Offline Voice Input (Vosk)"),
-        QStringLiteral("🎤"),
-        QStringLiteral("Fully offline speech recognition via Vosk. Supports 6 languages, "
-                       "wake word activation ('Jarvis'), whisper mode, and auto language detection."),
-        QStringLiteral("Click microphone button or say 'Jarvis'. "
-                       "Manage models: Models & Intelligence → Voice Models."),
-        true
-    });
-
-    // Screen Vision
-    modules.append({
-        QStringLiteral("screen_agent"), QStringLiteral("Screen Vision Agent"),
-        QStringLiteral("👁"),
-        QStringLiteral("Captures and analyzes screen content via Claude Vision API. "
-                       "Can describe what's on screen, locate UI elements, and click targets."),
-        QStringLiteral("'what do you see', 'describe screen', 'click on X'."),
-        true
-    });
-
-    // P2P Mesh
-    modules.append({
-        QStringLiteral("mesh_connector"), QStringLiteral("P2P Mesh Network"),
-        QStringLiteral("🌐"),
-        QStringLiteral("UDP beacon discovery + TCP command channel for JARVIS-to-JARVIS "
-                       "communication. Knowledge sync, task delegation, asset offloading, "
-                       "and user profile sync across nodes."),
-        QStringLiteral("Automatic on LAN. View peers: 'mesh status'."),
-        true
-    });
-
-    // Telegram Gateway
-    modules.append({
-        QStringLiteral("telegram"), QStringLiteral("Telegram Bot Gateway"),
-        QStringLiteral("📱"),
-        QStringLiteral("Full JARVIS control from your phone via Telegram bot. "
-                       "Text commands, voice notes, file attachments, media routing. "
-                       "Session-bound: each chat is linked to a specific PC."),
-        QStringLiteral("Phone & Server → Telegram QA Gateway. "
-                       "API keys and model selection: Models & Intelligence."),
-        true
-    });
-
     return modules;
 }
 

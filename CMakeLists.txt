@@ -317,6 +317,7 @@ target_link_libraries(JarvisCore PRIVATE
     advapi32
     psapi
     PowrProf
+    winmm
 )
 
 if(VOSK_AVAILABLE)

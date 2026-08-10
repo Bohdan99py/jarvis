@@ -803,12 +803,30 @@ void CuriosityEngine::saveResponse(qint64 chatId,
 void CuriosityEngine::expirePendingIfStale()
 {
     if (m_pendingQuestion.isEmpty()) return;
+    // A UI actively offering "answer this" keeps the question alive: expiring
+    // it while the prompt is still on screen is what made a late reply land
+    // as a brand-new topic instead of an answer.
+    if (m_answerHold) return;
     if (m_pendingTimestamp.secsTo(QDateTime::currentDateTime())
         > PENDING_ANSWER_WINDOW_MINUTES * 60) {
         m_pendingQuestion.clear();
         m_pendingChatId = 0;
         m_pendingMessageId = 0;
     }
+}
+
+QString CuriosityEngine::pendingQuestion() const
+{
+    const_cast<CuriosityEngine*>(this)->expirePendingIfStale();
+    return m_pendingQuestion;
+}
+
+void CuriosityEngine::setAnswerHold(bool hold)
+{
+    m_answerHold = hold;
+    // Releasing the hold re-arms normal expiry — a question the user
+    // dismissed without answering shouldn't linger past its window.
+    if (!hold) expirePendingIfStale();
 }
 
 bool CuriosityEngine::hasPendingQuestion() const
@@ -818,14 +836,18 @@ bool CuriosityEngine::hasPendingQuestion() const
 }
 
 bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText,
-                                     qint64 replyToMessageId)
+                                     qint64 replyToMessageId,
+                                     bool explicitReply)
 {
     // An explicit Telegram reply to the question we posted is authoritative
     // regardless of elapsed time — only fall back to the timestamp-window
     // expiry (for free-text, non-reply answers) when there's no such match.
-    const bool explicitReplyMatch = replyToMessageId != 0
-        && m_pendingMessageId != 0
-        && replyToMessageId == m_pendingMessageId;
+    // explicitReply is the desktop equivalent: the user answered through an
+    // affordance that named the question, which is the same guarantee.
+    const bool explicitReplyMatch = explicitReply
+        || (replyToMessageId != 0
+            && m_pendingMessageId != 0
+            && replyToMessageId == m_pendingMessageId);
 
     if (!explicitReplyMatch) {
         expirePendingIfStale();
@@ -898,5 +920,6 @@ bool CuriosityEngine::consumeAnswer(qint64 chatId, const QString& answerText,
     m_pendingDoubtId   = 0;
     m_pendingMessageId = 0;
     m_pendingOpinionId = 0;
+    m_answerHold       = false;  // answered — nothing left to hold open
     return true;
 }

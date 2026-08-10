@@ -5,7 +5,11 @@
 #include "jarvis_paths.h"
 
 #include <QDir>
+#include <QFile>
 #include <QDebug>
+#include <QUuid>
+#include <QProcess>
+#include <QCoreApplication>
 #include <QtConcurrent>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -14,6 +18,7 @@
 #include <windows.h>
 #include <objbase.h>
 #include <sapi.h>
+#include <mmsystem.h>
 
 // ============================================================
 //  Singleton
@@ -106,7 +111,9 @@ void VoiceSynthesisManager::processQueue()
                 return;
             }
 
-            speakViaSapi(text);
+            if (!m_piperReady.load() || !speakViaPiper(text)) {
+                speakViaSapi(text);
+            }
 
             // After this utterance finishes, process the next item
             QMetaObject::invokeMethod(this, [this]() {
@@ -163,8 +170,35 @@ void VoiceSynthesisManager::loadModelsAsync()
     });
 }
 
+// Locate piper.exe next to the redistributed runtime DLLs. Tries the
+// installed layout (next to the app exe) and the dev-tree layout
+// (running from the build dir inside the source checkout), mirroring
+// how ocr_extractor.cpp finds tesseract.exe/pdftoppm.exe.
+QString VoiceSynthesisManager::findPiperExe() const
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+
+    const QStringList candidates = {
+        appDir + QStringLiteral("/redist/piper/piper.exe"),
+        appDir + QStringLiteral("/../redist/piper/piper.exe"),
+        appDir + QStringLiteral("/piper/piper.exe"),
+    };
+
+    for (const QString& path : candidates) {
+        if (QFile::exists(path))
+            return path;
+    }
+    return QString();
+}
+
 void VoiceSynthesisManager::tryLoadPiperModels()
 {
+    const QString exePath = findPiperExe();
+    if (exePath.isEmpty()) {
+        qDebug() << "[VoiceSynth] piper.exe not found — using SAPI";
+        return;
+    }
+
     const QString modelsDir = JarvisPaths::subPath(QStringLiteral("models/tts"));
     QDir dir(modelsDir);
 
@@ -181,13 +215,88 @@ void VoiceSynthesisManager::tryLoadPiperModels()
         return;
     }
 
-    // Store path for future Piper integration
-    m_piperModelPath = dir.absoluteFilePath(onnxFiles.first());
+    QString ruModel, enModel;
+    for (const QString& name : onnxFiles) {
+        if (name.startsWith(QStringLiteral("ru_RU"), Qt::CaseInsensitive) && ruModel.isEmpty())
+            ruModel = dir.absoluteFilePath(name);
+        else if (name.startsWith(QStringLiteral("en_"), Qt::CaseInsensitive) && enModel.isEmpty())
+            enModel = dir.absoluteFilePath(name);
+    }
+
+    if (ruModel.isEmpty() && enModel.isEmpty()) {
+        qDebug() << "[VoiceSynth] No ru_RU-*/en_*-prefixed voice models found — using SAPI";
+        return;
+    }
+
+    m_piperExePath     = exePath;
+    m_piperModelPathRu = ruModel;
+    m_piperModelPathEn = enModel;
     m_piperReady.store(true);
 
-    qDebug() << "[VoiceSynth] Piper model discovered:" << m_piperModelPath;
+    qDebug() << "[VoiceSynth] Piper ready. RU model:" << ruModel << "EN model:" << enModel;
 
-    QMetaObject::invokeMethod(this, [this, name = onnxFiles.first()]() {
-        emit modelLoaded(name);
+    QMetaObject::invokeMethod(this, [this, ruModel, enModel]() {
+        emit modelLoaded(!ruModel.isEmpty() ? ruModel : enModel);
     }, Qt::QueuedConnection);
+}
+
+// ============================================================
+//  Piper TTS backend — spawns piper.exe, synthesizes to a temp
+//  WAV file, plays it back synchronously via winmm.
+// ============================================================
+
+bool VoiceSynthesisManager::speakViaPiper(const QString& text)
+{
+    // Pick a voice by script: any Cyrillic character routes to the
+    // Russian model, otherwise the English model. Falls back to
+    // whichever single model is available if only one was found.
+    bool hasCyrillic = false;
+    for (const QChar& ch : text) {
+        if (ch.unicode() >= 0x0400 && ch.unicode() <= 0x04FF) {
+            hasCyrillic = true;
+            break;
+        }
+    }
+
+    QString modelPath = hasCyrillic ? m_piperModelPathRu : m_piperModelPathEn;
+    if (modelPath.isEmpty())
+        modelPath = hasCyrillic ? m_piperModelPathEn : m_piperModelPathRu;
+
+    if (modelPath.isEmpty() || m_piperExePath.isEmpty())
+        return false;
+
+    const QString wavPath = QDir::tempPath() + QStringLiteral("/jarvis_tts_")
+        + QUuid::createUuid().toString(QUuid::Id128) + QStringLiteral(".wav");
+
+    QProcess proc;
+    proc.setProgram(m_piperExePath);
+    proc.setArguments({
+        QStringLiteral("--model"), modelPath,
+        QStringLiteral("--output_file"), wavPath,
+    });
+    proc.start();
+    if (!proc.waitForStarted(3000)) {
+        qWarning() << "[VoiceSynth] piper.exe failed to start";
+        return false;
+    }
+
+    proc.write(text.toUtf8());
+    proc.closeWriteChannel();
+
+    if (!proc.waitForFinished(15000) || proc.exitCode() != 0 || !QFile::exists(wavPath)) {
+        qWarning() << "[VoiceSynth] piper.exe synthesis failed:" << proc.readAllStandardError();
+        QFile::remove(wavPath);
+        return false;
+    }
+
+    if (m_stopRequested.load()) {
+        QFile::remove(wavPath);
+        return true;
+    }
+
+    const std::wstring wWavPath = wavPath.toStdWString();
+    PlaySoundW(wWavPath.c_str(), nullptr, SND_FILENAME | SND_SYNC);
+
+    QFile::remove(wavPath);
+    return true;
 }

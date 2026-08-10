@@ -807,6 +807,11 @@ void J2JMeshConnector::initTelegramGateway()
     m_telegramGw->setMeshConnector(this);
     MediaRoutingManager::instance().setTelegramGateway(m_telegramGw);
     ProactiveReminderManager::instance().setTelegramGateway(m_telegramGw);
+    // Self-knowledge is reported from the one place the gateway actually
+    // comes into existence, so the capability can't be advertised by a
+    // manifest entry while no gateway object exists.
+    SystemManifest::setRuntimeState(QStringLiteral("telegram_gateway"), true,
+                                    QStringLiteral("bridge initialized"));
     qDebug() << "[J2J] Telegram gateway initialized";
 }
 

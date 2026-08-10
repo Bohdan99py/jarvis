@@ -20,6 +20,10 @@
 #include <QMessageBox>
 #include <QDateTime>
 #include <QDir>
+#include <QVector>
+
+#include <algorithm>
+#include <cmath>
 
 TrainingCenterDialog::TrainingCenterDialog(qint64 userId,
                                            PassiveListener* passive,
@@ -97,7 +101,9 @@ TrainingCenterDialog::TrainingCenterDialog(qint64 userId,
     ctx->setContextProperty(QStringLiteral("historyResults"), QVariantList());
     ctx->setContextProperty(QStringLiteral("synapseNodeCount"), QVariant(0));
     ctx->setContextProperty(QStringLiteral("synapseEdgeCount"), QVariant(0));
-    ctx->setContextProperty(QStringLiteral("synapseTopNodes"), QVariantList());
+    ctx->setContextProperty(QStringLiteral("synapseGraphNodes"), QVariantList());
+    ctx->setContextProperty(QStringLiteral("synapseGraphEdges"), QVariantList());
+    ctx->setContextProperty(QStringLiteral("synapseLegend"), QVariantList());
     ctx->setContextProperty(QStringLiteral("synapseTopEdges"), QVariantList());
     ctx->setContextProperty(QStringLiteral("trainingCenter"), this);
 
@@ -193,6 +199,85 @@ void TrainingCenterDialog::refreshTrainingTab()
     ctx->setContextProperty(QStringLiteral("maxExamples"), m_maxExamples);
 }
 
+// ── Force-directed layout (Fruchterman–Reingold) ─────────────────────
+// Runs in C++ rather than QML for two reasons: the whole simulation is
+// ~300 iterations over ≤40 nodes (microseconds, once per refresh), and
+// keeping it here leaves the QML side purely declarative — it renders
+// finished coordinates instead of stepping a physics loop on the UI thread
+// every frame.
+//
+// Seeding is a deterministic circle, never random: reopening the dialog on
+// an unchanged graph must draw the same picture, otherwise the layout reads
+// as noise rather than as structure the user can learn to recognize.
+namespace {
+
+struct LayoutPoint { double x = 0.0; double y = 0.0; };
+
+QVector<LayoutPoint> computeLayout(const SynapseGraph::GraphView& g)
+{
+    const int n = g.nodes.size();
+    QVector<LayoutPoint> pos(n);
+    if (n == 0) return pos;
+    if (n == 1) { pos[0] = { 0.5, 0.5 }; return pos; }
+
+    for (int i = 0; i < n; ++i) {
+        const double a = 2.0 * M_PI * i / n;
+        pos[i] = { 0.5 + 0.32 * std::cos(a), 0.5 + 0.32 * std::sin(a) };
+    }
+
+    constexpr int    kIterations = 300;
+    const double     k = std::sqrt(1.0 / n);   // ideal separation in a unit square
+    QVector<LayoutPoint> disp(n);
+
+    for (int iter = 0; iter < kIterations; ++iter) {
+        // Cooling schedule: large early moves untangle the initial circle,
+        // small late ones settle it without jitter.
+        const double temp = 0.08 * (1.0 - double(iter) / kIterations) + 0.0005;
+        disp.fill({ 0.0, 0.0 });
+
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                double dx = pos[i].x - pos[j].x;
+                double dy = pos[i].y - pos[j].y;
+                double len = std::sqrt(dx * dx + dy * dy);
+                if (len < 1e-6) { dx = 1e-3 * (i + 1); dy = 1e-3 * (j + 1); len = std::sqrt(dx*dx + dy*dy); }
+                const double f = (k * k) / len;
+                disp[i].x += dx / len * f;  disp[i].y += dy / len * f;
+                disp[j].x -= dx / len * f;  disp[j].y -= dy / len * f;
+            }
+        }
+
+        for (const auto& e : g.edges) {
+            if (e.a < 0 || e.b < 0) continue;
+            double dx = pos[e.a].x - pos[e.b].x;
+            double dy = pos[e.a].y - pos[e.b].y;
+            const double len = std::max(std::sqrt(dx * dx + dy * dy), 1e-6);
+            // Heavier synapses pull harder, so strongly-associated concepts
+            // end up visibly clustered — that clustering IS the information.
+            const double pull = g.maxWeight > 0.0f
+                ? 0.5 + 0.5 * (double(e.weight) / double(g.maxWeight)) : 1.0;
+            const double f = (len * len) / k * pull;
+            disp[e.a].x -= dx / len * f;  disp[e.a].y -= dy / len * f;
+            disp[e.b].x += dx / len * f;  disp[e.b].y += dy / len * f;
+        }
+
+        for (int i = 0; i < n; ++i) {
+            const double len = std::sqrt(disp[i].x * disp[i].x + disp[i].y * disp[i].y);
+            if (len > 1e-9) {
+                const double step = std::min(len, temp);
+                pos[i].x += disp[i].x / len * step;
+                pos[i].y += disp[i].y / len * step;
+            }
+            // Margin keeps labels and node circles inside the viewport.
+            pos[i].x = std::clamp(pos[i].x, 0.06, 0.94);
+            pos[i].y = std::clamp(pos[i].y, 0.06, 0.94);
+        }
+    }
+    return pos;
+}
+
+} // namespace
+
 void TrainingCenterDialog::refreshSynapseGraph()
 {
     QQmlContext* ctx = m_view->rootContext();
@@ -202,32 +287,81 @@ void TrainingCenterDialog::refreshSynapseGraph()
     ctx->setContextProperty(QStringLiteral("synapseNodeCount"), stats.nodeCount);
     ctx->setContextProperty(QStringLiteral("synapseEdgeCount"), stats.edgeCount);
 
+    const auto view = graph.graphView(LlmCacheManager::kDesktopOwnerId, 40);
+    const auto pos  = computeLayout(view);
+
     QVariantList nodes;
-    const auto topNodes = graph.topNodes(LlmCacheManager::kDesktopOwnerId, 12);
-    int maxActivations = 1;
-    for (const auto& n : topNodes) maxActivations = qMax(maxActivations, n.activations);
-    for (const auto& n : topNodes) {
+    QHash<QString, int> sourceCounts;
+    for (int i = 0; i < view.nodes.size(); ++i) {
+        const auto& n = view.nodes[i];
+        const double heat = view.maxActivations > 0
+            ? double(n.activations) / view.maxActivations : 0.0;
         QVariantMap m;
         m[QStringLiteral("label")]       = n.label;
         m[QStringLiteral("activations")] = n.activations;
-        m[QStringLiteral("fraction")]    = double(n.activations) / maxActivations;
+        m[QStringLiteral("degree")]      = n.degree;
+        m[QStringLiteral("x")]           = pos[i].x;
+        m[QStringLiteral("y")]           = pos[i].y;
+        m[QStringLiteral("heat")]        = heat;
+        // Colour comes from the learning channel that first taught the
+        // concept — a real column in the table, not a tier invented here.
+        m[QStringLiteral("source")]      = n.source;
+        // "major" borrows the idea from brain-map's group styling: with 40
+        // nodes, 40 permanent labels are a wall of text. Only concepts that
+        // carry the structure — well-connected or frequently fired — are
+        // labelled at rest; the rest name themselves on hover.
+        m[QStringLiteral("major")]       = (n.degree >= 3 || heat >= 0.5);
         nodes.append(m);
+        sourceCounts[n.source]++;
     }
-    ctx->setContextProperty(QStringLiteral("synapseTopNodes"), nodes);
+    ctx->setContextProperty(QStringLiteral("synapseGraphNodes"), nodes);
+
+    // Per-channel legend with live counts, in fixed order so the legend
+    // doesn't reshuffle between refreshes.
+    const QVector<QPair<QString, QString>> channels = {
+        { QString::fromLatin1(SynapseGraph::kSourceDialogue),
+          IS_EN ? QStringLiteral("Told me")   : QStringLiteral("Сказано мне") },
+        { QString::fromLatin1(SynapseGraph::kSourceWatched),
+          IS_EN ? QStringLiteral("Watched")   : QStringLiteral("Увидено в работе") },
+        { QString::fromLatin1(SynapseGraph::kSourceFact),
+          IS_EN ? QStringLiteral("Learned facts") : QStringLiteral("Усвоенные факты") },
+    };
+    QVariantList legend;
+    for (const auto& ch : channels) {
+        QVariantMap m;
+        m[QStringLiteral("source")] = ch.first;
+        m[QStringLiteral("label")]  = ch.second;
+        m[QStringLiteral("count")]  = sourceCounts.value(ch.first, 0);
+        legend.append(m);
+    }
+    ctx->setContextProperty(QStringLiteral("synapseLegend"), legend);
 
     QVariantList edges;
-    for (const auto& e : graph.topEdges(LlmCacheManager::kDesktopOwnerId, 12)) {
+    for (const auto& e : view.edges) {
+        QVariantMap m;
+        m[QStringLiteral("x1")]     = pos[e.a].x;
+        m[QStringLiteral("y1")]     = pos[e.a].y;
+        m[QStringLiteral("x2")]     = pos[e.b].x;
+        m[QStringLiteral("y2")]     = pos[e.b].y;
+        m[QStringLiteral("weight")] = double(e.weight);
+        m[QStringLiteral("norm")]   = view.maxWeight > 0.0f
+            ? double(e.weight) / double(view.maxWeight) : 0.0;
+        edges.append(m);
+    }
+    ctx->setContextProperty(QStringLiteral("synapseGraphEdges"), edges);
+
+    // Compact "strongest associations" list beside the picture — the graph
+    // shows structure, this names it.
+    QVariantList top;
+    for (const auto& e : graph.topEdges(LlmCacheManager::kDesktopOwnerId, 10)) {
         QVariantMap m;
         m[QStringLiteral("labelA")]        = e.labelA;
         m[QStringLiteral("labelB")]        = e.labelB;
         m[QStringLiteral("weight")]        = double(e.weight);
-        // SynapseGraph::kEdgeWeightMax — kept in sync manually since it's
-        // a private tuning constant, not part of the public API surface.
-        m[QStringLiteral("fraction")]      = qMin(1.0, double(e.weight) / 3.0);
         m[QStringLiteral("coActivations")] = e.coActivations;
-        edges.append(m);
+        top.append(m);
     }
-    ctx->setContextProperty(QStringLiteral("synapseTopEdges"), edges);
+    ctx->setContextProperty(QStringLiteral("synapseTopEdges"), top);
 }
 
 // ============================================================

@@ -4,6 +4,7 @@
 
 #include "activity_tracker.h"
 #include "database_manager.h"
+#include "synapse_graph.h"
 #include "j2j_mesh_connector.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -471,6 +472,16 @@ void ActivityTracker::learnFact(qint64 userId, const QString& category,
     q.exec();
 
     emit knowledgeLearned(key, value);
+
+    // A learned fact is also an association. knowledge_base could only ever
+    // be searched by key, so a fact learned from a screenshot, a correction,
+    // or a mesh peer could never surface for a question worded differently.
+    // Putting key+value through the concept graph means it can: the fact's
+    // concepts link to each other and to whatever else those concepts already
+    // touch, whichever modality first taught them.
+    SynapseGraph::instance().reinforce(
+        userId, key + QStringLiteral(" ") + value, QString(),
+        QString::fromLatin1(SynapseGraph::kSourceFact));
 
     // Share reasonably confident facts with other JARVIS instances on
     // the mesh — this is what lets a fact learned on one PC ("он мог

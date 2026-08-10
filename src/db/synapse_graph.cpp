@@ -51,20 +51,28 @@ QStringList SynapseGraph::extractConcepts(const QString& text)
 //  Узлы и рёбра — низкоуровневые SQL-примитивы
 // ============================================================
 
-qint64 SynapseGraph::findOrCreateNode(qint64 ownerId, const QString& label)
+qint64 SynapseGraph::findOrCreateNode(qint64 ownerId, const QString& label,
+                                      const QString& source)
 {
     auto db = DatabaseManager::instance().connection();
     if (!db.isOpen()) return 0;
 
     QSqlQuery up(db);
+    // source is set on INSERT only, never in the DO UPDATE branch: the column
+    // answers "where did this concept come from", so the first channel to
+    // teach it owns that answer. Overwriting it on every reinforcement would
+    // turn origin into "whatever touched it last", which is not a fact about
+    // the concept at all.
     up.prepare(QStringLiteral(
-        "INSERT INTO synapse_nodes (owner_id, label, activations, created_at, last_activated_at) "
-        "VALUES (:oid, :l, 1, datetime('now'), datetime('now')) "
+        "INSERT INTO synapse_nodes (owner_id, label, activations, source, created_at, last_activated_at) "
+        "VALUES (:oid, :l, 1, :src, datetime('now'), datetime('now')) "
         "ON CONFLICT(owner_id, label) DO UPDATE SET "
         "  activations = activations + 1, "
         "  last_activated_at = datetime('now')"));
     up.bindValue(QStringLiteral(":oid"), ownerId);
     up.bindValue(QStringLiteral(":l"), label);
+    up.bindValue(QStringLiteral(":src"),
+                 source.isEmpty() ? QStringLiteral("dialogue") : source);
     if (!up.exec()) {
         qWarning() << "[SynapseGraph] node upsert error:" << up.lastError().text();
         return 0;
@@ -135,15 +143,24 @@ void SynapseGraph::linkCase(qint64 nodeId, const QString& caseHash, float weight
 //  Хеббовское обучение — reinforce() / weaken()
 // ============================================================
 
-void SynapseGraph::reinforce(qint64 ownerId, const QString& text, const QString& caseHash)
+void SynapseGraph::reinforce(qint64 ownerId, const QString& text,
+                             const QString& caseHash, const QString& source)
 {
     const QStringList concepts = extractConcepts(text);
     if (concepts.isEmpty()) return;
 
+    // Один вызов = до 10 upsert'ов узлов + до 45 рёбер + привязки кейсов,
+    // то есть ~55 отдельных запросов. В autocommit каждый из них — сам себе
+    // транзакция со своим fsync, и обучение упирается в диск, а не в логику.
+    // Одна транзакция на весь эпизод: он и логически атомарен — либо связь
+    // "эти понятия сработали вместе" записана целиком, либо не записана.
+    auto db = DatabaseManager::instance().connection();
+    const bool inTx = db.isOpen() && db.transaction();
+
     QList<qint64> nodeIds;
     nodeIds.reserve(concepts.size());
     for (const QString& c : concepts) {
-        const qint64 id = findOrCreateNode(ownerId, c);
+        const qint64 id = findOrCreateNode(ownerId, c, source);
         if (id == 0) continue;
         nodeIds.append(id);
         if (!caseHash.isEmpty()) linkCase(id, caseHash, 1.0f);
@@ -155,6 +172,10 @@ void SynapseGraph::reinforce(qint64 ownerId, const QString& text, const QString&
     for (int i = 0; i < nodeIds.size(); ++i)
         for (int j = i + 1; j < nodeIds.size(); ++j)
             linkEdge(ownerId, nodeIds[i], nodeIds[j], kHebbianIncrement);
+
+    // transaction() не удалась — значит соединение уже внутри чужой
+    // транзакции; коммитить её здесь нельзя, это работа вызывающего.
+    if (inTx) db.commit();
 }
 
 void SynapseGraph::weaken(qint64 ownerId, const QString& text)
@@ -166,21 +187,28 @@ void SynapseGraph::weaken(qint64 ownerId, const QString& text)
     if (!db.isOpen()) return;
 
     QList<qint64> nodeIds;
+    // Одно подготовленное выражение на все понятия вместо нового QSqlQuery
+    // с повторным prepare() в каждой итерации.
+    QSqlQuery lookup(db);
+    lookup.prepare(QStringLiteral(
+        "SELECT id FROM synapse_nodes WHERE owner_id=:oid AND label=:l"));
     for (const QString& c : concepts) {
-        QSqlQuery q(db);
-        q.prepare(QStringLiteral(
-            "SELECT id FROM synapse_nodes WHERE owner_id=:oid AND label=:l"));
-        q.bindValue(QStringLiteral(":oid"), ownerId);
-        q.bindValue(QStringLiteral(":l"), c);
-        if (q.exec() && q.next())
-            nodeIds.append(q.value(0).toLongLong());
+        lookup.bindValue(QStringLiteral(":oid"), ownerId);
+        lookup.bindValue(QStringLiteral(":l"), c);
+        if (lookup.exec() && lookup.next())
+            nodeIds.append(lookup.value(0).toLongLong());
     }
+    if (nodeIds.size() < 2) return;
+
+    const bool inTx = db.transaction();
 
     // Ошибка → минус вместо плюс. Только для уже существующих узлов —
     // ослаблять то, чего никогда не было, бессмысленно.
     for (int i = 0; i < nodeIds.size(); ++i)
         for (int j = i + 1; j < nodeIds.size(); ++j)
             linkEdge(ownerId, nodeIds[i], nodeIds[j], -kHebbianDecrement);
+
+    if (inTx) db.commit();
 }
 
 // ============================================================
@@ -353,6 +381,92 @@ SynapseGraph::Assembly SynapseGraph::assemble(
 // ============================================================
 //  Introspection
 // ============================================================
+
+SynapseGraph::GraphView SynapseGraph::graphView(qint64 ownerId, int maxNodes) const
+{
+    GraphView view;
+    auto db = DatabaseManager::instance().connection();
+    if (!db.isOpen()) return view;
+
+    // Strongest concepts first — a picture of everything is a hairball, and
+    // the tail of once-seen tokens carries no association worth drawing.
+    QSqlQuery nq(db);
+    nq.prepare(QStringLiteral(
+        "SELECT id, label, activations, source FROM synapse_nodes WHERE owner_id=:oid "
+        "ORDER BY activations DESC LIMIT :lim"));
+    nq.bindValue(QStringLiteral(":oid"), ownerId);
+    nq.bindValue(QStringLiteral(":lim"), maxNodes);
+    if (!nq.exec()) return view;
+
+    QHash<qint64, int> indexById;
+    QList<ViewNode> candidates;
+    while (nq.next()) {
+        ViewNode n;
+        n.id          = nq.value(0).toLongLong();
+        n.label       = nq.value(1).toString();
+        n.activations = nq.value(2).toInt();
+        n.source      = nq.value(3).toString();
+        if (n.source.isEmpty()) n.source = QString::fromLatin1(kSourceDialogue);
+        indexById.insert(n.id, candidates.size());
+        candidates.append(n);
+    }
+    if (candidates.isEmpty()) return view;
+
+    // Every synapse for those nodes; the both-endpoints-present test happens
+    // here rather than in SQL so the id list stays out of the query text.
+    QSqlQuery eq(db);
+    eq.prepare(QStringLiteral(
+        "SELECT node_a, node_b, weight, co_activations FROM synapse_edges "
+        "WHERE owner_id=:oid ORDER BY weight DESC"));
+    eq.bindValue(QStringLiteral(":oid"), ownerId);
+    if (!eq.exec()) return view;
+
+    // Collected against candidate indices first, then compacted below.
+    QList<ViewEdge> rawEdges;
+    while (eq.next()) {
+        const auto ia = indexById.constFind(eq.value(0).toLongLong());
+        const auto ib = indexById.constFind(eq.value(1).toLongLong());
+        if (ia == indexById.constEnd() || ib == indexById.constEnd()) continue;
+
+        ViewEdge e;
+        e.a             = *ia;
+        e.b             = *ib;
+        e.weight        = eq.value(2).toFloat();
+        e.coActivations = eq.value(3).toInt();
+        view.maxWeight  = qMax(view.maxWeight, e.weight);
+        candidates[e.a].degree++;
+        candidates[e.b].degree++;
+        rawEdges.append(e);
+    }
+
+    // Drop concepts with no synapse in this view. A node the layout cannot
+    // attach to anything gets pushed to the rim by pure repulsion and reads
+    // as debris around the network — and it is the least informative thing
+    // on screen, since a concept with no association is precisely the one
+    // carrying no association to show. They stay in the database and in the
+    // node count; this only decides what is worth drawing.
+    QList<int> remap;
+    remap.reserve(candidates.size());
+    for (const ViewNode& n : candidates) {
+        if (n.degree > 0) {
+            remap.append(view.nodes.size());
+            view.maxActivations = qMax(view.maxActivations, n.activations);
+            view.nodes.append(n);
+        } else {
+            remap.append(-1);
+        }
+    }
+    for (const ViewEdge& e : rawEdges) {
+        const int a = remap.value(e.a, -1);
+        const int b = remap.value(e.b, -1);
+        if (a < 0 || b < 0) continue;   // unreachable: an edge kept both ends
+        ViewEdge out = e;
+        out.a = a;
+        out.b = b;
+        view.edges.append(out);
+    }
+    return view;
+}
 
 QList<SynapseGraph::TopNode> SynapseGraph::topNodes(qint64 ownerId, int limit) const
 {

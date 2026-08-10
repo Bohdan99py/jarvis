@@ -696,6 +696,23 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=18");
         ver = 18;
     }
+    if (ver < 19) {
+        // Where each concept entered the brain from. Nodes are normalized
+        // tokens with no inherent category, so the graph could only ever be
+        // coloured by how often something fired — which says nothing about
+        // what kind of knowledge it is. Now that learning arrives from more
+        // than dialogue (watched app sessions, learned facts), the modality
+        // that first taught a concept is a real, data-derived grouping:
+        // it makes "you know this because you told me" visually distinct
+        // from "you know this because I watched you work".
+        //
+        // First writer wins (see SynapseGraph::findOrCreateNode) — the
+        // question is where a concept came FROM, and later reinforcement
+        // from another channel doesn't change its origin.
+        execQuery("ALTER TABLE synapse_nodes ADD COLUMN source TEXT NOT NULL DEFAULT 'dialogue'");
+        execQuery("UPDATE schema_version SET version=19");
+        ver = 19;
+    }
     return true;
 }
 
