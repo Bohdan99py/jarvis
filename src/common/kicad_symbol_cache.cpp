@@ -86,6 +86,97 @@ const QMap<QString, KiCadSymbolCache::ComponentInfo>& KiCadSymbolCache::componen
               {QStringLiteral("14"), QPointF(15.24, -5.08)},   // OUT4
               {QStringLiteral("15"), QPointF(-5.08, -17.78)}}, // SENSE_B
              false}},
+
+        // ── Добавлено: транзистор, резонатор, кнопка, ESP32 ──────────
+        // Координаты пинов не выведены "по смыслу", а вынуты из реальных
+        // .kicad_sym установленной KiCad 10.0 — как и всё выше. Пин,
+        // промахнувшийся мимо сетки хотя бы на 0.01 мм, KiCad считает
+        // неподключённым, и схема тихо разваливается на ERC.
+
+        // Q_NPN_BEC: имя описывает порядок выводов — 1=База, 2=Эмиттер,
+        // 3=Коллектор. Существует парный Q_NPN_CBE с той же графикой и
+        // другой нумерацией, так что тип назван явно.
+        {QStringLiteral("transistor_npn"),
+            {QStringLiteral("Transistor_BJT"), QStringLiteral("Q_NPN_BEC"),
+             {QStringLiteral("1"), QStringLiteral("2"), QStringLiteral("3")},
+             {{QStringLiteral("1"), QPointF(-5.08, 0)},      // B
+              {QStringLiteral("2"), QPointF(2.54, -5.08)},   // E
+              {QStringLiteral("3"), QPointF(2.54, 5.08)}},   // C
+             false}},
+
+        // Двухвыводный кварц. Трёхвыводный резонатор с землёй — отдельный
+        // символ (Resonator), здесь не заводится, чтобы "crystal" не
+        // означал две разные детали.
+        {QStringLiteral("crystal"),
+            {QStringLiteral("Device"), QStringLiteral("Crystal"),
+             {QStringLiteral("1"), QStringLiteral("2")},
+             {{QStringLiteral("1"), QPointF(-3.81, 0)},
+              {QStringLiteral("2"), QPointF(3.81, 0)}},
+             false}},
+
+        {QStringLiteral("button"),
+            {QStringLiteral("Switch"), QStringLiteral("SW_Push"),
+             {QStringLiteral("1"), QStringLiteral("2")},
+             {{QStringLiteral("1"), QPointF(-5.08, 0)},
+              {QStringLiteral("2"), QPointF(5.08, 0)}},
+             false}},
+
+        // ESP32-WROOM-32 — 39 выводов. Пины 1/15/38/39 сидят в одной точке
+        // (0,-35.56): это земля модуля, разведённая несколькими выводами
+        // корпуса, и в символе они намеренно совмещены. Дублирование здесь
+        // не ошибка копирования — так в самой библиотеке.
+        {QStringLiteral("esp32"),
+            {QStringLiteral("RF_Module"), QStringLiteral("ESP32-WROOM-32"),
+             {QStringLiteral("1"),  QStringLiteral("2"),  QStringLiteral("3"),  QStringLiteral("4"),
+              QStringLiteral("5"),  QStringLiteral("6"),  QStringLiteral("7"),  QStringLiteral("8"),
+              QStringLiteral("9"),  QStringLiteral("10"), QStringLiteral("11"), QStringLiteral("12"),
+              QStringLiteral("13"), QStringLiteral("14"), QStringLiteral("15"), QStringLiteral("16"),
+              QStringLiteral("17"), QStringLiteral("18"), QStringLiteral("19"), QStringLiteral("20"),
+              QStringLiteral("21"), QStringLiteral("22"), QStringLiteral("23"), QStringLiteral("24"),
+              QStringLiteral("25"), QStringLiteral("26"), QStringLiteral("27"), QStringLiteral("28"),
+              QStringLiteral("29"), QStringLiteral("30"), QStringLiteral("31"), QStringLiteral("32"),
+              QStringLiteral("33"), QStringLiteral("34"), QStringLiteral("35"), QStringLiteral("36"),
+              QStringLiteral("37"), QStringLiteral("38"), QStringLiteral("39")},
+             {{QStringLiteral("1"),  QPointF(0, -35.56)},      // GND
+              {QStringLiteral("2"),  QPointF(0, 35.56)},       // 3V3
+              {QStringLiteral("3"),  QPointF(-15.24, 30.48)},  // EN
+              {QStringLiteral("4"),  QPointF(-15.24, 25.4)},
+              {QStringLiteral("5"),  QPointF(-15.24, 22.86)},
+              {QStringLiteral("6"),  QPointF(15.24, -25.4)},
+              {QStringLiteral("7"),  QPointF(15.24, -27.94)},
+              {QStringLiteral("8"),  QPointF(15.24, -20.32)},
+              {QStringLiteral("9"),  QPointF(15.24, -22.86)},
+              {QStringLiteral("10"), QPointF(15.24, -12.7)},
+              {QStringLiteral("11"), QPointF(15.24, -15.24)},
+              {QStringLiteral("12"), QPointF(15.24, -17.78)},
+              {QStringLiteral("13"), QPointF(15.24, 10.16)},
+              {QStringLiteral("14"), QPointF(15.24, 15.24)},
+              {QStringLiteral("15"), QPointF(0, -35.56)},      // GND
+              {QStringLiteral("16"), QPointF(15.24, 12.7)},
+              {QStringLiteral("17"), QPointF(-15.24, -5.08)},
+              {QStringLiteral("18"), QPointF(-15.24, -7.62)},
+              {QStringLiteral("19"), QPointF(-15.24, -12.7)},
+              {QStringLiteral("20"), QPointF(-15.24, -10.16)},
+              {QStringLiteral("21"), QPointF(-15.24, 0)},
+              {QStringLiteral("22"), QPointF(-15.24, -2.54)},
+              {QStringLiteral("23"), QPointF(15.24, 7.62)},
+              {QStringLiteral("24"), QPointF(15.24, 25.4)},
+              {QStringLiteral("25"), QPointF(15.24, 30.48)},
+              {QStringLiteral("26"), QPointF(15.24, 20.32)},
+              {QStringLiteral("27"), QPointF(15.24, 5.08)},
+              {QStringLiteral("28"), QPointF(15.24, 2.54)},
+              {QStringLiteral("29"), QPointF(15.24, 17.78)},
+              {QStringLiteral("30"), QPointF(15.24, 0)},
+              {QStringLiteral("31"), QPointF(15.24, -2.54)},
+              {QStringLiteral("32"), QPointF(-12.7, -27.94)},
+              {QStringLiteral("33"), QPointF(15.24, -5.08)},
+              {QStringLiteral("34"), QPointF(15.24, 22.86)},
+              {QStringLiteral("35"), QPointF(15.24, 27.94)},
+              {QStringLiteral("36"), QPointF(15.24, -7.62)},
+              {QStringLiteral("37"), QPointF(15.24, -10.16)},
+              {QStringLiteral("38"), QPointF(0, -35.56)},      // GND
+              {QStringLiteral("39"), QPointF(0, -35.56)}},     // GND
+             false}},
     };
     return table;
 }

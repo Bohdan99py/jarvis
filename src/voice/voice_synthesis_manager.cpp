@@ -8,8 +8,15 @@
 #include <QFile>
 #include <QDebug>
 #include <QUuid>
+#include <QUrl>
+#include <QTimer>
+#include <QEventLoop>
+#include <QDirIterator>
 #include <QProcess>
 #include <QCoreApplication>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
 #include <QtConcurrent>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -19,6 +26,68 @@
 #include <objbase.h>
 #include <sapi.h>
 #include <mmsystem.h>
+
+// ============================================================
+//  Default Piper assets (offline neural TTS) — self-provisioned
+//  into Documents/Jarvis Data on first run if not already bundled.
+// ============================================================
+
+namespace {
+
+const QString& piperRuntimeUrl()
+{
+    static const QString url = QStringLiteral(
+        "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip");
+    return url;
+}
+
+// Blocking HTTP GET → file, meant to run on a background thread.
+// Bounded by a hard timeout so a stalled connection can't hang the
+// worker thread forever (falls back to SAPI if it never completes).
+bool downloadToFile(const QString& url, const QString& destPath)
+{
+    QNetworkAccessManager nam;
+    QNetworkRequest req{QUrl(url)};
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                      QNetworkRequest::NoLessSafeRedirectPolicy);
+
+    QNetworkReply* reply = nam.get(req);
+
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+    QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timeoutTimer.start(120000);
+    loop.exec();
+
+    if (!reply->isFinished()) {
+        qWarning() << "[VoiceSynth] download timed out:" << url;
+        reply->abort();
+        reply->deleteLater();
+        return false;
+    }
+
+    if (reply->error() != QNetworkReply::NoError) {
+        qWarning() << "[VoiceSynth] download failed:" << url << reply->errorString();
+        reply->deleteLater();
+        return false;
+    }
+
+    const QByteArray data = reply->readAll();
+    reply->deleteLater();
+
+    QFile out(destPath);
+    if (!out.open(QIODevice::WriteOnly)) {
+        qWarning() << "[VoiceSynth] cannot write:" << destPath;
+        return false;
+    }
+    out.write(data);
+    out.close();
+    return true;
+}
+
+} // namespace
 
 // ============================================================
 //  Singleton
@@ -188,30 +257,110 @@ QString VoiceSynthesisManager::findPiperExe() const
         if (QFile::exists(path))
             return path;
     }
+
+    // Self-provisioned copy from a previous run (downloaded into user
+    // data because no bundled redist/piper/ shipped with this build).
+    const QString runtimeDir = JarvisPaths::subPath(QStringLiteral("piper_runtime"));
+    QDirIterator it(runtimeDir, {QStringLiteral("piper.exe")}, QDir::Files,
+                     QDirIterator::Subdirectories);
+    if (it.hasNext())
+        return it.next();
+
     return QString();
+}
+
+// Downloads and extracts the Piper Windows runtime (piper.exe + DLLs)
+// into Documents/Jarvis Data/piper_runtime. Used when no bundled
+// redist/piper/ was shipped with this build (e.g. a pre-built exe
+// handed to someone who never ran CMake).
+bool VoiceSynthesisManager::provisionPiperRuntime()
+{
+    const QString runtimeDir = JarvisPaths::subPath(QStringLiteral("piper_runtime"));
+    QDir().mkpath(runtimeDir);
+
+    const QString zipPath = runtimeDir + QStringLiteral("/piper_windows_amd64.zip");
+
+    qDebug() << "[VoiceSynth] Downloading Piper runtime...";
+    if (!downloadToFile(piperRuntimeUrl(), zipPath))
+        return false;
+
+    // Windows 10 1803+ ships tar.exe (bsdtar), which understands .zip —
+    // avoids pulling in a zip-extraction library just for this.
+    QProcess tar;
+    tar.setProgram(QStringLiteral("tar"));
+    tar.setArguments({QStringLiteral("-xf"), zipPath, QStringLiteral("-C"), runtimeDir});
+    tar.start();
+    const bool extracted = tar.waitForFinished(60000) && tar.exitCode() == 0;
+
+    QFile::remove(zipPath);
+
+    if (!extracted) {
+        qWarning() << "[VoiceSynth] Failed to extract Piper runtime:" << tar.readAllStandardError();
+        return false;
+    }
+
+    qDebug() << "[VoiceSynth] Piper runtime provisioned to" << runtimeDir;
+    return true;
+}
+
+// Downloads one voice's .onnx + .onnx.json into modelsDir if either
+// is missing. No-op (returns true) if both are already present.
+bool VoiceSynthesisManager::provisionVoice(const QString& onnxUrl, const QString& jsonUrl,
+                                            const QString& onnxName, const QString& jsonName,
+                                            const QString& modelsDir)
+{
+    const QString onnxPath = modelsDir + QStringLiteral("/") + onnxName;
+    const QString jsonPath = modelsDir + QStringLiteral("/") + jsonName;
+
+    if (QFile::exists(onnxPath) && QFile::exists(jsonPath))
+        return true;
+
+    qDebug() << "[VoiceSynth] Downloading voice:" << onnxName;
+    const bool ok = downloadToFile(onnxUrl, onnxPath) && downloadToFile(jsonUrl, jsonPath);
+    if (!ok) {
+        QFile::remove(onnxPath);
+        QFile::remove(jsonPath);
+    }
+    return ok;
 }
 
 void VoiceSynthesisManager::tryLoadPiperModels()
 {
-    const QString exePath = findPiperExe();
+    QString exePath = findPiperExe();
     if (exePath.isEmpty()) {
-        qDebug() << "[VoiceSynth] piper.exe not found — using SAPI";
+        qDebug() << "[VoiceSynth] piper.exe not found — provisioning...";
+        if (provisionPiperRuntime())
+            exePath = findPiperExe();
+    }
+
+    if (exePath.isEmpty()) {
+        qDebug() << "[VoiceSynth] Piper runtime unavailable — using SAPI";
         return;
     }
 
     const QString modelsDir = JarvisPaths::subPath(QStringLiteral("models/tts"));
     QDir dir(modelsDir);
 
-    if (!dir.exists()) {
-        qDebug() << "[VoiceSynth] No models/tts directory — using SAPI";
-        return;
-    }
+    // Default voices, downloaded on demand if not already present.
+    provisionVoice(
+        QStringLiteral("https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx"),
+        QStringLiteral("https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx.json"),
+        QStringLiteral("ru_RU-denis-medium.onnx"),
+        QStringLiteral("ru_RU-denis-medium.onnx.json"),
+        modelsDir);
+
+    provisionVoice(
+        QStringLiteral("https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx"),
+        QStringLiteral("https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json"),
+        QStringLiteral("en_US-ryan-medium.onnx"),
+        QStringLiteral("en_US-ryan-medium.onnx.json"),
+        modelsDir);
 
     const QStringList onnxFiles = dir.entryList(
         {QStringLiteral("*.onnx")}, QDir::Files);
 
     if (onnxFiles.isEmpty()) {
-        qDebug() << "[VoiceSynth] No .onnx voice models found — using SAPI";
+        qDebug() << "[VoiceSynth] No .onnx voice models available — using SAPI";
         return;
     }
 

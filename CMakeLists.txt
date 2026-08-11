@@ -100,6 +100,45 @@ endif()
 message(STATUS "Qt version: ${Qt6_VERSION}")
 
 # ============================================================
+# Piper — offline neural TTS binary
+# Auto-downloads the Windows runtime on first configure if missing,
+# same pattern as the OpenCV bootstrap below. Voice models (.onnx)
+# are NOT fetched here — they're user data and are self-provisioned
+# by the app at runtime into Documents/Jarvis Data/models/tts (see
+# VoiceSynthesisManager::tryLoadPiperModels / provisionPiperRuntime).
+# ============================================================
+
+set(_piper_dir "${CMAKE_SOURCE_DIR}/redist/piper")
+set(_piper_zip "${CMAKE_SOURCE_DIR}/redist/piper_windows_amd64.zip")
+set(_piper_url "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip")
+
+if(WIN32 AND NOT EXISTS "${_piper_dir}/piper.exe")
+    message(STATUS "Piper: NOT FOUND — downloading runtime...")
+    file(DOWNLOAD "${_piper_url}" "${_piper_zip}"
+         SHOW_PROGRESS
+         STATUS _piper_dl_status
+         TIMEOUT 120)
+    list(GET _piper_dl_status 0 _piper_dl_code)
+
+    if(_piper_dl_code EQUAL 0)
+        file(ARCHIVE_EXTRACT INPUT "${_piper_zip}" DESTINATION "${CMAKE_SOURCE_DIR}/redist")
+        file(REMOVE "${_piper_zip}")
+    else()
+        message(WARNING "Piper download failed (code ${_piper_dl_code}). "
+                "Voice output will fall back to SAPI until the app "
+                "self-provisions it at runtime, or manually extract "
+                "${_piper_url} to ${_piper_dir}/")
+    endif()
+endif()
+
+if(EXISTS "${_piper_dir}/piper.exe")
+    set(JARVIS_HAS_PIPER TRUE)
+    message(STATUS "Piper found: ${_piper_dir}")
+else()
+    set(JARVIS_HAS_PIPER FALSE)
+endif()
+
+# ============================================================
 # Vosk — offline speech recognition
 # ============================================================
 
@@ -457,6 +496,20 @@ if(VOSK_AVAILABLE)
         endif()
     endforeach()
     message(STATUS "Vosk DLLs will be copied to bin/ on build")
+endif()
+
+# ============================================================
+# Post-build: copy Piper TTS runtime
+# ============================================================
+
+if(JARVIS_HAS_PIPER)
+    add_custom_command(TARGET jarvis POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_piper_dir}"
+            "$<TARGET_FILE_DIR:jarvis>/redist/piper"
+            COMMENT "Copying Piper TTS runtime..."
+    )
+    message(STATUS "Piper runtime will be copied to bin/redist/piper on build")
 endif()
 
 # ============================================================

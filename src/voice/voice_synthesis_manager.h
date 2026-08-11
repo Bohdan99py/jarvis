@@ -3,8 +3,10 @@
 // voice_synthesis_manager.h — Thread-Safe TTS Queue Engine
 //
 // Manages the TTS pipeline with a sequential playback queue.
-// Supports Windows SAPI out-of-the-box, with Piper ONNX model
-// loading when models are present in /models/tts/.
+// Starts on Windows SAPI immediately, then self-provisions Piper
+// (offline neural TTS) in the background: downloads the piper.exe
+// runtime and the RU/EN voice models on first run if missing, and
+// switches over automatically once ready.
 //
 // Usage:
 //   VoiceSynthesisManager::instance().say("Готово, файл обновлён.");
@@ -52,6 +54,10 @@ private:
     bool speakViaPiper(const QString& text);
     void tryLoadPiperModels();
     QString findPiperExe() const;
+    bool provisionPiperRuntime();
+    bool provisionVoice(const QString& onnxUrl, const QString& jsonUrl,
+                         const QString& onnxName, const QString& jsonName,
+                         const QString& modelsDir);
 
     QQueue<QString>   m_queue;
     QMutex            m_queueMutex;

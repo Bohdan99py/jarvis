@@ -20,7 +20,7 @@ target_include_directories(jarvis_voice PUBLIC
 
 target_link_libraries(jarvis_voice
     PUBLIC  jarvis_common Qt6::Core Qt6::Multimedia Qt6::Widgets
-    PRIVATE jarvis_db Qt6::Concurrent
+    PRIVATE jarvis_db Qt6::Concurrent Qt6::Network
 )
 
 # Vosk offline ASR — linked conditionally by master CMakeLists.txt
