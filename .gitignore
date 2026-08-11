@@ -48,3 +48,4 @@ redist/
 # scripts/build_release.bat под это не подпадает: он в другой папке.
 build_*.bat
 build_*.log
+run_*.bat
