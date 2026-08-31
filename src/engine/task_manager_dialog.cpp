@@ -7,6 +7,8 @@
 #include "notification_manager.h"
 #include "lang.h"
 
+#include "jarvis_theme.h"
+
 #include <QQuickWidget>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -106,8 +108,7 @@ TaskManagerDialog::TaskManagerDialog(qint64 userId, QWidget* parent)
     // See notification_manager.cpp for why this is needed: windeployqt
     // drops QML plugin deps under bin/qml/, which isn't on the engine's
     // default import search path.
-    m_board->engine()->addImportPath(QCoreApplication::applicationDirPath()
-                                     + QStringLiteral("/qml"));
+    JarvisTheme::prepareEngine(m_board->engine());
 
     m_todoModel       = new TaskListModel(this);
     m_inProgressModel = new TaskListModel(this);

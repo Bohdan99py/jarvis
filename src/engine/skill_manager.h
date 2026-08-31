@@ -138,6 +138,12 @@ private:
     static bool readManifest(const QString& skillDir, SkillInfo& out);
     static bool copySkillDir(const QString& src, const QString& dst);
 
+    // Сравнение версий вида "2.0.0". <0 если a старше b, 0 при равенстве.
+    // Нужно, чтобы обновление приложения доносило новые знания скилла до
+    // пользователей, у которых папка скилла уже создана: одноразовое
+    // копирование (installed_once) их обновление молча пропускало.
+    static int  compareVersions(const QString& a, const QString& b);
+
     void loadState();
     void saveState() const;
     QString stateFilePath() const;

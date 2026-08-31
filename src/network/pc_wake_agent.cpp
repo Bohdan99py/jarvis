@@ -39,7 +39,7 @@ PcWakeAgent::PcWakeAgent(const QString& deviceId, QObject* parent)
 
     // Ensure the pc_registry table exists locally
     {
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS pc_registry ("
             "  device_id         TEXT PRIMARY KEY,"
@@ -119,7 +119,7 @@ void PcWakeAgent::reportStatus(PcStatus status)
 
     // Update local DB
     {
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.prepare(QStringLiteral(
             "UPDATE pc_registry SET status = :st, last_heartbeat = datetime('now') "
             "WHERE device_id = :did"));
@@ -205,7 +205,7 @@ void PcWakeAgent::sendHeartbeat()
         }
 
         // Update local timestamp
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.prepare(QStringLiteral(
             "UPDATE pc_registry SET last_heartbeat = datetime('now') "
             "WHERE device_id = :did"));
@@ -440,7 +440,7 @@ void PcWakeAgent::queryAllPcStatus()
 
 void PcWakeAgent::persistLocalRegistration(const PcRegistration& reg)
 {
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT INTO pc_registry "
         "  (device_id, mac_address, broadcast_address, pc_name, status, wol_port) "
@@ -466,7 +466,7 @@ void PcWakeAgent::persistLocalRegistration(const PcRegistration& reg)
 
 void PcWakeAgent::loadLocalRegistration()
 {
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT mac_address, broadcast_address, pc_name, status, "
         "       last_heartbeat, wol_port "

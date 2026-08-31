@@ -14,6 +14,10 @@ add_library(jarvis_db OBJECT
     memory_manager.cpp
     synapse_graph.h
     synapse_graph.cpp
+    sentence_composer.h
+    sentence_composer.cpp
+    artifact_registry.h
+    artifact_registry.cpp
 )
 
 target_include_directories(jarvis_db PUBLIC

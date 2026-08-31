@@ -382,6 +382,101 @@ SynapseGraph::Assembly SynapseGraph::assemble(
 //  Introspection
 // ============================================================
 
+QString SynapseGraph::sourceDescription(const QString& source, bool english)
+{
+    if (source == QLatin1String(kSourceWatched)) {
+        return english ? QStringLiteral("seen while you worked at the PC")
+                       : QStringLiteral("увидел, пока ты работал за компьютером");
+    }
+    if (source == QLatin1String(kSourceFact)) {
+        return english ? QStringLiteral("learned as a fact or a correction")
+                       : QStringLiteral("усвоил как факт или исправление");
+    }
+    return english ? QStringLiteral("heard in conversation")
+                   : QStringLiteral("услышал в разговоре");
+}
+
+SynapseGraph::NodeDetail SynapseGraph::nodeDetail(qint64 ownerId, qint64 nodeId,
+                                                  int maxNeighbours, int maxOrigins) const
+{
+    NodeDetail detail;
+    auto db = DatabaseManager::instance().connection();
+    if (!db.isOpen()) return detail;
+
+    // ── Сам узел ────────────────────────────────────────────────
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT label, activations, source, created_at, last_activated_at "
+            "FROM synapse_nodes WHERE id=:id AND owner_id=:oid"));
+        q.bindValue(QStringLiteral(":id"),  nodeId);
+        q.bindValue(QStringLiteral(":oid"), ownerId);
+        if (!q.exec() || !q.next())
+            return detail;   // чужой или удалённый узел — не находка, а пусто
+
+        detail.found         = true;
+        detail.id            = nodeId;
+        detail.label         = q.value(0).toString();
+        detail.activations   = q.value(1).toInt();
+        detail.source        = q.value(2).toString();
+        detail.firstSeen     = q.value(3).toString();
+        detail.lastActivated = q.value(4).toString();
+    }
+
+    // ── Соседи ──────────────────────────────────────────────────
+    // Ребро хранится один раз, в нормализованном порядке (node_a < node_b),
+    // поэтому свой узел может оказаться с любой стороны — CASE выбирает
+    // противоположный конец, иначе половина связей потерялась бы.
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT n.label, e.weight, e.co_activations "
+            "FROM synapse_edges e "
+            "JOIN synapse_nodes n ON n.id = CASE WHEN e.node_a=:id1 THEN e.node_b ELSE e.node_a END "
+            "WHERE e.owner_id=:oid AND (e.node_a=:id2 OR e.node_b=:id3) "
+            "ORDER BY e.weight DESC LIMIT :lim"));
+        q.bindValue(QStringLiteral(":id1"), nodeId);
+        q.bindValue(QStringLiteral(":id2"), nodeId);
+        q.bindValue(QStringLiteral(":id3"), nodeId);
+        q.bindValue(QStringLiteral(":oid"), ownerId);
+        q.bindValue(QStringLiteral(":lim"), qBound(1, maxNeighbours, 50));
+        if (q.exec()) {
+            while (q.next()) {
+                TopEdge e;
+                e.labelA        = detail.label;
+                e.labelB        = q.value(0).toString();
+                e.weight        = q.value(1).toFloat();
+                e.coActivations = q.value(2).toInt();
+                detail.neighbours.append(e);
+            }
+        }
+    }
+
+    // ── Откуда узнал: реальные случаи ───────────────────────────
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT l.case_hash, c.original_query, c.response_text, l.weight "
+            "FROM synapse_case_links l "
+            "JOIN llm_cache c ON c.query_hash = l.case_hash "
+            "WHERE l.node_id=:id ORDER BY l.weight DESC LIMIT :lim"));
+        q.bindValue(QStringLiteral(":id"),  nodeId);
+        q.bindValue(QStringLiteral(":lim"), qBound(1, maxOrigins, 50));
+        if (q.exec()) {
+            while (q.next()) {
+                NodeOrigin o;
+                o.caseHash = q.value(0).toString();
+                o.query    = q.value(1).toString();
+                o.response = q.value(2).toString();
+                o.weight   = q.value(3).toFloat();
+                detail.origins.append(o);
+            }
+        }
+    }
+
+    return detail;
+}
+
 SynapseGraph::GraphView SynapseGraph::graphView(qint64 ownerId, int maxNodes) const
 {
     GraphView view;

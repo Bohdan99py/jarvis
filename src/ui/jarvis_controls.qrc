@@ -1,0 +1,32 @@
+<RCC>
+    <!--
+      Библиотека компонентов раскладывается по QML-модульному пути:
+      qrc:/qml/Jarvis/Controls/. Хосты (QQuickWidget каждого экрана)
+      зовут addImportPath("qrc:/qml"), после чего `import Jarvis.Controls`
+      находит qmldir рядом с файлами.
+
+      Отдельный prefix, а не общий "/qml" из соседних .qrc: qmldir должен
+      лежать РЯДОМ с компонентами, а не в корне ресурсов.
+    -->
+    <qresource prefix="/qml/Jarvis/Controls">
+        <file alias="qmldir">Jarvis/Controls/qmldir</file>
+        <file alias="JarvisUi.qml">Jarvis/Controls/JarvisUi.qml</file>
+        <file alias="JarvisBadge.qml">Jarvis/Controls/JarvisBadge.qml</file>
+        <file alias="JarvisButton.qml">Jarvis/Controls/JarvisButton.qml</file>
+        <file alias="JarvisCard.qml">Jarvis/Controls/JarvisCard.qml</file>
+        <file alias="JarvisChatBubble.qml">Jarvis/Controls/JarvisChatBubble.qml</file>
+        <file alias="JarvisChipGroup.qml">Jarvis/Controls/JarvisChipGroup.qml</file>
+        <file alias="JarvisEmptyState.qml">Jarvis/Controls/JarvisEmptyState.qml</file>
+        <file alias="JarvisNoticeBar.qml">Jarvis/Controls/JarvisNoticeBar.qml</file>
+        <file alias="JarvisPanel.qml">Jarvis/Controls/JarvisPanel.qml</file>
+        <file alias="JarvisProgressBar.qml">Jarvis/Controls/JarvisProgressBar.qml</file>
+        <file alias="JarvisProgressRing.qml">Jarvis/Controls/JarvisProgressRing.qml</file>
+        <file alias="JarvisScreenHeader.qml">Jarvis/Controls/JarvisScreenHeader.qml</file>
+        <file alias="JarvisSearchField.qml">Jarvis/Controls/JarvisSearchField.qml</file>
+        <file alias="JarvisStat.qml">Jarvis/Controls/JarvisStat.qml</file>
+        <file alias="JarvisStatusDot.qml">Jarvis/Controls/JarvisStatusDot.qml</file>
+        <file alias="JarvisTextField.qml">Jarvis/Controls/JarvisTextField.qml</file>
+        <file alias="JarvisToggle.qml">Jarvis/Controls/JarvisToggle.qml</file>
+        <file alias="JarvisTabBar.qml">Jarvis/Controls/JarvisTabBar.qml</file>
+    </qresource>
+</RCC>

@@ -7,6 +7,8 @@
 #include "notification_manager.h"
 #include "lang.h"
 
+#include "jarvis_theme.h"
+
 #include <QQuickWidget>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -35,8 +37,7 @@ OrganizePlanDialog::OrganizePlanDialog(Jarvis* jarvis, const OrganizePlan& plan,
     // See notification_manager.cpp for why this is needed: windeployqt
     // drops QML plugin deps under bin/qml/, which isn't on the engine's
     // default import search path.
-    m_view->engine()->addImportPath(QCoreApplication::applicationDirPath()
-                                    + QStringLiteral("/qml"));
+    JarvisTheme::prepareEngine(m_view->engine());
 
     QQmlContext* ctx = m_view->rootContext();
     ctx->setContextProperty(QStringLiteral("opEnglish"), IS_EN);

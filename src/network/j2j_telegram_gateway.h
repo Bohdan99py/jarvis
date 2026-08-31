@@ -103,6 +103,7 @@ struct TgChatSession {
     QString       boundRole;        // cached from paired_devices
     bool          isEnglish = false; // derived from role
     QaWizardStep  wizardStep = QaWizardStep::Idle;
+    QDateTime     wizardTouchedAt;   // последний шаг визарда — см. handleMessage
     QaBugReport   pendingBug;
     bool          awaitingLlm = false; // true while LLM is generating
     bool          awaitingCompanionAnswer = false; // waiting for ok/no re: security
@@ -123,6 +124,13 @@ struct TgChatSession {
     // declaration of OrganizePlan.
     std::shared_ptr<OrganizePlan> pendingOrganizePlan;
     bool          hasPendingOrganizePlan = false;
+
+    // Сообщение, по которому SemanticIntentManager предложил действие со
+    // средней уверенностью и ждёт «Да/Нет». Держим сам ТЕКСТ, а не разбор:
+    // по «Нет» его надо не выбросить, а отправить в LLM как обычную реплику
+    // (раньше вопрос «Похоже, ты хочешь X. Запустить?» был тупиком —
+    // подтверждать было нечем, и сообщение терялось).
+    QString       pendingIntentText;
 };
 
 // ── Gateway class ────────────────────────────────────────────
@@ -206,6 +214,9 @@ public:
 
     static constexpr int POLL_INTERVAL_MS    = 2000;
     static constexpr int TYPING_INTERVAL_MS  = 3000;
+    // Столько молчания — и незаконченный баг-репорт считается брошенным:
+    // иначе он молча съедает весь обычный текст (см. handleMessage).
+    static constexpr int WIZARD_IDLE_MINUTES = 20;
 
 signals:
     void messageReceived(qint64 chatId, const QString& text);

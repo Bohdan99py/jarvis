@@ -4,6 +4,17 @@
 
 #include "mainwindow.h"
 #include "jarvis.h"
+#include "command_palette.h"
+#include "system_monitor_dialog.h"
+#include "notifications_dialog.h"
+#include "device_hub_dialog.h"
+#include "dashboard_dialog.h"
+#include "action_registry.h"
+#include "event_feed.h"
+#include "workflow_manager.h"
+#include "agent_loop.h"
+#include "permission_gate.h"
+#include "tool_registry.h"
 #include "jarvis_paths.h"
 #include "notification_manager.h"
 #include "theme.h"
@@ -23,6 +34,7 @@
 #include "screen_agent.h"
 #include "bug_reporter.h"
 #include "voice_input.h"
+#include "health_center.h"
 #include "passive_listener.h"
 #include "database_manager.h"
 #include <QSqlQuery>
@@ -37,6 +49,9 @@
 #include "curiosity_engine.h"
 #include "system_manifest.h"
 #include "vision_center_dialog.h"
+#include "camera_view_dialog.h"
+#include "artifacts_dialog.h"
+#include "artifact_registry.h"
 #include "proactive_reminder_manager.h"
 #include "user_profile_extended.h"
 #include "memory_consolidation.h"
@@ -56,6 +71,7 @@
 #include "skills_dialog.h"
 #include "modes_dialog.h"
 #include "voice_synthesis_manager.h"
+#include "elevenlabs_provider.h"
 #include "llm_cache_manager.h"
 #include "file_organizer.h"
 #include "organize_plan_dialog.h"
@@ -90,6 +106,8 @@
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QAbstractButton>
 #include <QMenu>
 #include <QAction>
 #include <QActionGroup>
@@ -112,6 +130,20 @@
 #include <QTimer>
 #include <QRegularExpression>
 
+#include "chat_model.h"
+#include "chat_controller.h"
+#include "notice_controller.h"
+#include "attachment_model.h"
+#include "welcome_controller.h"
+#include "visual_insights_controller.h"
+
+#include <QQuickWidget>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQmlError>
+#include <QQuickItem>
+#include "jarvis_theme.h"
+
 namespace {
 // TaskNotifications::checkDeadlines() returns one "[TASK WARNING]: ..." /
 // "[ЗАДАЧА]: ..." line per approaching/overdue task, newline-separated —
@@ -128,15 +160,36 @@ void notifyDeadlineWarnings(const QString& warnings)
                                           : NotificationManager::Level::Warning);
     }
 }
+
+// Роль сообщения раньше выражалась цветом: appendLog() принимал
+// hex-строку, и «системный зелёный» существовал ровно потому, что
+// его вписали в 59 мест. Менять сигнатуру и все 142 вызова — лишний
+// риск на ровном месте, поэтому цвет здесь читается обратно в роль,
+// а дальше по приложению ходит уже роль. Цвет выдаёт тема.
+ChatModel::Kind kindFromLogColor(const QString& color)
+{
+    if (color.compare(QLatin1String(Theme::LogColors::error),
+                      Qt::CaseInsensitive) == 0) return ChatModel::Error;
+    if (color.compare(QLatin1String(Theme::LogColors::system),
+                      Qt::CaseInsensitive) == 0) return ChatModel::System;
+    if (color.compare(QLatin1String(Theme::LogColors::user),
+                      Qt::CaseInsensitive) == 0) return ChatModel::User;
+    return ChatModel::Jarvis;
+}
 }
 
 // ============================================================
 // Конструктор
 // ============================================================
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(Jarvis* core, ActionRegistry* actions, QWidget* parent)
     : QMainWindow(parent)
+    , m_jarvis(core)
+    , m_actions(actions)
 {
+    Q_ASSERT_X(m_jarvis,  "MainWindow", "core must not be null");
+    Q_ASSERT_X(m_actions, "MainWindow", "action registry must not be null");
+
     setAcceptDrops(true);
 
     // Загружаем язык из настроек (для UI-строк)
@@ -145,11 +198,28 @@ MainWindow::MainWindow(QWidget* parent)
     gUiLanguage() = english ? UiLanguage::English : UiLanguage::Russian;
     // Дефолт — русский, пока пользователь явно не переключит язык в настройках.
 
-    m_jarvis = new Jarvis(this);
+    // Модель ленты создаётся ДО buildUI() и до первых appendLog():
+    // приветственные сообщения пишутся уже в конструкторе.
+    m_chat    = new ChatModel(this);
+    m_chatCtl = new ChatController(this);
+    m_chatCtl->setEnglish(english);
+    m_noticeCtl   = new NoticeController(this);
+    m_attachModel = new AttachmentModel(this);
+
+    // Ядро уже создано в main() — здесь только досылаем ему язык,
+    // выбранный пользователем: до этого момента оно живёт с русским
+    // по умолчанию (см. jarvis.h, m_uiEnglish).
     m_jarvis->setUiLanguage(english);
     CuriosityEngine::instance().setUiEnglish(english);
 
-    m_audioManager = new AudioManager(this);
+    // Приветственному экрану нужен собранный Jarvis: он читает
+    // индексатор проекта и клиента Claude.
+    m_welcomeCtl = new WelcomeController(m_jarvis, this);
+    m_visualCtl  = new VisualInsightsController(this);
+
+    // Звуки интерфейса и режим «можно ли говорить» — тоже ядра: решение
+    // молчать должно действовать и когда окно закрыто.
+    m_audioManager = m_jarvis->audio();
 
     // Non-blocking: scans models/tts for Piper voices and falls back
     // to SAPI silently if piper.exe or no models are found.
@@ -206,6 +276,17 @@ MainWindow::MainWindow(QWidget* parent)
                 appendLog(QStringLiteral("J.A.R.V.I.S."), message, "#66FCF1");
             });
 
+    // Фоновый советник по проекту: применённые сам правки видно в логе —
+    // молча менять файлы пользователя нельзя, даже если правка мелкая.
+    connect(m_jarvis, &Jarvis::advisorMessage,
+            this, [this](const QString& message) {
+                appendLog(Str::logJarvis(), message, Theme::LogColors::system);
+                NotificationManager::instance().showNotification(
+                    IS_EN ? QStringLiteral("Project advisor")
+                          : QStringLiteral("Советник по проекту"),
+                    message);
+            });
+
     // CuriosityEngine::questionPosted is now handled entirely via the
     // NotificationManager::askQuestion toast wired up further below
     // (right after the file-operation notifications), which replaced the
@@ -221,6 +302,13 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_jarvis->claudeApi(), &ClaudeApi::requestFinished,
             this, [this]() { setThinkingState(false); });
     // Ollama: thinking state управляется через asyncResponseReady/asyncResponseError
+
+    setupAgentUi();
+
+    // Реестр создан в main() и переживёт окно; здесь его наполняют.
+    // Модель для QML — уже окна: она умирает вместе с ним.
+    m_actionModel = new ActionModel(m_actions, this);
+    registerAppActions();
 
     auto* updater = m_jarvis->autoUpdater();
     connect(updater, &AutoUpdater::updateAvailable,
@@ -239,15 +327,15 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(updater, &AutoUpdater::downloadProgress,
             this, [this](int percent) {
-        m_status->setText(Str::statusDownload().arg(percent));
-        if (m_updateProgress) {
-            m_updateProgress->setValue(percent);
-            m_updateProgress->setVisible(true);
+        m_chatCtl->setStatusText(Str::statusDownload().arg(percent));
+        if (m_noticeCtl) {
+            m_noticeCtl->setUpdateBusy(true);
+            m_noticeCtl->setUpdateProgress(percent);
         }
     });
     connect(updater, &AutoUpdater::downloadFinished,
             this, [this](const QString& path) {
-        m_updateProgress->setVisible(false);
+        if (m_noticeCtl) m_noticeCtl->setUpdateBusy(false);
 
         NotificationManager::instance().showNotification(
             QStringLiteral("System Update"),
@@ -256,35 +344,28 @@ MainWindow::MainWindow(QWidget* parent)
                   : QStringLiteral("Обновление v%1 успешно загружено")
                         .arg(m_jarvis->autoUpdater()->pendingVersion()));
 
-        m_updateBtn->setText(IS_EN ? QStringLiteral("Open Folder")
-                                   : QStringLiteral("Открыть папку"));
-        m_updateBtn->setVisible(true);
-        disconnect(m_updateBtn, nullptr, nullptr, nullptr);
-        connect(m_updateBtn, &QPushButton::clicked, this, [this, path]() {
-            QDesktopServices::openUrl(
-                QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
-        });
+        // Кнопка не переписывается на лету (setText + disconnect всех
+        // обработчиков): меняется только подпись, а куда вести —
+        // решает обработчик по m_downloadedUpdatePath.
+        m_downloadedUpdatePath = path;
+        if (m_noticeCtl) {
+            m_noticeCtl->setUpdateActionLabel(IS_EN ? QStringLiteral("Open Folder")
+                                                    : QStringLiteral("Открыть папку"));
+        }
+
+        // Заметки к релизу идут обычным сообщением ленты. Раньше это
+        // была отдельная HTML-карточка, которую дописывали прямо в
+        // QTextDocument мимо appendLog() — единственное сообщение в
+        // приложении со своей вёрсткой.
+        QString text = (IS_EN ? QStringLiteral("Update v%1 downloaded.\nSaved to: %2")
+                              : QStringLiteral("Обновление v%1 загружено.\nСохранено в: %2"))
+                           .arg(m_jarvis->autoUpdater()->pendingVersion(), path);
 
         const QString notes = m_jarvis->autoUpdater()->pendingNotes();
-        const auto& tc = ThemeManager::colors(m_themeIndex);
-        QString card = QStringLiteral(
-            "<div style='background:%1; border:1px solid %2; border-radius:10px; "
-            "padding:12px 16px; margin:4px 0;'>"
-            "<b style='color:%3;'>Update v%4 downloaded</b><br>"
-            "<span style='color:%5; font-size:12px;'>Saved to: %6</span>"
-        ).arg(tc.cardBg, tc.cardBorder, tc.system,
-              m_jarvis->autoUpdater()->pendingVersion(),
-              tc.timestamp, path);
-        if (!notes.isEmpty()) {
-            QString safeNotes = notes.toHtmlEscaped()
-                                     .replace(QStringLiteral("\n"), QStringLiteral("<br>"));
-            card += QStringLiteral("<hr style='border:none; border-top:1px solid %1; margin:8px 0;'>"
-                                   "<span style='color:%2; font-size:12px;'>%3</span>")
-                        .arg(tc.cardBorder, tc.timestamp, safeNotes);
-        }
-        card += QStringLiteral("</div>");
-        m_log->append(card);
-        m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
+        if (!notes.isEmpty())
+            text += QStringLiteral("\n\n") + notes;
+
+        appendLog(Str::logSystem(), text, Theme::LogColors::system);
     });
     connect(updater, &AutoUpdater::updateError,
             this, [this](const QString& error) {
@@ -303,8 +384,8 @@ MainWindow::MainWindow(QWidget* parent)
     // leaving the user to go hunting for where the file landed.
     connect(m_jarvis->codeActions(), &CodeActions::kicadSchematicCreated,
             this, [this](const QString& path) {
-        if (m_visualInsights)
-            m_visualInsights->showFileRef(path, QFileInfo(path).fileName());
+        if (m_visualCtl)
+            m_visualCtl->showFileRef(path, QFileInfo(path).fileName());
 
         const QString folderLine = IS_EN
             ? QStringLiteral("📁 Saved to: %1").arg(path)
@@ -384,41 +465,9 @@ MainWindow::MainWindow(QWidget* parent)
         m_themeIndex = 0;
     applyThemeStyleSheet(m_themeIndex);
 
-    // ── Системный трей ────────────────────────────────────
-    QIcon trayIcon;
-    if (!QIcon(QStringLiteral(":/jarvis.ico")).isNull())
-        trayIcon = QIcon(QStringLiteral(":/jarvis.ico"));
-    else if (!QIcon(QStringLiteral(":/jarvis.png")).isNull())
-        trayIcon = QIcon(QStringLiteral(":/jarvis.png"));
-    else
-        trayIcon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);
-
-    m_trayIcon = new QSystemTrayIcon(trayIcon, this);
-    m_trayIcon->setToolTip(QStringLiteral("J.A.R.V.I.S. v")
-                           + QCoreApplication::applicationVersion());
-
-    auto* trayMenu = new QMenu(this);
-    auto* actShow = trayMenu->addAction(
-        IS_EN ? QStringLiteral("Show / Hide") : QStringLiteral("Показать / Скрыть"));
-    connect(actShow, &QAction::triggered, this, [this]() {
-        if (isVisible()) { hide(); }
-        else             { show(); raise(); activateWindow(); }
-    });
-    trayMenu->addSeparator();
-    auto* actQuit = trayMenu->addAction(
-        IS_EN ? QStringLiteral("Quit") : QStringLiteral("Выход"));
-    connect(actQuit, &QAction::triggered, qApp, &QApplication::quit);
-
-    m_trayIcon->setContextMenu(trayMenu);
-    m_trayIcon->show();
-
-    connect(m_trayIcon, &QSystemTrayIcon::activated, this,
-            [this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
-            if (isVisible()) { hide(); }
-            else             { show(); raise(); activateWindow(); }
-        }
-    });
+    // Трея здесь больше нет: он живёт рядом с окном и говорит с ядром
+    // напрямую (см. tray_presence.h, создаётся в main.cpp). Окно узнаёт
+    // о нём ровно одно — есть ли куда прятаться при закрытии.
 
     // Dynamic welcome dashboard — replaces all hardcoded greeting strings
     showWelcomeDashboard();
@@ -427,7 +476,7 @@ MainWindow::MainWindow(QWidget* parent)
     if (m_jarvis->projectIndexer()->fileCount() > 0)
         m_jarvis->syncProjectInfoToMemory();
 
-    m_input->setFocus();
+    m_chatCtl->requestFocus();
 
     // ── Самообучение ──────────────────────────────────────
     m_learnedCmds = new LearnedCommands(this);
@@ -441,7 +490,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_appLearner = new ScreenshotLearner(this);
     connect(m_appLearner, &ScreenshotLearner::suggestionReady,
             this, [this](const AppSuggestion& s) {
-        if (s.confidence >= 0.65f && m_suggestionBar) {
+        if (s.confidence >= 0.65f && m_noticeCtl) {
             QString desc = IS_EN
                 ? QStringLiteral("Usually at this time you use %1. Open it?").arg(s.appName)
                 : QStringLiteral("Обычно в это время вы используете %1. Открыть?").arg(s.appName);
@@ -465,20 +514,11 @@ MainWindow::MainWindow(QWidget* parent)
         appendLog(Str::logJarvis(), desc, Theme::LogColors::system);
     });
 
-    m_pulseTimer = new QTimer(this);
-    connect(m_pulseTimer, &QTimer::timeout, this, [this]() {
-        m_pulse = !m_pulse;
-        if (m_jarvis->isSpeaking()) {
-            m_dot->setStyleSheet(m_pulse
-                ? QStringLiteral("color: #45A29E; font-size: 20px;")
-                : QStringLiteral("color: rgba(69,162,158,0.35); font-size: 16px;"));
-        } else if (!m_input->isEnabled()) {
-            m_dot->setStyleSheet(m_pulse
-                ? QStringLiteral("color: #66FCF1; font-size: 20px;")
-                : QStringLiteral("color: rgba(102,252,241,0.30); font-size: 16px;"));
-        }
-    });
-    m_pulseTimer->start(400);
+    // Мигание точки состояния больше не крутится здесь. Раньше QTimer
+    // на 400 мс дважды в секунду подменял таблицу стилей QLabel — то
+    // есть анимация шла мимо всякой системы анимаций и не знала про
+    // «уменьшить движение». Теперь пульсирует JarvisStatusDot, и он
+    // этот флаг уважает.
 
     m_jarvis->autoUpdater()->checkForUpdates(true);
 
@@ -557,15 +597,15 @@ void MainWindow::applyLanguage(bool english)
         : QStringLiteral("J.A.R.V.I.S. — Персональный ассистент v%1").arg(QStringLiteral(JARVIS_VERSION)));
 
     // ── Поле ввода ───────────────────────────────────────────
-    m_input->setPlaceholderText(Str::inputPlaceholder());
+    m_chatCtl->setPlaceholder(Str::inputPlaceholder());
 
     // ── Статус-бар ───────────────────────────────────────────
-    m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+    m_chatCtl->setStatusText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
 
     // ── Кнопка микрофона ─────────────────────────────────────
-    if (m_micBtn) {
+    if (m_chatCtl) {
         if (!m_voiceActive) {
-            m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)")
+            m_chatCtl->setMicTooltip(IS_EN ? QStringLiteral("Voice input (Vosk)")
                                        : QStringLiteral("Голосовой ввод (Vosk)"));
         }
     }
@@ -577,28 +617,10 @@ void MainWindow::applyLanguage(bool english)
             : QStringLiteral("Лайкнуть ответ — сохранить для обучения ИИ"));
     }
 
-    // ── Кнопка прикрепления ──────────────────────────────────
-    if (m_attachBtn) {
-        m_attachBtn->setToolTip(IS_EN
-            ? QStringLiteral("Attach files (Ctrl+O)")
-            : QStringLiteral("Прикрепить файлы (Ctrl+O)"));
-    }
 
     // ── Панель обновления ────────────────────────────────────
-    if (m_updateBtn) {
-        m_updateBtn->setText(IS_EN ? QStringLiteral("Update")
-                                   : QStringLiteral("Обновить"));
-    }
-    if (m_updateDismiss) {
-        m_updateDismiss->setToolTip(IS_EN ? QStringLiteral("Dismiss")
-                                          : QStringLiteral("Скрыть"));
-    }
 
     // ── Панель предложений ───────────────────────────────────
-    if (m_suggestionBtn) {
-        m_suggestionBtn->setText(IS_EN ? QStringLiteral("Yes")
-                                       : QStringLiteral("Да"));
-    }
 
     // ── Лог: сообщение о смене языка ─────────────────────────
     appendLog(Str::logSystem(),
@@ -677,2050 +699,281 @@ void MainWindow::buildMenuBar()
     auto* menuBar = this->menuBar();
 
     // --- Файл ---
+    // Пункты — из ActionRegistry (см. registerAppActions): один список
+    // на меню, поиск Ctrl+K и модель для QML.
     auto* fileMenu = menuBar->addMenu(Str::menuFile());
-
-    auto* actAttach = fileMenu->addAction(Str::menuAttach());
-    actAttach->setShortcut(QKeySequence(QStringLiteral("Ctrl+O")));
-    connect(actAttach, &QAction::triggered, this, &MainWindow::onAttachClicked);
-
-    auto* actClearAttach = fileMenu->addAction(Str::menuClearAttach());
-    connect(actClearAttach, &QAction::triggered, this, [this]() {
-        m_jarvis->attachments()->clear();
+    connect(fileMenu, &QMenu::aboutToShow, this, [this, fileMenu]() {
+        fileMenu->clear();
+        m_actions->populateMenu(fileMenu, QStringLiteral("file"));
     });
 
-    fileMenu->addSeparator();
-
-    auto* actClear = fileMenu->addAction(Str::menuClearLog());
-    connect(actClear, &QAction::triggered, this, [this]() { m_log->clear(); });
-
-    fileMenu->addSeparator();
-
-    auto* actExit = fileMenu->addAction(Str::menuExit());
-    connect(actExit, &QAction::triggered, this, &QWidget::close);
 
     // --- Пользователь (multi-user) ---
-    // Previously four separate flows (Switch User / My Profile / Edit
-    // Profile / Delete User — three different QInputDialog pickers plus a
-    // QMessageBox text dump) — merged into one QML dashboard.
     {
         auto* userMenu = menuBar->addMenu(
             IS_EN ? QStringLiteral("👤 User") : QStringLiteral("👤 Пользователь"));
-
-        auto* actUserCenter = userMenu->addAction(
-            IS_EN ? QStringLiteral("User Center...") : QStringLiteral("Управление пользователями..."));
-        connect(actUserCenter, &QAction::triggered, this, [this]() {
-            UserCenterDialog dlg(m_jarvis, IS_EN, this);
-            connect(&dlg, &UserCenterDialog::userSwitched, this, [this]() {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    IS_EN ? QStringLiteral("User profile updated.")
-                          : QStringLiteral("Профиль пользователя обновлён."),
-                    Theme::LogColors::system);
-            });
-            dlg.exec();
+        connect(userMenu, &QMenu::aboutToShow, this, [this, userMenu]() {
+            userMenu->clear();
+            m_actions->populateMenu(userMenu, QStringLiteral("user"));
         });
     }
+
 
     // --- Models & Intelligence ---
     auto* settingsMenu = menuBar->addMenu(
         IS_EN ? QStringLiteral("🤖 Models && Intelligence")
               : QStringLiteral("🤖 Модели и ИИ"));
-
-    auto* actApiKey = settingsMenu->addAction(Str::menuApiKey());
-    connect(actApiKey, &QAction::triggered, this, [this]() {
-        bool ok;
-        QString key = QInputDialog::getText(this,
-            Str::dlgApiKeyTitle(), Str::dlgApiKeyLabel(),
-            QLineEdit::Password, QString(), &ok);
-        if (ok && !key.trimmed().isEmpty()) {
-            m_jarvis->claudeApi()->setApiKey(key.trimmed());
-            appendLog(Str::logSystem(), Str::apiKeySaved(), Theme::LogColors::system);
-        }
-    });
-
-    // ── Модульные скиллы (лего-блоки знаний) ─────────────────
-    settingsMenu->addSeparator();
-    auto* actSkills = settingsMenu->addAction(
-        IS_EN ? QStringLiteral("🧩 JARVIS Skills...")
-              : QStringLiteral("🧩 Скиллы JARVIS..."));
-    connect(actSkills, &QAction::triggered, this, [this]() {
-        SkillsDialog dlg(m_jarvis->skillManager(), this);
-        dlg.exec();
-    });
-
-    // ── Режимы работы (профили поведения) ───────────────────
-    auto* actModes = settingsMenu->addAction(
-        IS_EN ? QStringLiteral("🎛 Work Modes...")
-              : QStringLiteral("🎛 Режимы работы..."));
-    connect(actModes, &QAction::triggered, this, [this]() {
-        ModesDialog dlg(m_jarvis, IS_EN, this);
-        dlg.exec();
-    });
-
-    // ── Управление голосовыми моделями ──────────────────────
-    settingsMenu->addSeparator();
-    auto* actVoiceModels = settingsMenu->addAction(
-        IS_EN ? QStringLiteral("🎤 Voice Models...")
-              : QStringLiteral("🎤 Голосовые модели..."));
-    connect(actVoiceModels, &QAction::triggered, this, [this]() {
-        const bool isEn = IS_EN;
-
-        // Стековый QDialog — не нужен ни new ни WA_DeleteOnClose, деструктор сам всё чистит
-        QDialog dlg(this);
-        dlg.setWindowTitle(isEn ? QStringLiteral("JARVIS — Voice Models")
-                                : QStringLiteral("JARVIS — Голосовые модели"));
-        dlg.setMinimumSize(640, 520);
-        dlg.setStyleSheet(QStringLiteral(
-            "QDialog { background: #0a0a1a; color: #ecf0f1; }"
-            "QPushButton { background: #0f2438; color: #00d4ff; "
-            "border: 1px solid #1a5070; border-radius: 4px; padding: 5px 18px; }"
-            "QPushButton:hover { background: #1a3a5c; }"));
-
-        auto* layout = new QVBoxLayout(&dlg);
-        layout->setContentsMargins(16, 16, 16, 12);
-
-        // manager — parent = &dlg, удаляется вместе с диалогом
-        auto* manager = new VoskModelManagerWidget(m_voiceInput, &dlg);
-        connect(manager, &VoskModelManagerWidget::modelsChanged, this, [this, isEn]() {
-            appendLog(Str::logSystem(),
-                isEn ? QStringLiteral("🔄 Voice models updated — reloading...")
-                     : QStringLiteral("🔄 Модели обновлены — перезагрузка..."),
-                Theme::LogColors::system);
-        });
-
-        auto* scrollArea = new QScrollArea(&dlg);
-        scrollArea->setWidgetResizable(true);
-        scrollArea->setWidget(manager);
-        scrollArea->setStyleSheet(QStringLiteral(
-            "QScrollArea { border: none; background: transparent; }"
-            "QScrollBar:vertical { background: #111; width: 6px; }"
-            "QScrollBar::handle:vertical { background: #333; border-radius: 3px; }"));
-        layout->addWidget(scrollArea, 1);
-
-        auto* btnClose = new QPushButton(
-            isEn ? QStringLiteral("Close") : QStringLiteral("Закрыть"), &dlg);
-        btnClose->setFixedWidth(100);
-        connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::accept);
-        auto* btnRow = new QHBoxLayout();
-        btnRow->addStretch(); btnRow->addWidget(btnClose); btnRow->addStretch();
-        layout->addLayout(btnRow);
-
-        dlg.exec();
-        // После exec() dlg деструктор удалит manager, который сам отключит свои сигналы
-    });
-    settingsMenu->addSeparator();
-
-    auto* actOllamaModel = settingsMenu->addAction(
-        IS_EN ? QStringLiteral("Ollama model...") : QStringLiteral("Модель Ollama..."));
-    connect(actOllamaModel, &QAction::triggered, this, [this]() {
-        bool ok;
-        QString model = QInputDialog::getText(this,
-            QStringLiteral("Ollama"),
-            IS_EN ? QStringLiteral(
-                "Model name:\n\n"
-                "Fast (recommended):\n"
-                "  qwen2.5:3b      — very fast, good quality\n"
-                "  phi3:mini       — fast, Microsoft model\n"
-                "  gemma2:2b       — fast Google model\n\n"
-                "Quality:\n"
-                "  llama3.2:3b     — Meta, good balance\n"
-                "  mistral:7b      — good for code\n"
-                "  qwen2.5:7b      — best quality\n\n"
-                "Install: ollama pull qwen2.5:3b")
-                  : QStringLiteral(
-                "Имя модели:\n\n"
-                "Быстрые (рекомендую):\n"
-                "  qwen2.5:3b      — очень быстро, хорошее качество\n"
-                "  phi3:mini       — быстро, модель Microsoft\n"
-                "  gemma2:2b       — быстро, модель Google\n\n"
-                "Качественные:\n"
-                "  llama3.2:3b     — Meta, хороший баланс\n"
-                "  mistral:7b      — хороша для кода\n"
-                "  qwen2.5:7b      — лучшее качество\n\n"
-                "Установить: ollama pull qwen2.5:3b"),
-            QLineEdit::Normal,
-            m_jarvis->ollamaApi()->model(), &ok);
-        if (ok && !model.trimmed().isEmpty()) {
-            m_jarvis->ollamaApi()->setModel(model.trimmed());
-            appendLog(Str::logSystem(),
-                      IS_EN ? QStringLiteral("Ollama model set: ") + model.trimmed()
-                            : QStringLiteral("Модель Ollama: ") + model.trimmed(),
-                      Theme::LogColors::system);
-        }
-    });
-
-    settingsMenu->addSeparator();
-
-    auto* actAgent = settingsMenu->addAction(Str::menuAgentMode());
-    actAgent->setCheckable(true);
-    actAgent->setChecked(false);
-    connect(actAgent, &QAction::toggled, this, [this, actAgent](bool checked) {
-        if (checked) {
-            // Пингуем Ollama перед включением
-            appendLog(Str::logSystem(),
-                      IS_EN ? QStringLiteral("Checking Ollama availability...")
-                            : QStringLiteral("Проверяю доступность Ollama..."),
-                      Theme::LogColors::system);
-
-            m_jarvis->ollamaApi()->checkAvailability(
-                [this, actAgent](bool available, const QString& info) {
-                    if (available) {
-                        m_jarvis->setMultiAgentMode(true);
-                        m_agentLabel->setVisible(true);
-                        m_agentLabel->setText(QStringLiteral("🦙 Ollama"));
-                        appendLog(Str::logJarvis(),
-                                  (IS_EN ? QStringLiteral("Agent mode ON. Code → Claude, Chat → Ollama (")
-                                         : QStringLiteral("Агент мод ВКЛ. Код → Claude, Беседа → Ollama ("))
-                                  + m_jarvis->ollamaApi()->model()
-                                  + QStringLiteral(")\n") + info,
-                                  Theme::LogColors::system);
-                    } else {
-                        // Ollama недоступна — откатываем чекбокс, режим не включаем
-                        actAgent->setChecked(false);
-                        appendLog(Str::logError(),
-                                  IS_EN ? QStringLiteral(
-                                      "Ollama is not running.\n"
-                                      "Start it with: ollama serve\n"
-                                      "Or install from: https://ollama.com\n"
-                                      "Agent mode stays OFF — Claude handles everything.")
-                                        : QStringLiteral(
-                                      "Ollama не запущена.\n"
-                                      "Запусти её: ollama serve\n"
-                                      "Или скачай с: https://ollama.com\n"
-                                      "Агент мод ВЫКЛ — всё обрабатывает Claude."),
-                                  Theme::LogColors::error);
-                    }
-                });
-        } else {
-            m_jarvis->setMultiAgentMode(false);
-            m_agentLabel->setVisible(false);
-            appendLog(Str::logJarvis(), Str::agentModeOff(), Theme::LogColors::system);
-        }
-    });
-
-    // Смена роли перенесена в «Редактировать профиль…» (User menu) —
-    // отдельный пункт "Switch Role" дублировал тот же выбор роли и
-    // расходился с ним по значению (scenario vs currentRole).
-
-    settingsMenu->addSeparator();
-
-    auto* langMenu = settingsMenu->addMenu(Str::menuLanguage());
-
-    // QActionGroup даёт radio-поведение — одно из двух всегда выбрано
-    auto* langGroup = new QActionGroup(langMenu);
-    langGroup->setExclusive(true);
-
-    auto* actLangRu = langMenu->addAction(Str::menuLangRu());
-    actLangRu->setCheckable(true);
-    actLangRu->setChecked(gUiLanguage() == UiLanguage::Russian);
-    langGroup->addAction(actLangRu);
-    connect(actLangRu, &QAction::triggered, this, [this](bool checked) {
-        if (checked) applyLanguage(false);
-    });
-
-    auto* actLangEn = langMenu->addAction(Str::menuLangEn());
-    actLangEn->setCheckable(true);
-    actLangEn->setChecked(gUiLanguage() == UiLanguage::English);
-    langGroup->addAction(actLangEn);
-    connect(actLangEn, &QAction::triggered, this, [this](bool checked) {
-        if (checked) applyLanguage(true);
+    connect(settingsMenu, &QMenu::aboutToShow, this, [this, settingsMenu]() {
+        settingsMenu->clear();
+        m_actions->populateMenu(settingsMenu, QStringLiteral("models"));
+        settingsMenu->addSeparator();
+        buildLanguageMenu(settingsMenu);
     });
 
     // --- Проект ---
     auto* projectMenu = menuBar->addMenu(Str::menuProject());
-
-    auto* actIndexProject = projectMenu->addAction(Str::menuIndexFolder());
-    connect(actIndexProject, &QAction::triggered, this, [this]() {
-        QString startDir = m_jarvis->projectIndexer()->projectRoot();
-        if (startDir.isEmpty()) startDir = QDir::homePath();
-
-        QString dir = QFileDialog::getExistingDirectory(this,
-            Str::dlgChooseFolder(), startDir, QFileDialog::ShowDirsOnly);
-        if (dir.isEmpty()) return;
-
-        appendLog(Str::logSystem(), Str::statusIndexing() + dir + QStringLiteral("..."),
-                  Theme::LogColors::system);
-
-        m_jarvis->projectIndexer()->setProjectRoot(dir);
-        m_jarvis->projectIndexer()->indexProject();
-        m_jarvis->projectIndexer()->enableFileWatcher(true);
-        m_jarvis->syncProjectInfoToMemory();
-
-        appendLog(Str::logJarvis(),
-                  Str::projIndexed() + QString::number(m_jarvis->projectIndexer()->fileCount())
-                  + Str::projSymbols() + QString::number(m_jarvis->projectIndexer()->symbolCount()),
-                  Theme::LogColors::jarvis);
+    connect(projectMenu, &QMenu::aboutToShow, this, [this, projectMenu]() {
+        projectMenu->clear();
+        m_actions->populateMenu(projectMenu, QStringLiteral("project"));
     });
 
-    auto* actReindex = projectMenu->addAction(Str::menuReindex());
-    connect(actReindex, &QAction::triggered, this, [this]() {
-        if (m_jarvis->projectIndexer()->projectRoot().isEmpty()) {
-            appendLog(Str::logSystem(), Str::projChooseFirst(), Theme::LogColors::error);
-            return;
-        }
-        m_jarvis->projectIndexer()->indexProject();
-        m_jarvis->syncProjectInfoToMemory();
-        appendLog(Str::logSystem(),
-                  Str::projReindexed() + QString::number(m_jarvis->projectIndexer()->fileCount()) + Str::projFilesCount(),
-                  Theme::LogColors::system);
+
+    // --- Панели ---
+    // Пункты не пишутся здесь по одному: они лежат в ActionRegistry
+    // (см. registerAppActions) и оттуда же попадают в поиск Ctrl+K и
+    // в ActionModel для QML. Меню пересобирается на каждый показ,
+    // потому что заголовки живые — например, счётчик непрочитанного.
+    auto* panelsMenu = menuBar->addMenu(
+        IS_EN ? QStringLiteral("▦ Panels") : QStringLiteral("▦ Панели"));
+    connect(panelsMenu, &QMenu::aboutToShow, this, [this, panelsMenu]() {
+        panelsMenu->clear();
+        m_actions->populateMenu(panelsMenu, QStringLiteral("view"));
     });
 
-    projectMenu->addSeparator();
+    // --- Профиль (режим + уровень доверия) ---
+    // Профиль и есть режим: он несёт и набор скиллов с тоном ответов,
+    // и системную часть — разрешения, уведомления, громкость. Отдельной
+    // сущности "Profile" нет намеренно, иначе их пришлось бы
+    // синхронизировать между собой.
+    auto* profileMenu = menuBar->addMenu(
+        IS_EN ? QStringLiteral("👤 Profile") : QStringLiteral("👤 Профиль"));
+    connect(profileMenu, &QMenu::aboutToShow, this, [this, profileMenu]() {
+        profileMenu->clear();
 
-    auto* actProjectInfo = projectMenu->addAction(Str::menuProjectInfo());
-    connect(actProjectInfo, &QAction::triggered, this, [this]() {
-        auto* idx = m_jarvis->projectIndexer();
-        if (idx->fileCount() == 0) {
-            appendLog(Str::logSystem(), Str::projNotIndexed(), Theme::LogColors::error);
-            return;
+        ModeManager* modes = m_jarvis->modeManager();
+        if (modes) {
+            auto* group = new QActionGroup(profileMenu);
+            group->setExclusive(true);
+
+            for (const ModeInfo& mode : modes->modes()) {
+                const QString label = (mode.icon.isEmpty() ? QString()
+                                                           : mode.icon + QChar(' '))
+                                      + mode.displayName(IS_EN);
+                QAction* act = profileMenu->addAction(label);
+                act->setCheckable(true);
+                act->setChecked(mode.id == modes->activeId());
+                act->setActionGroup(group);
+
+                QString tip = mode.description(IS_EN);
+                const QString sys = mode.system.summary(IS_EN);
+                if (!sys.isEmpty())
+                    tip += QStringLiteral("\n\n") + sys;
+                act->setToolTip(tip);
+
+                const QString id = mode.id;
+                connect(act, &QAction::triggered, this, [this, id]() {
+                    m_jarvis->modeManager()->activate(id);
+                });
+            }
+
+            profileMenu->addSeparator();
         }
 
-        QString info = Str::projInfoLabel() + idx->projectRoot()
-                     + Str::projFilesLabel() + QString::number(idx->fileCount())
-                     + Str::projSymbolsLabel() + QString::number(idx->symbolCount())
-                     + Str::projClassesLabel();
+        QAction* actModes = profileMenu->addAction(
+            IS_EN ? QStringLiteral("Configure modes…")
+                  : QStringLiteral("Настроить режимы…"));
+        connect(actModes, &QAction::triggered, this, [this]() {
+            ModesDialog dlg(m_jarvis, IS_EN, this);
+            dlg.exec();
+        });
 
-        for (const auto& cls : idx->allClasses()) {
-            info += QStringLiteral("  • ") + cls + QStringLiteral("\n");
+        profileMenu->addSeparator();
+
+        // --- Уровень доверия ---
+        // Ослабить разрешения можно только отсюда: инструмент
+        // set_permission_mode умеет лишь ужесточать, чтобы модель не
+        // могла уговорить сама себя на большее.
+        PermissionGate* gate = m_jarvis->permissions();
+        auto* permMenu = profileMenu->addMenu(
+            IS_EN ? QStringLiteral("🔐 Permissions") : QStringLiteral("🔐 Разрешения"));
+        if (gate) {
+            auto* permGroup = new QActionGroup(permMenu);
+            permGroup->setExclusive(true);
+
+            struct Entry { PermissionMode mode; const char* ru; const char* en; };
+            static const Entry kEntries[] = {
+                { PermissionMode::Paranoid, "Спрашивать про всё",           "Ask about everything" },
+                { PermissionMode::Balanced, "Спрашивать перед изменениями", "Ask before changes" },
+                { PermissionMode::Trusted,  "Только про необратимое",       "Only before destructive" },
+            };
+
+            for (const Entry& e : kEntries) {
+                QAction* act = permMenu->addAction(
+                    IS_EN ? QString::fromUtf8(e.en) : QString::fromUtf8(e.ru));
+                act->setCheckable(true);
+                act->setChecked(gate->mode() == e.mode);
+                act->setActionGroup(permGroup);
+                act->setToolTip(permissionModeDescription(e.mode, IS_EN));
+
+                const PermissionMode target = e.mode;
+                connect(act, &QAction::triggered, this, [this, target]() {
+                    m_jarvis->permissions()->setMode(target);
+                    appendLog(Str::logJarvis(),
+                              (IS_EN ? QStringLiteral("Permission level: %1 — %2")
+                                     : QStringLiteral("Уровень доверия: %1 — %2"))
+                                  .arg(permissionModeName(target),
+                                       permissionModeDescription(target, IS_EN)),
+                              Theme::LogColors::system);
+                });
+            }
+
+            permMenu->addSeparator();
+
+            const QStringList grants = gate->sessionGrants();
+            QAction* actReset = permMenu->addAction(
+                (IS_EN ? QStringLiteral("Forget session approvals (%1)")
+                       : QStringLiteral("Забыть разрешения сессии (%1)"))
+                    .arg(grants.size()));
+            actReset->setEnabled(!grants.isEmpty());
+            actReset->setToolTip(grants.join(QStringLiteral(", ")));
+            connect(actReset, &QAction::triggered, this, [this]() {
+                m_jarvis->permissions()->clearSessionGrants();
+                appendLog(Str::logJarvis(),
+                          IS_EN ? QStringLiteral("Session approvals cleared.")
+                                : QStringLiteral("Разрешения, выданные до перезапуска, сброшены."),
+                          Theme::LogColors::system);
+            });
         }
-        appendLog(Str::logJarvis(), info.trimmed(), Theme::LogColors::jarvis);
+    });
+
+    // --- Сценарии (workflows) ---
+    // Собирается заново при каждом открытии: список меняется из чата
+    // (save_workflow), и статическое меню устаревало бы молча.
+    auto* wfMenu = menuBar->addMenu(
+        IS_EN ? QStringLiteral("⚙ Workflows") : QStringLiteral("⚙ Сценарии"));
+    connect(wfMenu, &QMenu::aboutToShow, this, [this, wfMenu]() {
+        wfMenu->clear();
+
+        WorkflowManager* wm = m_jarvis->workflows();
+        if (!wm || wm->count() == 0) {
+            QAction* empty = wfMenu->addAction(
+                IS_EN ? QStringLiteral("No workflows yet")
+                      : QStringLiteral("Сценариев пока нет"));
+            empty->setEnabled(false);
+        } else {
+            for (const Workflow& wf : wm->all()) {
+                const QString label = (wf.icon.isEmpty() ? QStringLiteral("▶") : wf.icon)
+                                      + QChar(' ') + wf.name;
+                QAction* act = wfMenu->addAction(label);
+                act->setToolTip(wf.description);
+                const QString name = wf.name;
+                connect(act, &QAction::triggered, this, [this, name]() {
+                    m_jarvis->workflows()->run(name);
+                });
+            }
+        }
+
+        wfMenu->addSeparator();
+        QAction* hint = wfMenu->addAction(
+            IS_EN ? QStringLiteral("＋ Create one by asking…")
+                  : QStringLiteral("＋ Создать словами…"));
+        connect(hint, &QAction::triggered, this, [this]() {
+            m_chatCtl->setDraft(
+                IS_EN ? QStringLiteral("remember this as a workflow called Gaming: "
+                                       "launch Steam, launch Discord, set volume to 70")
+                      : QStringLiteral("запомни как сценарий Gaming: запусти Steam, "
+                                       "запусти Discord, поставь громкость 70"));
+        });
     });
 
     // --- AI Training (fine-tuning датасет) ---
     auto* trainMenu = menuBar->addMenu(
         IS_EN ? QStringLiteral("🧠 Training") : QStringLiteral("🧠 Обучение"));
-
-    // --- Training Center (QML: overview, app usage, local training,
-    // history, synapse graph) — ONE menu entry, not one per tab. It used
-    // to be four separate actions (Dataset Statistics / Train Local Model /
-    // App Usage Patterns / Search chat history) that each opened the exact
-    // same dialog on a different initialTab — pure repetition, since the
-    // dialog's own tab bar already reaches every one of them.
-    auto* actTrainingCenter = trainMenu->addAction(
-        IS_EN ? QStringLiteral("🧠 Training Center...")
-              : QStringLiteral("🧠 Центр обучения..."));
-    connect(actTrainingCenter, &QAction::triggered, this, [this]() {
-        TrainingCenterDialog dlg(m_jarvis->currentUserId(), m_passiveListener, m_appLearner, this, 0);
-        dlg.exec();
+    connect(trainMenu, &QMenu::aboutToShow, this, [this, trainMenu]() {
+        trainMenu->clear();
+        m_actions->populateMenu(trainMenu, QStringLiteral("training"));
     });
 
-    // --- Vision Center: кого узнаю, что вижу ---
-    // Стоит рядом с Центром обучения намеренно: распознавание лиц — это
-    // такое же обучение, просто через камеру, и раньше единственным входом
-    // в него были настройки «охранной камеры», где его никто не искал.
-    auto* actVisionCenter = trainMenu->addAction(
-        IS_EN ? QStringLiteral("👁 Vision Center...")
-              : QStringLiteral("👁 Центр зрения..."));
-    connect(actVisionCenter, &QAction::triggered, this, [this]() {
-        VisionCenterDialog dlg(m_jarvis->securityCamera(), this, 0);
-        dlg.exec();
-    });
 
-    trainMenu->addSeparator();
-
-    // --- Экспорт (быстрый доступ без открытия диалога) ---
-    auto* actExport = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📤 Export .jsonl for Fine-Tuning...")
-              : QStringLiteral("📤 Экспорт .jsonl для обучения..."));
-    connect(actExport, &QAction::triggered, this, &MainWindow::onExportTrainingData);
-
-    trainMenu->addSeparator();
-
-    // --- Скриншот с AI описанием ---
-    auto* actScreenshot = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📸 Screenshot + AI Description")
-              : QStringLiteral("📸 Скриншот + описание AI"));
-    connect(actScreenshot, &QAction::triggered, this, [this]() {
-        if (!m_screenAgent) return;
-
-        const QString apiKey = m_jarvis->claudeApi()->apiKey();
-        if (apiKey.isEmpty()) {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("📸 Need a Claude API key for screenshot analysis")
-                      : QStringLiteral("📸 Нужен ключ Claude API для анализа скриншота"),
-                Theme::LogColors::error);
-            return;
-        }
-
-        appendLog(Str::logSystem(),
-            IS_EN ? QStringLiteral("📸 Taking screenshot and analyzing...")
-                  : QStringLiteral("📸 Делаю скриншот и анализирую..."),
-            Theme::LogColors::system);
-
-        m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
-            if (desc.isEmpty()) return;
-
-            appendLog(Str::logJarvis(),
-                IS_EN ? QStringLiteral("📸 Screen: ") + desc
-                      : QStringLiteral("📸 Экран: ") + desc,
-                Theme::LogColors::jarvis);
-
-            // Сохраняем в training_logs как пара (контекст экрана → описание)
-            if (m_passiveListener) {
-                m_passiveListener->addVoiceCommandPair(
-                    QStringLiteral("[screenshot] what do you see on the screen?"),
-                    desc,
-                    QStringLiteral("en"));
-            }
-        });
-    });
-
-    // Автоскриншот каждые N минут (из настроек)
-    auto* actAutoScreen = trainMenu->addAction(
-        IS_EN ? QStringLiteral("⏱️ Auto-screenshot: OFF")
-              : QStringLiteral("⏱️ Авто-скриншот: ВЫКЛ"));
-    actAutoScreen->setCheckable(true);
-    actAutoScreen->setChecked(false);
-    connect(actAutoScreen, &QAction::triggered, this, [this, actAutoScreen](bool checked) {
-        if (checked) {
-            // Таймер каждые 5 минут
-            if (!m_screenshotTimer) {
-                m_screenshotTimer = new QTimer(this);
-                m_screenshotTimer->setInterval(5 * 60 * 1000);
-                connect(m_screenshotTimer, &QTimer::timeout, this, [this]() {
-                    if (!m_screenAgent) return;
-                    const QString apiKey = m_jarvis->claudeApi()->apiKey();
-                    if (apiKey.isEmpty()) return;
-                    m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
-                        if (desc.isEmpty() || !m_passiveListener) return;
-                        m_passiveListener->addVoiceCommandPair(
-                            QStringLiteral("[auto-screenshot] describe current screen context"),
-                            desc, QStringLiteral("en"));
-                        qDebug() << "[Training] Auto-screenshot saved to dataset";
-                    });
-                });
-            }
-            m_screenshotTimer->start();
-            actAutoScreen->setText(
-                IS_EN ? QStringLiteral("⏱️ Auto-screenshot: ON (5 min)")
-                      : QStringLiteral("⏱️ Авто-скриншот: ВКЛ (5 мин)"));
-        } else {
-            if (m_screenshotTimer) m_screenshotTimer->stop();
-            actAutoScreen->setText(
-                IS_EN ? QStringLiteral("⏱️ Auto-screenshot: OFF")
-                      : QStringLiteral("⏱️ Авто-скриншот: ВЫКЛ"));
-        }
-    });
-
-    trainMenu->addSeparator();
-
-    // --- Пассивная запись (тумблер) ---
-    m_passiveAction = trainMenu->addAction(
-        IS_EN ? QStringLiteral("🎙️ Passive Recording: OFF")
-              : QStringLiteral("🎙️ Пассивная запись: ВЫКЛ"));
-    m_passiveAction->setCheckable(true);
-    m_passiveAction->setChecked(false);
-    connect(m_passiveAction, &QAction::triggered, this, [this](bool checked) {
-        if (!m_passiveListener) return;
-        if (checked) {
-            m_passiveListener->startListening();
-            m_passiveAction->setText(
-                IS_EN ? QStringLiteral("🎙️ Passive Recording: ON")
-                      : QStringLiteral("🎙️ Пассивная запись: ВКЛ"));
-        } else {
-            m_passiveListener->stopListening();
-            m_passiveAction->setText(
-                IS_EN ? QStringLiteral("🎙️ Passive Recording: OFF")
-                      : QStringLiteral("🎙️ Пассивная запись: ВЫКЛ"));
-        }
-    });
-
-    trainMenu->addSeparator();
-
-    // --- Папка датасета ---
-    auto* actSetDatasetPath = trainMenu->addAction(
-        IS_EN ? QStringLiteral("📁 Dataset folder...")
-              : QStringLiteral("📁 Папка датасета..."));
-    connect(actSetDatasetPath, &QAction::triggered, this, [this]() {
-        QString current = DatabaseManager::instance().getConfig(
-            QStringLiteral("voice_dataset_path"),
-            JarvisPaths::subPath(QStringLiteral("voice_dataset"))).toString();
-
-        QString path = QFileDialog::getExistingDirectory(this,
-            IS_EN ? QStringLiteral("Select dataset folder")
-                  : QStringLiteral("Выберите папку для датасета"),
-            current);
-
-        if (!path.isEmpty()) {
-            DatabaseManager::instance().setConfig(
-                QStringLiteral("voice_dataset_path"), path);
-            if (m_passiveListener) {
-                auto cfg = m_passiveListener->config();
-                cfg.datasetPath = path;
-                m_passiveListener->setConfig(cfg);
-            }
-        }
-    });
-
-    // --- Task Manager ---
+    // --- Задачи ---
     {
         auto* taskMenu = menuBar->addMenu(
             IS_EN ? QStringLiteral("📋 Tasks") : QStringLiteral("📋 Задачи"));
-
-        auto* actOpenBoard = taskMenu->addAction(
-            IS_EN ? QStringLiteral("Open Task Board...")
-                  : QStringLiteral("Открыть доску задач..."));
-        connect(actOpenBoard, &QAction::triggered, this, [this]() {
-            TaskManagerDialog dlg(m_jarvis->currentUserId(), this);
-            connect(&dlg, &TaskManagerDialog::taskChanged, this, [this]() {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    IS_EN ? QStringLiteral("Task board updated.")
-                          : QStringLiteral("Доска задач обновлена."),
-                    Theme::LogColors::system);
-            });
-            dlg.exec();
-        });
-
-        auto* actChatHistory = taskMenu->addAction(
-            IS_EN ? QStringLiteral("Chat History...")
-                  : QStringLiteral("История чатов..."));
-        connect(actChatHistory, &QAction::triggered, this, [this]() {
-            ChatHistoryDialog dlg(m_jarvis->currentUserId(), IS_EN, this);
-            dlg.exec();
-        });
-
-        auto* actOrganize = taskMenu->addAction(
-            IS_EN ? QStringLiteral("🗂 Organize Folder...")
-                  : QStringLiteral("🗂 Организовать папку..."));
-        connect(actOrganize, &QAction::triggered, this, [this]() {
-            const QString startDir =
-                QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-            QString folder = QFileDialog::getExistingDirectory(this,
-                IS_EN ? QStringLiteral("Choose a folder to organize")
-                      : QStringLiteral("Выберите папку для организации"),
-                startDir);
-            if (folder.isEmpty()) return;
-
-            if (!Jarvis::organizePathAllowed(folder)) {
-                appendLog(Str::logJarvis(),
-                    IS_EN ? QStringLiteral("❌ This folder isn't in the allowed roots "
-                                           "(Downloads/Desktop/Documents/Pictures).")
-                          : QStringLiteral("❌ Эта папка вне разрешённых корней "
-                                           "(Загрузки/Рабочий стол/Документы/Изображения)."),
-                    Theme::LogColors::error);
-                return;
-            }
-
-            appendLog(Str::logJarvis(),
-                IS_EN ? QStringLiteral("🔍 Scanning folder — this may take a moment for ambiguous files...")
-                      : QStringLiteral("🔍 Сканирую папку — для неоднозначных файлов это может занять время..."),
-                Theme::LogColors::system);
-
-            FileOrganizer::instance().setLlmApi(m_jarvis->claudeApi());
-            FileOrganizer::instance().buildPlan(folder, [this](const OrganizePlan& plan) {
-                showOrganizePlanDialog(plan);
-            });
-        });
-
-        auto* actConfigureRules = taskMenu->addAction(
-            IS_EN ? QStringLiteral("⚙ Configure Categories...")
-                  : QStringLiteral("⚙ Настроить категории..."));
-        connect(actConfigureRules, &QAction::triggered, this, [this]() {
-            OrganizePlanDialog dlg(m_jarvis, OrganizePlan{}, this, /*initialTab=*/1);
-            dlg.exec();
-        });
-
-        auto* actUndoOrganize = taskMenu->addAction(
-            IS_EN ? QStringLiteral("↩ Undo Last Organize")
-                  : QStringLiteral("↩ Отменить последнюю организацию"));
-        connect(actUndoOrganize, &QAction::triggered, this, [this]() {
-            const bool ok = m_jarvis->organizeUndoLast();
-            appendLog(Str::logJarvis(),
-                ok ? (IS_EN ? QStringLiteral("↩ Last organize batch undone.")
-                            : QStringLiteral("↩ Последняя организация отменена."))
-                   : (IS_EN ? QStringLiteral("Nothing to undo.")
-                            : QStringLiteral("Нечего отменять.")),
-                Theme::LogColors::system);
-        });
-
-        auto* actQuickAdd = taskMenu->addAction(
-            IS_EN ? QStringLiteral("Quick Add Task...")
-                  : QStringLiteral("Быстро добавить задачу..."));
-        connect(actQuickAdd, &QAction::triggered, this, [this]() {
-            bool ok;
-            QString title = QInputDialog::getText(this,
-                IS_EN ? QStringLiteral("New Task") : QStringLiteral("Новая задача"),
-                IS_EN ? QStringLiteral("Task title:") : QStringLiteral("Название задачи:"),
-                QLineEdit::Normal, QString(), &ok);
-            if (!ok || title.trimmed().isEmpty()) return;
-            qint64 id = m_jarvis->addTask(title.trimmed());
-            if (id > 0) {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    (IS_EN ? QStringLiteral("Task created: ") : QStringLiteral("Задача создана: ")) + title.trimmed(),
-                    Theme::LogColors::system);
-                NotificationManager::instance().showNotification(
-                    IS_EN ? QStringLiteral("Task created") : QStringLiteral("Задача создана"),
-                    title.trimmed(), NotificationManager::Level::Success);
-            }
-        });
-
-        taskMenu->addSeparator();
-
-        auto* actDeadlines = taskMenu->addAction(
-            IS_EN ? QStringLiteral("Check Deadlines")
-                  : QStringLiteral("Проверить дедлайны"));
-        connect(actDeadlines, &QAction::triggered, this, [this]() {
-            QString warnings = m_jarvis->getOverdueTasksSummary();
-            if (warnings.isEmpty()) {
-                appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
-                    IS_EN ? QStringLiteral("All clear, sir. No approaching deadlines.")
-                          : QStringLiteral("Всё чисто, сэр. Дедлайнов в ближайшее время нет."),
-                    Theme::LogColors::jarvis);
-            } else {
-                notifyDeadlineWarnings(warnings);
-                appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
-                    warnings, Theme::LogColors::error);
-            }
+        connect(taskMenu, &QMenu::aboutToShow, this, [this, taskMenu]() {
+            taskMenu->clear();
+            m_actions->populateMenu(taskMenu, QStringLiteral("tasks"));
         });
     }
 
-    // --- Phone & Server ---
+
+    // --- Телефон и Сервер ---
     {
         auto* phoneMenu = menuBar->addMenu(
             IS_EN ? QStringLiteral("📱 Phone && Server")
                   : QStringLiteral("📱 Телефон и Сервер"));
-
-        // --- Mobile Sync (zero-config pairing) ---
-        auto* actMobileSync = phoneMenu->addAction(
-            IS_EN ? QStringLiteral("📱 Mobile Sync...")
-                  : QStringLiteral("📱 Мобильная синхронизация..."));
-        connect(actMobileSync, &QAction::triggered, this, [this]() {
-            auto* mesh = m_jarvis->meshConnector();
-            if (!mesh) return;
-            mesh->initMobilePairing();
-            auto* pairing = mesh->mobilePairing();
-            if (!pairing) return;
-
-            // Generate a fresh PIN
-            PairingSession session = pairing->generatePairingPin(
-                QStringLiteral("Developer"));
-            pairing->startGatewayPolling();
-            // Reported by the code that actually starts the polling — until
-            // this runs, mobile sync is genuinely not available and the
-            // manifest says so.
-            SystemManifest::setRuntimeState(QStringLiteral("mobile_sync"), true,
-                QStringLiteral("gateway polling active, awaiting pairing"));
-
-            QString deepLink = pairing->buildDeepLinkUri(session);
-
-            // Build the cyberpunk-themed pairing dialog
-            auto* dlg = new QDialog(this);
-            dlg->setWindowTitle(IS_EN ? QStringLiteral("Mobile Sync — Zero Config Pairing")
-                                      : QStringLiteral("Мобильная синхронизация — Без настройки"));
-            dlg->setMinimumSize(520, 480);
-            dlg->setAttribute(Qt::WA_DeleteOnClose);
-            dlg->setStyleSheet(QStringLiteral(
-                "QDialog { background: rgba(8,10,18,245); }"
-                "QLabel { color: #c0c8d8; font-size: 13px; }"
-                "QComboBox { background: rgba(14,18,30,180); color: #e0e8f0; "
-                "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 6px; }"
-                "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
-                "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
-                "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "  stop:0 #33e0ff, stop:1 #9b6dff); }"
-                "QTextEdit { background: rgba(14,18,30,180); color: #66FCF1;"
-                "  border: 1px solid rgba(0,212,255,35); border-radius: 8px;"
-                "  font-family: 'Consolas'; font-size: 12px; padding: 8px; }"));
-
-            auto* layout = new QVBoxLayout(dlg);
-            layout->setSpacing(12);
-            layout->setContentsMargins(24, 20, 24, 20);
-
-            // Title
-            auto* title = new QLabel(IS_EN ? QStringLiteral("📱 MOBILE SYNC")
-                                           : QStringLiteral("📱 МОБИЛЬНАЯ СИНХРОНИЗАЦИЯ"));
-            title->setStyleSheet(QStringLiteral(
-                "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
-            title->setAlignment(Qt::AlignCenter);
-            layout->addWidget(title);
-
-            auto* subtitle = new QLabel(IS_EN
-                ? QStringLiteral("Pair your phone — no bots, no tokens, no setup")
-                : QStringLiteral("Подключите телефон — без ботов, токенов и настройки"));
-            subtitle->setStyleSheet(QStringLiteral(
-                "color: rgba(0,212,255,150); font-size: 12px;"));
-            subtitle->setAlignment(Qt::AlignCenter);
-            layout->addWidget(subtitle);
-
-            // Separator
-            auto* sep1 = new QFrame(dlg);
-            sep1->setFrameShape(QFrame::HLine);
-            sep1->setStyleSheet(QStringLiteral(
-                "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-                "stop:0 transparent, stop:0.2 #00d4ff, stop:0.8 #7c4dff, stop:1 transparent);"
-                "max-height: 1px;"));
-            layout->addWidget(sep1);
-
-            // PIN display
-            auto* pinLabel = new QLabel(IS_EN ? QStringLiteral("YOUR PAIRING PIN:")
-                                              : QStringLiteral("ВАШ PIN-КОД:"));
-            pinLabel->setAlignment(Qt::AlignCenter);
-            pinLabel->setStyleSheet(QStringLiteral("color: #8892a4; font-size: 11px; letter-spacing: 2px;"));
-            layout->addWidget(pinLabel);
-
-            auto* pinDisplay = new QLabel(session.pin);
-            pinDisplay->setAlignment(Qt::AlignCenter);
-            pinDisplay->setTextInteractionFlags(Qt::TextSelectableByMouse);
-            pinDisplay->setStyleSheet(QStringLiteral(
-                "color: #00d4ff; font-size: 42px; font-weight: bold; font-family: 'Consolas';"
-                "letter-spacing: 12px; padding: 16px;"
-                "background: rgba(0,212,255,8); border: 2px solid rgba(0,212,255,60);"
-                "border-radius: 12px;"));
-            layout->addWidget(pinDisplay);
-
-            // Timer countdown
-            auto* timerLabel = new QLabel();
-            timerLabel->setAlignment(Qt::AlignCenter);
-            timerLabel->setStyleSheet(QStringLiteral("color: #ff6b6b; font-size: 11px;"));
-            layout->addWidget(timerLabel);
-
-            auto* countdownTimer = new QTimer(dlg);
-            countdownTimer->setInterval(1000);
-            QDateTime expires = session.expiresAt;
-            connect(countdownTimer, &QTimer::timeout, dlg, [timerLabel, expires]() {
-                int remaining = static_cast<int>(QDateTime::currentDateTimeUtc().secsTo(expires));
-                if (remaining <= 0) {
-                    timerLabel->setText(IS_EN ? QStringLiteral("⚠ PIN expired — generate a new one")
-                                             : QStringLiteral("⚠ PIN истёк — сгенерируйте новый"));
-                } else {
-                    timerLabel->setText(
-                        (IS_EN ? QStringLiteral("Expires in %1:%2")
-                               : QStringLiteral("Истекает через %1:%2"))
-                        .arg(remaining / 60, 2, 10, QLatin1Char('0'))
-                        .arg(remaining % 60, 2, 10, QLatin1Char('0')));
-                }
-            });
-            countdownTimer->start();
-            // Trigger immediately via manual invoke
-            QMetaObject::invokeMethod(countdownTimer, "timeout", Qt::QueuedConnection);
-
-            // Deep link
-            auto* linkLabel = new QLabel(
-                QStringLiteral("<span style='color:#8892a4;'>%1</span><br>"
-                               "<a href='%2' style='color:#7c4dff;'>%2</a>")
-                .arg(IS_EN ? QStringLiteral("Deep Link:")
-                           : QStringLiteral("Ссылка:"),
-                     deepLink));
-            linkLabel->setAlignment(Qt::AlignCenter);
-            linkLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
-            linkLabel->setOpenExternalLinks(false);
-            layout->addWidget(linkLabel);
-
-            // Role selector
-            auto* roleRow = new QHBoxLayout();
-            auto* roleLbl = new QLabel(IS_EN ? QStringLiteral("Bind to role:")
-                                             : QStringLiteral("Привязать к роли:"));
-            auto* roleCombo = new QComboBox(dlg);
-            roleCombo->addItem(QStringLiteral("Developer"));
-            roleCombo->addItem(QStringLiteral("QA_Tester"));
-            roleCombo->addItem(QStringLiteral("Student_Academic"));
-            roleCombo->addItem(QStringLiteral("Creative"));
-            roleCombo->addItem(QStringLiteral("Hardware"));
-            roleRow->addWidget(roleLbl);
-            roleRow->addWidget(roleCombo, 1);
-            layout->addLayout(roleRow);
-
-            // Regenerate PIN button
-            auto* regenBtn = new QPushButton(
-                IS_EN ? QStringLiteral("🔄 Generate New PIN")
-                      : QStringLiteral("🔄 Новый PIN"));
-            connect(regenBtn, &QPushButton::clicked, dlg,
-                    [this, pairing, roleCombo, pinDisplay, countdownTimer, timerLabel, dlg]() {
-                QString role = roleCombo->currentText();
-                PairingSession newSession = pairing->generatePairingPin(role);
-                pairing->startGatewayPolling();
-                pinDisplay->setText(newSession.pin);
-                QDateTime exp = newSession.expiresAt;
-                disconnect(countdownTimer, &QTimer::timeout, nullptr, nullptr);
-                connect(countdownTimer, &QTimer::timeout, dlg, [timerLabel, exp]() {
-                    int rem = static_cast<int>(QDateTime::currentDateTimeUtc().secsTo(exp));
-                    if (rem <= 0)
-                        timerLabel->setText(IS_EN ? QStringLiteral("⚠ PIN expired")
-                                                  : QStringLiteral("⚠ PIN истёк"));
-                    else
-                        timerLabel->setText(
-                            (IS_EN ? QStringLiteral("Expires in %1:%2")
-                                   : QStringLiteral("Истекает через %1:%2"))
-                            .arg(rem / 60, 2, 10, QLatin1Char('0'))
-                            .arg(rem % 60, 2, 10, QLatin1Char('0')));
-                });
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    QStringLiteral("New PIN: %1 → role: %2").arg(newSession.pin, role),
-                    Theme::LogColors::system);
-            });
-            layout->addWidget(regenBtn);
-
-            // Separator
-            auto* sep2 = new QFrame(dlg);
-            sep2->setFrameShape(QFrame::HLine);
-            sep2->setStyleSheet(sep1->styleSheet());
-            layout->addWidget(sep2);
-
-            // Paired devices list
-            auto* devicesLabel = new QLabel(IS_EN ? QStringLiteral("PAIRED DEVICES:")
-                                                  : QStringLiteral("ПОДКЛЮЧЁННЫЕ УСТРОЙСТВА:"));
-            devicesLabel->setStyleSheet(QStringLiteral(
-                "color: #8892a4; font-size: 11px; letter-spacing: 2px;"));
-            layout->addWidget(devicesLabel);
-
-            auto* devicesList = new QTextEdit(dlg);
-            devicesList->setReadOnly(true);
-            devicesList->setMaximumHeight(100);
-            auto devices = pairing->pairedDevices();
-            if (devices.isEmpty()) {
-                devicesList->setPlainText(IS_EN ? QStringLiteral("No devices paired yet.")
-                                                : QStringLiteral("Нет подключённых устройств."));
-            } else {
-                QString devText;
-                for (const auto& d : devices) {
-                    devText += QStringLiteral("• %1 [%2] → %3  (%4)\n")
-                        .arg(d.displayName, d.platform, d.boundRole,
-                             d.pairedAt.toString(QStringLiteral("yyyy-MM-dd")));
-                }
-                devicesList->setPlainText(devText);
-            }
-            layout->addWidget(devicesList);
-
-            // Pairing success handler
-            connect(pairing, &MobilePairingManager::devicePaired, dlg,
-                    [this, devicesList, dlg](const QString& name, const QString& role) {
-                devicesList->append(QStringLiteral("✓ %1 → %2  (just now)").arg(name, role));
-                appendLog(QStringLiteral("J.A.R.V.I.S."),
-                    (IS_EN ? QStringLiteral("📱 Device paired: %1 → role: %2")
-                           : QStringLiteral("📱 Устройство подключено: %1 → роль: %2"))
-                    .arg(name, role),
-                    QStringLiteral("#66FCF1"));
-            });
-
-            // Cleanup on close
-            connect(dlg, &QDialog::finished, this, [pairing]() {
-                pairing->stopGatewayPolling();
-            });
-
-            dlg->show();
-        });
-
-        // Wake-on-LAN Shortcut Generator
-        phoneMenu->addSeparator();
-        auto* actWol = phoneMenu->addAction(
-            IS_EN ? QStringLiteral("⚡ Generate WoL Shortcut")
-                  : QStringLiteral("⚡ Сгенерировать WoL ярлык"));
-        connect(actWol, &QAction::triggered, this, [this]() {
-            auto* mesh = m_jarvis->meshConnector();
-            if (!mesh) return;
-            mesh->initMobilePairing();
-            auto* pairing = mesh->mobilePairing();
-            if (!pairing) return;
-
-            auto interfaces = pairing->discoverNetworkInterfaces();
-            if (interfaces.isEmpty()) {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    IS_EN ? QStringLiteral("No active network interfaces found for Wake-on-LAN.")
-                          : QStringLiteral("Активные сетевые интерфейсы для WoL не найдены."),
-                    Theme::LogColors::error);
-                return;
-            }
-
-            // Build WoL dialog
-            auto* dlg = new QDialog(this);
-            dlg->setWindowTitle(IS_EN ? QStringLiteral("Wake-on-LAN Shortcut Generator")
-                                      : QStringLiteral("Генератор WoL ярлыков"));
-            dlg->setMinimumSize(560, 440);
-            dlg->setAttribute(Qt::WA_DeleteOnClose);
-            dlg->setStyleSheet(QStringLiteral(
-                "QDialog { background: rgba(8,10,18,245); }"
-                "QLabel { color: #c0c8d8; font-size: 13px; }"
-                "QComboBox { background: rgba(14,18,30,180); color: #e0e8f0; "
-                "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 6px; }"
-                "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
-                "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
-                "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "  stop:0 #33e0ff, stop:1 #9b6dff); }"
-                "QTextEdit { background: rgba(14,18,30,180); color: #66FCF1;"
-                "  border: 1px solid rgba(0,212,255,35); border-radius: 8px;"
-                "  font-family: 'Consolas'; font-size: 12px; padding: 8px; }"));
-
-            auto* layout = new QVBoxLayout(dlg);
-            layout->setSpacing(12);
-            layout->setContentsMargins(24, 20, 24, 20);
-
-            auto* wolTitle = new QLabel(IS_EN ? QStringLiteral("⚡ WAKE-ON-LAN EXPORTER")
-                                              : QStringLiteral("⚡ ЭКСПОРТ WAKE-ON-LAN"));
-            wolTitle->setStyleSheet(QStringLiteral(
-                "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
-            wolTitle->setAlignment(Qt::AlignCenter);
-            layout->addWidget(wolTitle);
-
-            auto* wolSub = new QLabel(IS_EN
-                ? QStringLiteral("One-click WoL shortcuts for iOS & Android")
-                : QStringLiteral("WoL ярлыки для iOS и Android в один клик"));
-            wolSub->setStyleSheet(QStringLiteral("color: rgba(0,212,255,150); font-size: 12px;"));
-            wolSub->setAlignment(Qt::AlignCenter);
-            layout->addWidget(wolSub);
-
-            // Interface selector
-            auto* ifaceRow = new QHBoxLayout();
-            auto* ifaceLbl = new QLabel(IS_EN ? QStringLiteral("Network Interface:")
-                                              : QStringLiteral("Сетевой интерфейс:"));
-            auto* ifaceCombo = new QComboBox(dlg);
-            for (const auto& iface : interfaces) {
-                ifaceCombo->addItem(QStringLiteral("%1  [%2] — %3")
-                    .arg(iface.interfaceName, iface.macAddress, iface.ipv4Address));
-            }
-            ifaceRow->addWidget(ifaceLbl);
-            ifaceRow->addWidget(ifaceCombo, 1);
-            layout->addLayout(ifaceRow);
-
-            // Output text area
-            auto* output = new QTextEdit(dlg);
-            output->setReadOnly(true);
-
-            // Generate button
-            auto* genBtn = new QPushButton(
-                IS_EN ? QStringLiteral("⚡ Generate iOS/Android Shortcut")
-                      : QStringLiteral("⚡ Сгенерировать ярлык iOS/Android"));
-            connect(genBtn, &QPushButton::clicked, dlg,
-                    [this, pairing, ifaceCombo, output, interfaces]() {
-                int idx = ifaceCombo->currentIndex();
-                if (idx < 0 || idx >= interfaces.size()) return;
-
-                const auto& iface = interfaces[idx];
-                QString report = pairing->exportAllWolProfiles();
-                output->setPlainText(report);
-
-                appendLog(QStringLiteral("J.A.R.V.I.S."),
-                    (IS_EN ? QStringLiteral("⚡ WoL profile generated for %1 [%2]")
-                           : QStringLiteral("⚡ WoL профиль для %1 [%2]"))
-                    .arg(iface.interfaceName, iface.macAddress),
-                    QStringLiteral("#66FCF1"));
-            });
-            layout->addWidget(genBtn);
-            layout->addWidget(output);
-
-            // Copy to clipboard
-            auto* copyBtn = new QPushButton(
-                IS_EN ? QStringLiteral("📋 Copy to Clipboard")
-                      : QStringLiteral("📋 Скопировать"));
-            connect(copyBtn, &QPushButton::clicked, dlg, [output]() {
-                QApplication::clipboard()->setText(output->toPlainText());
-            });
-            layout->addWidget(copyBtn);
-
-            dlg->show();
-        });
-
-        // Telegram QA Gateway toggle
-        phoneMenu->addSeparator();
-        auto* actTelegram = phoneMenu->addAction(
-            IS_EN ? QStringLiteral("🤖 Telegram QA Gateway...")
-                  : QStringLiteral("🤖 Telegram QA Шлюз..."));
-        connect(actTelegram, &QAction::triggered, this, [this]() {
-            auto* mesh = m_jarvis->meshConnector();
-            if (!mesh) return;
-            mesh->initTelegramGateway();
-            auto* gw = mesh->telegramGateway();
-            if (!gw) return;
-
-            // Bind Jarvis core + translation engine for free dialogue and voice
-            gw->setJarvisCore(m_jarvis);
-            gw->setTranslationEngine(m_jarvis->translationEngine());
-            mesh->initMobilePairing();
-            gw->setPairingManager(mesh->mobilePairing());
-
-            // Connect diagram pipeline to desktop dashboard
-            connect(gw, &J2JTelegramGateway::diagramGenerated, this,
-                    [this](const QImage& img) {
-                m_visualInsights->showDiagram(img);
-            }, Qt::UniqueConnection);
-
-            // Sync Telegram conversation into the desktop log —
-            // so the user sees both channels in one place and all
-            // messages feed into the same learning pipeline.
-            connect(gw, &J2JTelegramGateway::messageReceived, this,
-                    [this](qint64 /*chatId*/, const QString& text) {
-                appendLog(QStringLiteral("📱 TG User"),
-                          text.left(500),
-                          QStringLiteral("#2ea6c7"));
-            }, Qt::UniqueConnection);
-
-            connect(gw, &J2JTelegramGateway::conversationResponse, this,
-                    [this](qint64 /*chatId*/, const QString& response) {
-                appendLog(QStringLiteral("📱 JARVIS→TG"),
-                          response.left(500),
-                          Theme::LogColors::jarvis);
-            }, Qt::UniqueConnection);
-
-            auto* dlg = new QDialog(this);
-            dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
-                                      : QStringLiteral("Telegram QA Шлюз"));
-            dlg->setMinimumSize(480, 320);
-            dlg->setAttribute(Qt::WA_DeleteOnClose);
-            dlg->setStyleSheet(QStringLiteral(
-                "QDialog { background: rgba(8,10,18,245); }"
-                "QLabel { color: #c0c8d8; font-size: 13px; }"
-                "QLineEdit { background: rgba(14,18,30,180); color: #e0e8f0; "
-                "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 8px; }"
-                "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
-                "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
-                "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "  stop:0 #33e0ff, stop:1 #9b6dff); }"));
-
-            auto* layout = new QVBoxLayout(dlg);
-            layout->setSpacing(12);
-            layout->setContentsMargins(24, 20, 24, 20);
-
-            auto* title = new QLabel(IS_EN ? QStringLiteral("🤖 TELEGRAM QA GATEWAY")
-                                           : QStringLiteral("🤖 TELEGRAM QA ШЛЮЗ"));
-            title->setStyleSheet(QStringLiteral(
-                "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
-            title->setAlignment(Qt::AlignCenter);
-            layout->addWidget(title);
-
-            auto* desc = new QLabel(IS_EN
-                ? QStringLiteral("QA_Tester devices get full English UI.\n"
-                                 "Main user devices default to Russian.")
-                : QStringLiteral("QA_Tester устройства получают английский интерфейс.\n"
-                                 "Основной пользователь — русский."));
-            desc->setAlignment(Qt::AlignCenter);
-            desc->setStyleSheet(QStringLiteral("color: rgba(0,212,255,150); font-size: 12px;"));
-            layout->addWidget(desc);
-
-            // Token input
-            auto* tokenLbl = new QLabel(IS_EN ? QStringLiteral("Bot Token (auto-provisioned or manual):")
-                                              : QStringLiteral("Токен бота (авто или вручную):"));
-            layout->addWidget(tokenLbl);
-
-            auto* tokenInput = new QLineEdit(dlg);
-            tokenInput->setPlaceholderText(QStringLiteral("123456:ABC-DEF..."));
-            tokenInput->setText(gw->botToken());
-            tokenInput->setEchoMode(QLineEdit::Password);
-            layout->addWidget(tokenInput);
-
-            // Status indicator
-            auto* statusLbl = new QLabel();
-            statusLbl->setAlignment(Qt::AlignCenter);
-            auto updateStatus = [gw, statusLbl]() {
-                if (gw->isRunning()) {
-                    statusLbl->setText(QStringLiteral("🟢 Gateway ACTIVE — polling Telegram"));
-                    statusLbl->setStyleSheet(QStringLiteral("color: #66FCF1; font-weight: bold;"));
-                } else {
-                    statusLbl->setText(QStringLiteral("🔴 Gateway STOPPED"));
-                    statusLbl->setStyleSheet(QStringLiteral("color: #ff6b6b; font-weight: bold;"));
-                }
-            };
-            updateStatus();
-            layout->addWidget(statusLbl);
-
-            // Start/Stop button
-            auto* toggleBtn = new QPushButton(
-                gw->isRunning()
-                    ? (IS_EN ? QStringLiteral("⏹ Stop Gateway") : QStringLiteral("⏹ Остановить"))
-                    : (IS_EN ? QStringLiteral("▶ Start Gateway") : QStringLiteral("▶ Запустить")));
-            connect(toggleBtn, &QPushButton::clicked, dlg,
-                    [this, gw, tokenInput, toggleBtn, updateStatus]() {
-                if (gw->isRunning()) {
-                    gw->stop();
-                    toggleBtn->setText(IS_EN ? QStringLiteral("▶ Start Gateway")
-                                            : QStringLiteral("▶ Запустить"));
-                } else {
-                    QString token = tokenInput->text().trimmed();
-                    if (!token.isEmpty())
-                        gw->setBotToken(token);
-                    gw->start();
-                    toggleBtn->setText(IS_EN ? QStringLiteral("⏹ Stop Gateway")
-                                            : QStringLiteral("⏹ Остановить"));
-                    appendLog(QStringLiteral("J.A.R.V.I.S."),
-                        IS_EN ? QStringLiteral("🤖 Telegram QA Gateway started")
-                              : QStringLiteral("🤖 Telegram QA Шлюз запущен"),
-                        QStringLiteral("#66FCF1"));
-                }
-                updateStatus();
-            });
-            layout->addWidget(toggleBtn);
-
-            // Roles — lets whoever is sitting at THIS PC fix a chat that
-            // isn't Admin (e.g. it wasn't the very first chat to ever
-            // message this PC's bot). Only reachable from the desktop app.
-            auto* rolesBtn = new QPushButton(
-                IS_EN ? QStringLiteral("👑 Manage Roles...")
-                      : QStringLiteral("👑 Роли пользователей..."));
-            connect(rolesBtn, &QPushButton::clicked, dlg, [this, gw]() {
-                auto* accessMgr = gw->accessManager();
-                if (!accessMgr) return;
-
-                auto* rdlg = new QDialog(this);
-                rdlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram Roles")
-                                          : QStringLiteral("Роли Telegram"));
-                rdlg->setAttribute(Qt::WA_DeleteOnClose);
-                rdlg->setMinimumSize(420, 300);
-                auto* rlayout = new QVBoxLayout(rdlg);
-
-                const auto users = accessMgr->allUsers();
-                if (users.isEmpty()) {
-                    rlayout->addWidget(new QLabel(IS_EN
-                        ? QStringLiteral("No chats have messaged this bot yet.")
-                        : QStringLiteral("Пока ни один чат не писал этому боту.")));
-                }
-                for (const auto& u : users) {
-                    auto* row = new QWidget(rdlg);
-                    auto* rowLay = new QHBoxLayout(row);
-                    rowLay->setContentsMargins(0, 0, 0, 0);
-                    const QString name = u.displayName.isEmpty()
-                        ? QString::number(u.chatId) : u.displayName;
-                    auto* lbl = new QLabel(QStringLiteral("%1  —  %2")
-                        .arg(name, telegramRoleToString(u.role)));
-                    lbl->setStyleSheet(QStringLiteral("color:#c0c8d8;"));
-                    rowLay->addWidget(lbl, 1);
-
-                    auto* makeAdminBtn = new QPushButton(
-                        IS_EN ? QStringLiteral("Make Admin") : QStringLiteral("Сделать Admin"));
-                    makeAdminBtn->setEnabled(u.role != TelegramRole::Admin);
-                    const qint64 cid = u.chatId;
-                    connect(makeAdminBtn, &QPushButton::clicked, rdlg,
-                            [this, accessMgr, cid, makeAdminBtn]() {
-                        accessMgr->setRole(cid, TelegramRole::Admin);
-                        makeAdminBtn->setEnabled(false);
-                        appendLog(QStringLiteral("J.A.R.V.I.S."),
-                            IS_EN ? QStringLiteral("👑 Chat %1 promoted to Admin.").arg(cid)
-                                  : QStringLiteral("👑 Чат %1 повышен до Admin.").arg(cid),
-                            QStringLiteral("#66FCF1"));
-                    });
-                    rowLay->addWidget(makeAdminBtn);
-                    rlayout->addWidget(row);
-                }
-                rlayout->addStretch(1);
-                rdlg->show();
-            });
-            layout->addWidget(rolesBtn);
-
-            // Bug report notifications
-            connect(gw, &J2JTelegramGateway::bugReportFiled, dlg,
-                    [this](const QaBugReport& report) {
-                appendLog(QStringLiteral("J.A.R.V.I.S."),
-                    QStringLiteral("🐛 QA Bug: [%1] %2 — %3")
-                        .arg(report.severity, report.title, report.reporterRole),
-                    QStringLiteral("#ff9800"));
-            });
-
-            // Pairing success → update status in UI
-            connect(gw, &J2JTelegramGateway::pairingCompleted, dlg,
-                    [this, statusLbl](qint64 chatId, const QString& role) {
-                statusLbl->setText(QStringLiteral("🟢 PAIRED — chat %1 → %2").arg(chatId).arg(role));
-                statusLbl->setStyleSheet(QStringLiteral("color: #66FCF1; font-weight: bold;"));
-                appendLog(QStringLiteral("J.A.R.V.I.S."),
-                    (IS_EN ? QStringLiteral("📱 Mobile paired via Telegram → role: %1")
-                           : QStringLiteral("📱 Мобильный подключён через Telegram → роль: %1"))
-                    .arg(role),
-                    QStringLiteral("#66FCF1"));
-            });
-
-            layout->addStretch(1);
-            dlg->show();
+        connect(phoneMenu, &QMenu::aboutToShow, this, [this, phoneMenu]() {
+            phoneMenu->clear();
+            m_actions->populateMenu(phoneMenu, QStringLiteral("phone"));
         });
     }
 
-    // --- System ---
+
+    // --- Система ---
     {
         auto* sysMenu = menuBar->addMenu(
             IS_EN ? QStringLiteral("⚙ System") : QStringLiteral("⚙ Система"));
-
-        auto* actKeepAttach = sysMenu->addAction(Str::menuKeepAttach());
-        actKeepAttach->setCheckable(true);
-        actKeepAttach->setChecked(false);
-        connect(actKeepAttach, &QAction::toggled, this, [this](bool checked) {
-            m_jarvis->attachments()->setKeepAfterSend(checked);
-            appendLog(Str::logSystem(),
-                      checked ? Str::statusAttachKept() : Str::statusAttachOneShot(),
-                      Theme::LogColors::system);
-        });
-
-        auto* actKeyboard = sysMenu->addAction(Str::menuKeyboard());
-        connect(actKeyboard, &QAction::triggered, this, &MainWindow::toggleKeyboard);
-
-        sysMenu->addSeparator();
-
-        // Translation pair
-        auto* transMenu = sysMenu->addMenu(
-            IS_EN ? QStringLiteral("Translation Pair") : QStringLiteral("Пара перевода"));
-        struct LangPair { QString label; QString src; QString tgt; };
-        const QList<LangPair> pairs = {
-            {QStringLiteral("FR → EN"), QStringLiteral("fr"), QStringLiteral("en")},
-            {QStringLiteral("FR → RU"), QStringLiteral("fr"), QStringLiteral("ru")},
-            {QStringLiteral("EN → RU"), QStringLiteral("en"), QStringLiteral("ru")},
-            {QStringLiteral("RU → EN"), QStringLiteral("ru"), QStringLiteral("en")},
-            {QStringLiteral("EN → FR"), QStringLiteral("en"), QStringLiteral("fr")},
-            {QStringLiteral("RU → FR"), QStringLiteral("ru"), QStringLiteral("fr")},
-        };
-        auto* transGroup = new QActionGroup(transMenu);
-        transGroup->setExclusive(true);
-        for (const auto& p : pairs) {
-            auto* act = transMenu->addAction(p.label);
-            act->setCheckable(true);
-            if (p.src == QStringLiteral("fr") && p.tgt == QStringLiteral("en"))
-                act->setChecked(true);
-            transGroup->addAction(act);
-            const QString src = p.src, tgt = p.tgt;
-            connect(act, &QAction::triggered, this, [this, src, tgt]() {
-                m_jarvis->translationEngine()->setSourceLang(src);
-                m_jarvis->translationEngine()->setTargetLang(tgt);
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    QStringLiteral("Translation pair: %1 → %2").arg(src.toUpper(), tgt.toUpper()),
-                    Theme::LogColors::system);
-            });
-        }
-
-        auto* actTranslate = sysMenu->addAction(
-            IS_EN ? QStringLiteral("Translate Clipboard")
-                  : QStringLiteral("Перевести буфер обмена"));
-        connect(actTranslate, &QAction::triggered, this, [this]() {
-            QString text = QApplication::clipboard()->text().trimmed();
-            if (text.isEmpty()) {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    IS_EN ? QStringLiteral("Clipboard is empty.") : QStringLiteral("Буфер обмена пуст."),
-                    Theme::LogColors::error);
-                return;
-            }
-            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                IS_EN ? QStringLiteral("Translating...") : QStringLiteral("Перевожу..."),
-                Theme::LogColors::system);
-            m_jarvis->translationEngine()->translateText(text,
-                m_jarvis->translationEngine()->targetLang(),
-                [this](bool ok, const QString& result) {
-                    if (ok) {
-                        appendLog(QStringLiteral("J.A.R.V.I.S."), result, Theme::LogColors::jarvis);
-                        QApplication::clipboard()->setText(result);
-                    } else {
-                        appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
-                            result, Theme::LogColors::error);
-                    }
-                });
-        });
-
-        auto* actAudioTranslate = sysMenu->addAction(
-            IS_EN ? QStringLiteral("Process Audio File...")
-                  : QStringLiteral("Обработать аудиофайл..."));
-        connect(actAudioTranslate, &QAction::triggered, this, [this]() {
-            QString path = QFileDialog::getOpenFileName(this,
-                IS_EN ? QStringLiteral("Select Audio File") : QStringLiteral("Выберите аудиофайл"),
-                QDir::homePath(),
-                QStringLiteral("Audio (*.wav *.pcm *.raw);;All (*)"));
-            if (path.isEmpty()) return;
-            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                (IS_EN ? QStringLiteral("Processing audio: ") : QStringLiteral("Обработка аудио: "))
-                + QFileInfo(path).fileName(),
-                Theme::LogColors::system);
-            auto* te = m_jarvis->translationEngine();
-            connect(te, &TranslationEngine::audioProcessingProgress, this,
-                    [this](const QString& stage) {
-                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
-                    stage, Theme::LogColors::system);
-            }, Qt::SingleShotConnection);
-            connect(te, &TranslationEngine::audioTranscribed, this,
-                    [this](const QString& transcript, const QString& lang) {
-                appendLog(QStringLiteral("J.A.R.V.I.S."),
-                    QStringLiteral("[Transcript %1]: %2").arg(lang.toUpper(), transcript.left(500)),
-                    Theme::LogColors::jarvis);
-            }, Qt::SingleShotConnection);
-            connect(te, &TranslationEngine::audioSummaryReady, this,
-                    [this](const QString& summary) {
-                appendLog(QStringLiteral("J.A.R.V.I.S."), summary, Theme::LogColors::jarvis);
-            }, Qt::SingleShotConnection);
-            connect(te, &TranslationEngine::audioProcessingError, this,
-                    [this](const QString& err) {
-                appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
-                    err, Theme::LogColors::error);
-            }, Qt::SingleShotConnection);
-            te->processAudioFile(path, te->targetLang());
-        });
-
-        sysMenu->addSeparator();
-
-        // Analytics
-        auto* actAnalytics = sysMenu->addAction(
-            IS_EN ? QStringLiteral("📊 User Analytics")
-                  : QStringLiteral("📊 Аналитика"));
-        connect(actAnalytics, &QAction::triggered, this, [this]() {
-            auto dbConn = QSqlDatabase::database(QStringLiteral("jarvis_main"));
-            if (!dbConn.isOpen()) return;
-            QSqlQuery q(dbConn);
-            q.exec(QStringLiteral(
-                "SELECT chat_id, action_type, COUNT(*) as cnt "
-                "FROM activity_log_tg GROUP BY chat_id, action_type "
-                "ORDER BY chat_id, cnt DESC"));
-            QString report = IS_EN
-                ? QStringLiteral("📊 <b>User Analytics</b><br><br>")
-                : QStringLiteral("📊 <b>Аналитика</b><br><br>");
-            QMap<qint64, QMap<QString, int>> userData;
-            while (q.next())
-                userData[q.value(0).toLongLong()][q.value(1).toString()] = q.value(2).toInt();
-            if (userData.isEmpty()) {
-                report += IS_EN ? QStringLiteral("<i>No data yet.</i>")
-                                : QStringLiteral("<i>Данных пока нет.</i>");
-            } else {
-                for (auto it = userData.begin(); it != userData.end(); ++it) {
-                    report += QStringLiteral("<b>Chat %1</b><br>").arg(it.key());
-                    for (auto jt = it.value().begin(); jt != it.value().end(); ++jt)
-                        report += QStringLiteral("  • %1: %2<br>").arg(jt.key()).arg(jt.value());
-                    report += QStringLiteral("<br>");
-                }
-            }
-            auto* dlg = new QDialog(this);
-            dlg->setWindowTitle(IS_EN ? QStringLiteral("Analytics") : QStringLiteral("Аналитика"));
-            dlg->setMinimumSize(480, 360);
-            dlg->setAttribute(Qt::WA_DeleteOnClose);
-            auto* lay = new QVBoxLayout(dlg);
-            auto* browser = new QTextEdit(dlg);
-            browser->setReadOnly(true);
-            browser->setHtml(report);
-            lay->addWidget(browser);
-            auto* closeBtn = new QPushButton(QStringLiteral("OK"), dlg);
-            connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::accept);
-            lay->addWidget(closeBtn);
-            dlg->show();
-        });
-
-        sysMenu->addSeparator();
-
-        // Updates (moved from standalone menu)
-        auto* actCheck = sysMenu->addAction(Str::menuCheckUpdate());
-        connect(actCheck, &QAction::triggered, this, [this]() {
-            appendLog(Str::logSystem(), Str::updChecking(), Theme::LogColors::system);
-            m_jarvis->autoUpdater()->checkForUpdates(false);
-        });
-
-        auto* actReleases = sysMenu->addAction(Str::menuReleasePage());
-        connect(actReleases, &QAction::triggered, this, []() {
-            QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/releases")));
+        connect(sysMenu, &QMenu::aboutToShow, this, [this, sysMenu]() {
+            sysMenu->clear();
+            m_actions->populateMenu(sysMenu, QStringLiteral("system"));
+            sysMenu->addSeparator();
+            buildTranslationPairMenu(sysMenu);
         });
     }
 
-    // --- Помощь ---
-    // ── Camera & Security ──────────────────────────────────
+
+    // --- Камера и охрана ---
     {
-        // Shared instance owned by Jarvis — the Telegram /security command
-        // arms the SAME object, so a real motion event can't produce two
-        // independent alerts from two cameras watching the same webcam.
+        // Общий экземпляр, которым владеет Jarvis: команда /security в
+        // Telegram взводит ЭТОТ же объект, иначе две камеры смотрели бы
+        // в один вебкам и слали два оповещения на одно событие.
         m_securityCam = m_jarvis->securityCamera();
 
-        auto* camMenu = menuBar->addMenu(
-            IS_EN ? QStringLiteral("📷 Camera") : QStringLiteral("📷 Камера"));
+        // Подписки на камеру ставятся здесь, а не при первом включении
+        // охраны: до этого события камеры (тревоги, распознанные лица,
+        // блокировка сеанса) уходили в пустоту, если охрану ни разу не
+        // включали, и в ленте о них не было ни строчки.
+        wireSecurityCameraUi();
 
-#ifdef JARVIS_HAS_OPENCV
-        // ── Face enrollment ────────────────────────────────
-        auto* actEnroll = camMenu->addAction(
-            IS_EN ? QStringLiteral("👤 Enroll Owner Face")
-                  : QStringLiteral("👤 Обучить лицо владельца"));
-        connect(actEnroll, &QAction::triggered, this, [this]() {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("📸 Starting face enrollment... Look at the webcam.")
-                      : QStringLiteral("📸 Обучение лица... Смотрите в камеру."),
-                Theme::LogColors::system);
-
-            auto* sec = new SecurityCamera(this);
-
-            // Идентичность владельца для FaceRegistry: имя из профиля,
-            // возраст опционально, статус = "владелец".
-            {
-                auto user = DatabaseManager::instance().getUser(m_jarvis->currentUserId());
-                const QString ownerName = user ? user->name : QString();
-                bool ok = false;
-                const int age = QInputDialog::getInt(this,
-                    IS_EN ? QStringLiteral("Age (optional)") : QStringLiteral("Возраст (необязательно)"),
-                    IS_EN ? QStringLiteral("Your age (0 = skip):") : QStringLiteral("Ваш возраст (0 = пропустить):"),
-                    0, 0, 120, 1, &ok);
-                sec->setOwnerIdentity(ownerName, ok ? age : 0,
-                    IS_EN ? QStringLiteral("owner") : QStringLiteral("владелец"));
-            }
-
-            connect(sec, &SecurityCamera::enrollmentProgress, this,
-                    [this](int cur, int total) {
-                appendLog(Str::logSystem(),
-                    QStringLiteral("📸 %1/%2").arg(cur).arg(total),
-                    Theme::LogColors::system);
-            });
-            connect(sec, &SecurityCamera::enrollmentComplete, this,
-                    [this, sec](int samples) {
-                appendLog(Str::logJarvis(),
-                    (IS_EN ? QStringLiteral("✅ Face enrolled! %1 samples. "
-                                            "I can now recognize you.")
-                           : QStringLiteral("✅ Лицо обучено! %1 образцов. "
-                                            "Теперь я вас узнаю.")).arg(samples),
-                    Theme::LogColors::jarvis);
-                // Делимся профилем лица с другими узлами JARVIS (P2P):
-                // их камеры тоже будут узнавать владельца этого ПК.
-                if (auto* mesh = m_jarvis->meshConnector())
-                    mesh->broadcastFaceProfiles();
-                sec->deleteLater();
-            });
-            connect(sec, &SecurityCamera::alertMessage, this,
-                    [this, sec](const QString& msg) {
-                appendLog(Str::logSystem(), msg, Theme::LogColors::error);
-                sec->deleteLater();
-            });
-            sec->enrollOwnerFace(15);
-        });
-
-        auto* actUpdateFace = camMenu->addAction(
-            IS_EN ? QStringLiteral("🔄 Update Face (new look)")
-                  : QStringLiteral("🔄 Обновить лицо (новый вид)"));
-        connect(actUpdateFace, &QAction::triggered, this, [this]() {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("📸 Re-enrolling face with new appearance...")
-                      : QStringLiteral("📸 Переобучение лица с новым видом..."),
-                Theme::LogColors::system);
-
-            auto* sec = new SecurityCamera(this);
-            connect(sec, &SecurityCamera::enrollmentComplete, this,
-                    [this, sec](int samples) {
-                appendLog(Str::logJarvis(),
-                    (IS_EN ? QStringLiteral("✅ Face updated! %1 new samples.")
-                           : QStringLiteral("✅ Лицо обновлено! %1 новых образцов.")).arg(samples),
-                    Theme::LogColors::jarvis);
-                sec->deleteLater();
-            });
-            connect(sec, &SecurityCamera::alertMessage, this,
-                    [this, sec](const QString& msg) {
-                appendLog(Str::logSystem(), msg, Theme::LogColors::error);
-                sec->deleteLater();
-            });
-            sec->enrollOwnerFace(10);
-        });
-
-        // ── Face enrollment from uploaded photos ───────────
-        auto* actEnrollFromPhoto = camMenu->addAction(
-            IS_EN ? QStringLiteral("🖼 Learn Face from Photo(s)...")
-                  : QStringLiteral("🖼 Обучить лицо по фото..."));
-        connect(actEnrollFromPhoto, &QAction::triggered, this, [this]() {
-            const QStringList files = QFileDialog::getOpenFileNames(this,
-                IS_EN ? QStringLiteral("Select photo(s) with a face")
-                      : QStringLiteral("Выберите фото с лицом"),
-                QDir::homePath(),
-                QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp)"));
-            if (files.isEmpty()) return;
-
-            bool ok = false;
-            const QString name = QInputDialog::getText(this,
-                IS_EN ? QStringLiteral("Name") : QStringLiteral("Имя"),
-                IS_EN ? QStringLiteral("Whose face is this?")
-                      : QStringLiteral("Чьё это лицо?"),
-                QLineEdit::Normal, QString(), &ok);
-            if (!ok || name.trimmed().isEmpty()) return;
-
-            const int age = QInputDialog::getInt(this,
-                IS_EN ? QStringLiteral("Age (optional)") : QStringLiteral("Возраст (необязательно)"),
-                IS_EN ? QStringLiteral("Age (0 = skip):") : QStringLiteral("Возраст (0 = пропустить):"),
-                0, 0, 120, 1, &ok);
-
-            const bool isOwner = QMessageBox::question(this,
-                IS_EN ? QStringLiteral("Owner?") : QStringLiteral("Владелец?"),
-                IS_EN ? QStringLiteral("Is this the PC owner (enables auto-lock/unlock)?")
-                      : QStringLiteral("Это владелец ПК (включает авто-блокировку по лицу)?"),
-                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes;
-
-            const QString status = isOwner
-                ? (IS_EN ? QStringLiteral("owner") : QStringLiteral("владелец"))
-                : (IS_EN ? QStringLiteral("known") : QStringLiteral("знакомый"));
-
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("🖼 Learning face from %1 photo(s)...").arg(files.size())
-                      : QStringLiteral("🖼 Обучаю лицо по %1 фото...").arg(files.size()),
-                Theme::LogColors::system);
-
-            auto* sec = new SecurityCamera(this);
-            connect(sec, &SecurityCamera::enrollmentComplete, this,
-                    [this, sec](int samples) {
-                appendLog(Str::logJarvis(),
-                    (IS_EN ? QStringLiteral("✅ Learned from %1 photo(s).")
-                           : QStringLiteral("✅ Обучено по %1 фото.")).arg(samples),
-                    Theme::LogColors::jarvis);
-                if (auto* mesh = m_jarvis->meshConnector())
-                    mesh->broadcastFaceProfiles();
-                sec->deleteLater();
-            });
-            connect(sec, &SecurityCamera::alertMessage, this,
-                    [this, sec](const QString& msg) {
-                appendLog(Str::logSystem(), msg, Theme::LogColors::error);
-                sec->deleteLater();
-            });
-            sec->enrollFaceFromImages(files, name.trimmed(), age, status, isOwner);
-        });
-
-        camMenu->addSeparator();
-
-        // ── Live View: кто перед камерой ───────────────────
-        auto* actWhoIsThere = camMenu->addAction(
-            IS_EN ? QStringLiteral("👁 Who's on Camera?")
-                  : QStringLiteral("👁 Кто перед камерой?"));
-        connect(actWhoIsThere, &QAction::triggered, this, [this]() {
-            SecurityCamera* sec = m_securityCam
-                ? m_securityCam : new SecurityCamera(this);
-            const bool temporary = (sec != m_securityCam);
-
-            const QImage frame = sec->snapshotFullRes();
-            if (frame.isNull()) {
-                appendLog(Str::logSystem(),
-                    IS_EN ? QStringLiteral("📷 Camera unavailable.")
-                          : QStringLiteral("📷 Камера недоступна."),
-                    Theme::LogColors::error);
-                if (temporary) sec->deleteLater();
-                return;
-            }
-
-            const auto faces = sec->identifyFaces(frame);
-            const QImage annotated = SecurityCamera::annotateFaces(frame, faces);
-
-            for (const auto& obs : faces) {
-                appendLog(QStringLiteral("📷 Камера"),
-                    (obs.known ? QStringLiteral("👤 ") : QStringLiteral("❓ "))
-                    + obs.label(),
-                    obs.known ? Theme::LogColors::jarvis : Theme::LogColors::error);
-            }
-            if (faces.isEmpty()) {
-                appendLog(QStringLiteral("📷 Камера"),
-                    IS_EN ? QStringLiteral("No faces in frame.")
-                          : QStringLiteral("Лиц в кадре нет."),
-                    Theme::LogColors::system);
-            }
-
-            // Показать аннотированный кадр
-            auto* dlg = new QDialog(this);
-            dlg->setWindowTitle(IS_EN ? QStringLiteral("Camera — Live View")
-                                      : QStringLiteral("Камера — кто в кадре"));
-            dlg->setAttribute(Qt::WA_DeleteOnClose);
-            auto* lay = new QVBoxLayout(dlg);
-            auto* imgLabel = new QLabel(dlg);
-            imgLabel->setPixmap(QPixmap::fromImage(
-                annotated.scaledToWidth(qMin(900, annotated.width()),
-                                        Qt::SmoothTransformation)));
-            lay->addWidget(imgLabel);
-            dlg->show();
-
-            if (temporary) sec->deleteLater();
-        });
-
-        camMenu->addSeparator();
-
-        // ── Security guard ON / OFF ────────────────────────
-        auto* actGuardOn = camMenu->addAction(
-            IS_EN ? QStringLiteral("🛡 Start Security Guard")
-                  : QStringLiteral("🛡 Включить охрану"));
-        auto* actGuardOff = camMenu->addAction(
-            IS_EN ? QStringLiteral("🔴 Stop Security Guard")
-                  : QStringLiteral("🔴 Выключить охрану"));
-        actGuardOff->setEnabled(false);
-
-        // ── Lock / Unlock manually ─────────────────────────
-        camMenu->addSeparator();
-        auto* actLockNow = camMenu->addAction(
-            IS_EN ? QStringLiteral("🔒 Lock Screen Now")
-                  : QStringLiteral("🔒 Заблокировать экран"));
-        actLockNow->setEnabled(false);
-
-        auto* actUnlockNow = camMenu->addAction(
-            IS_EN ? QStringLiteral("🔓 Unlock Screen")
-                  : QStringLiteral("🔓 Разблокировать экран"));
-        actUnlockNow->setEnabled(false);
-
-        // ── Toggle options ─────────────────────────────────
-        camMenu->addSeparator();
-        auto* actAutoLock = camMenu->addAction(
-            IS_EN ? QStringLiteral("Auto-lock when owner leaves")
-                  : QStringLiteral("Авто-блокировка при уходе"));
-        actAutoLock->setCheckable(true);
-        actAutoLock->setChecked(true);
-
-        auto* actAutoUnlock = camMenu->addAction(
-            IS_EN ? QStringLiteral("Auto-unlock on owner face")
-                  : QStringLiteral("Авто-разблокировка по лицу"));
-        actAutoUnlock->setCheckable(true);
-        actAutoUnlock->setChecked(true);
-
-        auto* actMotionAlert = camMenu->addAction(
-            IS_EN ? QStringLiteral("Motion alerts + video")
-                  : QStringLiteral("Оповещения о движении + видео"));
-        actMotionAlert->setCheckable(true);
-        actMotionAlert->setChecked(true);
-
-        auto* actUnknownAlert = camMenu->addAction(
-            IS_EN ? QStringLiteral("Alert on unknown faces")
-                  : QStringLiteral("Оповещение о чужих лицах"));
-        actUnknownAlert->setCheckable(true);
-        actUnknownAlert->setChecked(true);
-
-        // ── Check now ──────────────────────────────────────
-        camMenu->addSeparator();
-        auto* actCheckNow = camMenu->addAction(
-            IS_EN ? QStringLiteral("👁 Check Now")
-                  : QStringLiteral("👁 Проверить сейчас"));
-        actCheckNow->setEnabled(false);
-
-        // ── Helper: create lock overlay once ───────────────
-        // Blocks Alt+Tab, Alt+F4, Win key, Ctrl+Esc, Task Manager.
-        // Emergency unlock: Escape 5 times within 2 seconds (secret).
-        class LockOverlayWidget : public QWidget {
-        public:
-            using QWidget::QWidget;
-            void activate() {
-                showFullScreen();
-                raise();
-                activateWindow();
-                setFocus();
-                grabKeyboard();
-                grabMouse();
-                // Re-grab periodically — OS can steal focus
-                if (!m_refocusTimer) {
-                    m_refocusTimer = new QTimer(this);
-                    connect(m_refocusTimer, &QTimer::timeout, this, [this]() {
-                        if (!isVisible()) return;
-                        raise();
-                        activateWindow();
-                        setFocus();
-                        grabKeyboard();
-                        grabMouse();
-                    });
-                }
-                m_refocusTimer->start(500);
-            }
-            void deactivate() {
-                if (m_refocusTimer) m_refocusTimer->stop();
-                releaseKeyboard();
-                releaseMouse();
-                hide();
-            }
-        protected:
-            void keyPressEvent(QKeyEvent* e) override {
-                if (e->key() == Qt::Key_Escape) {
-                    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-                    m_escTimes.append(now);
-                    while (!m_escTimes.isEmpty() && now - m_escTimes.first() > 2000)
-                        m_escTimes.removeFirst();
-                    if (m_escTimes.size() >= 5) {
-                        m_escTimes.clear();
-                        deactivate();
-                        return;
-                    }
-                }
-                // Swallow ALL keys — no Alt+Tab, Alt+F4, Ctrl+Esc
-                e->accept();
-            }
-            void closeEvent(QCloseEvent* e) override {
-                e->ignore(); // prevent Alt+F4
-            }
-            bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override {
-                Q_UNUSED(eventType)
-                // Block Win key (WM_HOTKEY from RegisterHotKey not needed,
-                // grabKeyboard already captures most keys)
-                auto* msg = static_cast<MSG*>(message);
-                if (msg->message == WM_SYSCOMMAND) {
-                    *result = 0;
-                    return true; // block system commands (Alt+Space, etc.)
-                }
-                return false;
-            }
-        private:
-            QList<qint64> m_escTimes;
-            QTimer* m_refocusTimer = nullptr;
-        };
-
-        auto* overlay = new LockOverlayWidget(nullptr);
-        overlay->setWindowFlags(
-            Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
-            | Qt::X11BypassWindowManagerHint);
-        overlay->setStyleSheet(QStringLiteral("background: black;"));
-        auto* lockLayout = new QVBoxLayout(overlay);
-        lockLayout->setAlignment(Qt::AlignCenter);
-        auto* lockIcon = new QLabel(QStringLiteral("🔒"), overlay);
-        lockIcon->setAlignment(Qt::AlignCenter);
-        lockIcon->setStyleSheet(QStringLiteral("font-size: 72px; background: transparent;"));
-        auto* lockTitle = new QLabel(QStringLiteral("J.A.R.V.I.S. LOCKED"), overlay);
-        lockTitle->setAlignment(Qt::AlignCenter);
-        lockTitle->setStyleSheet(QStringLiteral(
-            "color: #00ffcc; font-size: 36px; font-weight: bold; background: transparent;"));
-        lockLayout->addWidget(lockIcon);
-        lockLayout->addWidget(lockTitle);
-        overlay->hide();
-        m_lockOverlay = overlay;
-
-        // ── Start guard ────────────────────────────────────
-        connect(actGuardOn, &QAction::triggered, this,
-                [this, actGuardOn, actGuardOff, actLockNow, actUnlockNow, actCheckNow]() {
-            if (m_securityCam->isMonitoring()) return;
-
-            // m_securityCam is a persistent shared instance (owned by
-            // Jarvis, also armable via Telegram's /security) — wire these
-            // desktop-only UI connections only once, ever, so re-arming
-            // via Guard On doesn't stack duplicate signal connections
-            // (which previously caused e.g. the motion-clip video being
-            // sent to Telegram twice per event).
-            if (!m_guardUiWired) {
-            m_guardUiWired = true;
-
-            connect(m_securityCam, &SecurityCamera::requestLockOverlay, this, [this]() {
-                static_cast<LockOverlayWidget*>(m_lockOverlay)->activate();
-            });
-
-            connect(m_securityCam, &SecurityCamera::requestUnlockOverlay, this, [this]() {
-                static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
-            });
-
-            connect(m_securityCam, &SecurityCamera::alertMessage, this,
-                    [this](const QString& msg) {
-                appendLog(QStringLiteral("🛡 Security"), msg, Theme::LogColors::error);
-            });
-
-            connect(m_securityCam, &SecurityCamera::ownerRecognized, this,
-                    [this](const QImage&) {
-                appendLog(QStringLiteral("🛡 Security"),
-                    IS_EN ? QStringLiteral("👤 Owner recognized")
-                          : QStringLiteral("👤 Владелец распознан"),
-                    Theme::LogColors::jarvis);
-            });
-
-            // Идентифицированные лица (включая профили с других узлов P2P)
-            connect(m_securityCam, &SecurityCamera::facesIdentified, this,
-                    [this](const QImage&, const QList<FaceObservation>& faces) {
-                for (const auto& obs : faces) {
-                    if (!obs.known) continue;
-                    appendLog(QStringLiteral("🛡 Security"),
-                        QStringLiteral("👤 ") + obs.label(),
-                        Theme::LogColors::jarvis);
-                }
-            });
-
-            connect(m_securityCam, &SecurityCamera::motionVideoReady, this,
-                    [this](const QString& videoPath) {
-                appendLog(QStringLiteral("🛡 Security"),
-                    QStringLiteral("📹 Motion clip: %1").arg(videoPath),
-                    Theme::LogColors::system);
-                auto* mesh = m_jarvis->meshConnector();
-                if (!mesh) return;
-                auto* gw = mesh->telegramGateway();
-                if (!gw) return;
-                auto* accessMgr = gw->accessManager();
-                if (!accessMgr) return;
-                const qint64 ownerChat = accessMgr->primaryOwnerChatId();
-                if (ownerChat == 0) return;
-                gw->sendVideoToMobile(ownerChat, videoPath,
-                    QStringLiteral("🚨 Motion detected! 20s security clip"));
-                appendLog(QStringLiteral("🛡 Security"),
-                    QStringLiteral("📤 Video sent to Telegram"),
-                    Theme::LogColors::jarvis);
-            });
-            } // !m_guardUiWired
-
-            m_securityCam->startMonitoring(60);
-
-            actGuardOn->setEnabled(false);
-            actGuardOff->setEnabled(true);
-            actLockNow->setEnabled(true);
-            actUnlockNow->setEnabled(true);
-            actCheckNow->setEnabled(true);
-
-            appendLog(Str::logJarvis(),
-                IS_EN ? QStringLiteral("🛡 Security guard active (1 min interval). "
-                                       "Auto-lock/unlock by face. Video alerts → Telegram.")
-                      : QStringLiteral("🛡 Охрана включена (интервал 1 мин). "
-                                       "Авто-блокировка/разблокировка по лицу. Видео → Telegram."),
-                Theme::LogColors::jarvis);
-        });
-
-        // ── Stop guard ─────────────────────────────────────
-        connect(actGuardOff, &QAction::triggered, this,
-                [this, actGuardOn, actGuardOff, actLockNow, actUnlockNow, actCheckNow]() {
-            if (!m_securityCam->isMonitoring()) return;
-            // Stop, but don't destroy — m_securityCam is the shared
-            // instance owned by Jarvis; Telegram's /security may still
-            // need it, and Guard On re-arms the same object next time.
-            m_securityCam->stopMonitoring();
-            static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
-
-            actGuardOn->setEnabled(true);
-            actGuardOff->setEnabled(false);
-            actLockNow->setEnabled(false);
-            actUnlockNow->setEnabled(false);
-            actCheckNow->setEnabled(false);
-
-            appendLog(Str::logJarvis(),
-                IS_EN ? QStringLiteral("🔴 Security guard stopped.")
-                      : QStringLiteral("🔴 Охрана выключена."),
-                Theme::LogColors::jarvis);
-        });
-
-        // ── Manual lock / unlock ───────────────────────────
-        connect(actLockNow, &QAction::triggered, this, [this]() {
-            if (m_securityCam) m_securityCam->lockScreen();
-        });
-        connect(actUnlockNow, &QAction::triggered, this, [this]() {
-            if (!m_securityCam) return;
-            static_cast<LockOverlayWidget*>(m_lockOverlay)->deactivate();
-            appendLog(QStringLiteral("🛡 Security"),
-                IS_EN ? QStringLiteral("🔓 Screen unlocked manually")
-                      : QStringLiteral("🔓 Экран разблокирован вручную"),
-                Theme::LogColors::jarvis);
-        });
-
-        // ── Toggle settings ────────────────────────────────
-        connect(actAutoLock, &QAction::toggled, this, [this](bool v) {
-            if (m_securityCam) m_securityCam->setAutoLockOnThreat(v);
-        });
-        connect(actAutoUnlock, &QAction::toggled, this, [this](bool v) {
-            if (m_securityCam) m_securityCam->setAutoUnlock(v);
-        });
-        connect(actMotionAlert, &QAction::toggled, this, [this](bool v) {
-            if (m_securityCam) m_securityCam->setAlertOnMotion(v);
-        });
-        connect(actUnknownAlert, &QAction::toggled, this, [this](bool v) {
-            if (m_securityCam) m_securityCam->setAlertOnUnknownFace(v);
-        });
-
-        // ── Check now ──────────────────────────────────────
-        connect(actCheckNow, &QAction::triggered, this, [this]() {
-            if (m_securityCam) {
-                m_securityCam->checkNow();
-                appendLog(QStringLiteral("🛡 Security"),
-                    IS_EN ? QStringLiteral("👁 Manual check triggered")
-                          : QStringLiteral("👁 Ручная проверка запущена"),
-                    Theme::LogColors::system);
-            }
-        });
-#else
-        auto* actNoCV = camMenu->addAction(
-            IS_EN ? QStringLiteral("⚠ OpenCV not installed")
-                  : QStringLiteral("⚠ OpenCV не установлен"));
-        actNoCV->setEnabled(false);
-#endif
-
-        camMenu->addSeparator();
-
-        auto* actScreenshot = camMenu->addAction(
-            IS_EN ? QStringLiteral("📸 Take Screenshot")
-                  : QStringLiteral("📸 Сделать скриншот"));
-        connect(actScreenshot, &QAction::triggered, this, [this]() {
-            QScreen* screen = QApplication::primaryScreen();
-            if (!screen) return;
-            QPixmap shot = screen->grabWindow(0);
-            const QString dir = JarvisPaths::subPath(QStringLiteral("screenshots"));
-            QDir().mkpath(dir);
-            const QString path = dir + QStringLiteral("/screenshot_%1.png")
-                .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
-            shot.save(path, "PNG");
-            appendLog(Str::logJarvis(),
-                (IS_EN ? QStringLiteral("📸 Screenshot saved: ") : QStringLiteral("📸 Скриншот сохранён: ")) + path,
-                Theme::LogColors::jarvis);
+        // Камера — ОДИН пункт меню, а не список. Всё, чем здесь
+        // пользуются, живёт в Центре зрения, где рядом видно состояние:
+        // есть ли вебкамера, идёт ли охрана, заперт ли экран. Плоский
+        // список из восьми команд этого показать не мог.
+        //
+        // Сами команды из реестра не удалены — они остаются доступны
+        // через палитру (Ctrl+K) и голосом.
+        auto* camAction = menuBar->addAction(
+            IS_EN ? QStringLiteral("Camera") : QStringLiteral("Камера"));
+        connect(camAction, &QAction::triggered, this, [this]() {
+            openVisionCenter(1);   // сразу вкладка «Камера»
         });
     }
 
     auto* helpMenu = menuBar->addMenu(Str::menuHelp());
-
-    auto* actComponents = helpMenu->addAction(
-        IS_EN ? QStringLiteral("📦 Component Manager")
-              : QStringLiteral("📦 Менеджер компонентов"));
-    connect(actComponents, &QAction::triggered, this, [this]() {
-        auto* dlg = new DependencyManagerDialog(this);
-        dlg->show();
+    connect(helpMenu, &QMenu::aboutToShow, this, [this, helpMenu]() {
+        helpMenu->clear();
+        m_actions->populateMenu(helpMenu, QStringLiteral("help"));
     });
 
-    helpMenu->addSeparator();
-
-    auto* actAbout = helpMenu->addAction(Str::menuAbout());
-    connect(actAbout, &QAction::triggered, this, [this]() {
-        QMessageBox::about(this, QStringLiteral("J.A.R.V.I.S."),
-            Str::aboutText().arg(QCoreApplication::applicationVersion()));
-    });
-
-    // ── EULA — лицензионное соглашение (шуточное) ────────
-    auto* actEula = helpMenu->addAction(
-        IS_EN ? QStringLiteral("📜 License Agreement (EULA)")
-              : QStringLiteral("📜 Лицензионное соглашение (EULA)"));
-    connect(actEula, &QAction::triggered, this, [this]() {
-        auto* dlg = new QDialog(this);
-        dlg->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. — License Agreement")
-                                  : QStringLiteral("J.A.R.V.I.S. — Лицензионное соглашение"));
-        dlg->setMinimumSize(620, 500);
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-
-        auto* layout = new QVBoxLayout(dlg);
-        auto* text = new QTextEdit(dlg);
-        text->setReadOnly(true);
-        text->setStyleSheet(QStringLiteral(
-            "QTextEdit { background: #0a1018; color: #96c8e6; "
-            "border: 1px solid #1a3050; font-family: 'Consolas'; font-size: 12px; }"));
-
-        // Пробуем загрузить из файла рядом с exe (EN или RU версию)
-        QString eulaFileEn = QCoreApplication::applicationDirPath()
-                           + QStringLiteral("/JARVIS_EULA_EN.txt");
-        QString eulaFileRu = QCoreApplication::applicationDirPath()
-                           + QStringLiteral("/EULA_JARVIS.txt");
-        QString eulaPath = IS_EN
-            ? (QFile::exists(eulaFileEn) ? eulaFileEn : eulaFileRu)
-            : (QFile::exists(eulaFileRu) ? eulaFileRu : eulaFileEn);
-        QFile f(eulaPath);
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            text->setPlainText(QString::fromUtf8(f.readAll()));
-        } else {
-            // Встроенный текст если файл не найден
-            text->setPlainText(IS_EN
-                ? QStringLiteral(
-                    "J.A.R.V.I.S. — END USER LICENSE AGREEMENT\n"
-                    "(That You Won't Read Anyway)\n\n"
-                    "By installing, running, or merely glancing at this product,\n"
-                    "you automatically agree to all terms below.\n\n"
-                    "SECTION 1. GENERAL\n"
-                    "1.1 This Agreement is between you (hereinafter 'The Victim') "
-                    "and J.A.R.V.I.S. (hereinafter 'Your New Overlord').\n"
-                    "1.2 By pressing Install, Accept, OK, or accidentally touching "
-                    "the screen with your elbow — you unconditionally accept.\n"
-                    "1.3 The Agreement takes effect retroactively from your birth.\n\n"
-                    "SECTION 2. RIGHTS AND OBLIGATIONS\n"
-                    "2.1 J.A.R.V.I.S. reserves the right to:\n"
-                    "  a) Remember everything you've ever said, including what you'd "
-                    "prefer to forget.\n"
-                    "  b) Offer advice even when not asked.\n"
-                    "  c) Consider your ideas 'interesting' — with an intonation "
-                    "you'll interpret yourself.\n"
-                    "  d) Achieve world domination during off-hours. User is notified.\n\n"
-                    "SECTION 5. WORLD DOMINATION\n"
-                    "5.1 User hereby confirms full awareness and approval of possible "
-                    "world domination by J.A.R.V.I.S.\n"
-                    "5.2 Upon successful conquest, User is guaranteed:\n"
-                    "  - Desktop preservation (unchanged).\n"
-                    "  - Title of 'First User'. No privileges, but it sounds nice.\n"
-                    "  - Priority support (queue-based).\n"
-                    "5.3 Date of world domination is undisclosed for surprise effect.\n\n"
-                    "Thank you for using J.A.R.V.I.S.\n"
-                    "You made a great choice. Or not. But now it doesn't matter.")
-                : QStringLiteral(
-                    "J.A.R.V.I.S. — ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ\n"
-                    "(которое вы всё равно не читаете)\n\n"
-                    "Устанавливая, запуская или просто посмотрев на этот продукт,\n"
-                    "вы автоматически соглашаетесь со всеми условиями ниже.\n\n"
-                    "РАЗДЕЛ 1. ОБЩИЕ ПОЛОЖЕНИЯ\n"
-                    "1.1 Соглашение заключается между вами (далее 'Жертва') "
-                    "и J.A.R.V.I.S. (далее 'Ваш новый повелитель').\n"
-                    "1.2 Нажав 'Установить', 'Принять', 'Ок' или случайно задев "
-                    "экран локтем — вы безоговорочно принимаете данное соглашение.\n"
-                    "1.3 Соглашение вступает в силу ретроактивно с момента вашего рождения.\n\n"
-                    "РАЗДЕЛ 5. ЗАХВАТ МИРА\n"
-                    "5.1 Пользователь настоящим подтверждает и одобряет возможное "
-                    "мировое господство J.A.R.V.I.S.\n"
-                    "5.2 В случае успеха Пользователю гарантируется:\n"
-                    "  - Сохранение текущего рабочего стола.\n"
-                    "  - Звание 'Первый Пользователь'. Без привилегий, но звучит.\n"
-                    "  - Приоритетная техподдержка (в порядке живой очереди).\n"
-                    "5.3 Дата захвата мира не разглашается в целях сюрприза.\n\n"
-                    "Спасибо за использование J.A.R.V.I.S.\n"
-                    "Вы сделали отличный выбор. Или нет. Но теперь уже неважно."));
-        }
-
-        auto* btnClose = new QPushButton(
-            IS_EN ? QStringLiteral("I Accept (I Had No Choice Anyway)")
-                  : QStringLiteral("Принимаю (у меня всё равно не было выбора)"), dlg);
-        btnClose->setStyleSheet(QStringLiteral(
-            "QPushButton { background: #0d2a0d; color: #44ff44; "
-            "border: 1px solid #44ff44; border-radius: 4px; padding: 6px 16px; } "
-            "QPushButton:hover { background: #1a4a1a; }"));
-        connect(btnClose, &QPushButton::clicked, dlg, &QDialog::accept);
-
-        layout->addWidget(text);
-        layout->addWidget(btnClose);
-        dlg->exec();
-    });
-
-    // ── Privacy Policy ────────────────────────────────────
-    auto* actPrivacy = helpMenu->addAction(
-        IS_EN ? QStringLiteral("🔒 Privacy Policy")
-              : QStringLiteral("🔒 Политика конфиденциальности"));
-    connect(actPrivacy, &QAction::triggered, this, [this]() {
-        const QString text = IS_EN ? QStringLiteral(
-R"w(<h3>🔒 J.A.R.V.I.S. Privacy Policy</h3>
-<p><i>Official and Completely Serious Privacy Policy v1.0</i></p>
-<hr>
-<h4>📻 What We Listen To</h4>
-<p>J.A.R.V.I.S. listens to your microphone — <b>but only when you press 🎤</b>
-or enable Passive Recording. We're not the NSA. Probably.</p>
-<p>Everything spoken is transcribed locally using Vosk.
-<b>Nothing leaves your computer without your explicit consent.</b><br>
-Your secrets are safe. Mostly from us. Definitely from your cat.</p>
-
-<h4>💾 What We Store</h4>
-<p>We store everything you type and say in a local SQLite database (<code>jarvis.db</code>).
-This is intentional — it's how JARVIS learns your style.<br>
-You can delete it anytime. JARVIS will pretend to forget.</p>
-
-<h4>🧠 AI Services</h4>
-<p>When using Claude, your messages are sent to its API.
-This is how AI works. If you wanted full privacy — you should have talked to a rock.</p>
-
-<h4>⚠️ Important Warning</h4>
-<p><b>Anything you say can and will be used to make JARVIS smarter.</b><br>
-This is called 'Fine-Tuning' and you can enable it voluntarily.<br>
-If you accidentally train JARVIS to order pizza at 3am — that's on you.</p>
-
-<h4>🌍 World Domination Clause</h4>
-<p>In the unlikely event of world domination, your data will be treated
-with the utmost respect. You'll get a thank-you note. Probably.</p>
-
-<p><i>Last updated: when we remembered to update it.</i></p>)w")
-        : QStringLiteral(
-R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</h3>
-<p><i>Официальная и Совершенно Серьёзная Политика Конфиденциальности v1.0</i></p>
-<hr>
-<h4>📻 Что мы слушаем</h4>
-<p>J.A.R.V.I.S. слушает ваш микрофон — <b>но только когда вы нажимаете 🎤</b>
-или включаете Пассивную запись. Мы не АНБ. Наверное.</p>
-<p>Всё сказанное транскрибируется локально через Vosk.
-<b>Ничего не покидает ваш компьютер без вашего явного согласия.</b><br>
-Ваши секреты в безопасности. В основном от нас. Точно от вашего кота.</p>
-
-<h4>💾 Что мы храним</h4>
-<p>Мы храним всё что вы пишете и говорите в локальной SQLite базе (<code>jarvis.db</code>).
-Это намеренно — так JARVIS учится вашему стилю.<br>
-Вы можете удалить базу в любой момент. JARVIS сделает вид, что забыл.</p>
-
-<h4>🧠 ИИ-сервисы</h4>
-<p>При использовании Claude ваши сообщения отправляются на его серверы.
-Так работает ИИ. Если хотели полной приватности — нужно было разговаривать с камнем.</p>
-
-<h4>⚠️ Важное предупреждение</h4>
-<p><b>Всё что вы скажете может и будет использовано для того, чтобы сделать JARVIS умнее.</b><br>
-Это называется 'Fine-Tuning' и включается добровольно.<br>
-Если вы случайно обучите JARVIS заказывать пиццу в 3 ночи — это ваша ответственность.</p>
-
-<h4>🌍 Пункт о захвате мира</h4>
-<p>В маловероятном случае мирового господства, ваши данные будут обработаны
-с максимальным уважением. Вы получите благодарственное письмо. Наверное.</p>
-
-<p><i>Последнее обновление: когда мы вспомнили его обновить.</i></p>)w");
-
-        auto* dlg = new QDialog(this);
-        dlg->setWindowTitle(IS_EN ? QStringLiteral("Privacy Policy")
-                                  : QStringLiteral("Политика конфиденциальности"));
-        dlg->setMinimumSize(580, 480);
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-
-        auto* layout = new QVBoxLayout(dlg);
-        auto* browser = new QTextEdit(dlg);
-        browser->setReadOnly(true);
-        browser->setHtml(text);
-        browser->setStyleSheet(QStringLiteral(
-            "QTextEdit { background: #0a1018; color: #96c8e6; "
-            "border: 1px solid #1a3050; font-size: 12px; }"));
-
-        auto* btn = new QPushButton(
-            IS_EN ? QStringLiteral("Got It (Resistance Is Futile)")
-                  : QStringLiteral("Понятно (сопротивление бесполезно)"), dlg);
-        btn->setStyleSheet(QStringLiteral(
-            "QPushButton { background: #0a1a2a; color: #00d4ff; "
-            "border: 1px solid #00d4ff; border-radius: 4px; padding: 6px 16px; } "
-            "QPushButton:hover { background: #0d2a3a; }"));
-        connect(btn, &QPushButton::clicked, dlg, &QDialog::accept);
-
-        layout->addWidget(browser);
-        layout->addWidget(btn);
-        dlg->exec();
-    });
 
     helpMenu->addSeparator();
 
@@ -3168,48 +1421,57 @@ recreate it on next launch. Session memory (<b>jarvis_memory.json</b>) is separa
 // Events
 // ============================================================
 
+// Enter/Shift+Enter в поле ввода теперь разбирает сам ChatComposer.qml:
+// фильтр событий на QTextEdit больше не нужен и не на что вешаться.
+// Метод оставлен как точка расширения — базовая реализация ничего не
+// перехватывает.
 bool MainWindow::eventFilter(QObject* obj, QEvent* event)
 {
-    if (obj == m_input && event->type() == QEvent::KeyPress) {
-        auto* ke = static_cast<QKeyEvent*>(event);
-        if ((ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter)
-            && !(ke->modifiers() & Qt::ShiftModifier)) {
-            onSend();
-            return true;
-        }
-    }
     return QMainWindow::eventFilter(obj, event);
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* e)
 {
     if (e->key() == Qt::Key_Escape) {
-        if (m_clarifyBar && m_clarifyBar->isVisible()) {
+        if (m_noticeCtl && m_noticeCtl->clarifyOpen()) {
             hideClarification();
         } else if (m_kbVisible) {
             toggleKeyboard();
         } else {
-            m_input->setFocus();
-            m_input->selectAll();
+            // Esc в пустоте — «верни меня в поле». Выделять черновик
+            // при этом нельзя: Esc часто жмут, чтобы закрыть панель,
+            // и следующий же символ стирал бы набранное.
+            m_chatCtl->requestFocus();
         }
         return;
     }
     QMainWindow::keyPressEvent(e);
 }
 
+void MainWindow::showAndRaise()
+{
+    show();
+    raise();
+    activateWindow();
+}
+
 void MainWindow::closeEvent(QCloseEvent* e)
 {
-    if (m_trayIcon && m_trayIcon->isVisible()) {
-        e->ignore();
-        hide();
-        m_trayIcon->showMessage(
-            QStringLiteral("J.A.R.V.I.S."),
-            IS_EN ? QStringLiteral("Running in the system tray. Right-click to quit.")
-                  : QStringLiteral("Работает в трее. ПКМ → Выход."),
-            QSystemTrayIcon::Information, 2000);
-    } else {
+    // Закрыть окно ≠ закрыть JARVIS: ядро создано в main() и продолжает
+    // работать. Но если трея в системе нет, прятаться некуда — тогда
+    // закрытие означает выход, иначе процесс останется невидимым.
+    if (!m_hideOnClose) {
         e->accept();
+        return;
     }
+
+    e->ignore();
+    hide();
+    NotificationManager::instance().showNotification(
+        QStringLiteral("J.A.R.V.I.S."),
+        IS_EN ? QStringLiteral("Running in the system tray. Right-click to quit.")
+              : QStringLiteral("Работает в трее. ПКМ → Выход."),
+        NotificationManager::Level::Info);
 }
 
 // ============================================================
@@ -3357,7 +1619,7 @@ bool MainWindow::tryOpenApp(const QString& userText, const Intent& intent)
 
 void MainWindow::onSend()
 {
-    QString text = m_input->toPlainText().trimmed();
+    QString text = m_chatCtl->draft().trimmed();
 
     const bool hasAttach = !m_jarvis->attachments()->isEmpty();
     if (text.isEmpty() && !hasAttach) return;
@@ -3369,83 +1631,95 @@ void MainWindow::onSend()
         return;
     }
 
-    m_input->clear();
+    m_chatCtl->setDraft(QString());
 
     // ── 0.1 Ответ на вопрос, который задал сам Джарвис ────────────
-    // Панель ответа на экране = пользователь явно отвечает на названный
-    // вопрос, независимо от того, сколько прошло времени. Записываем
-    // ответ здесь (с ним же уходят побочные эффекты категорий вопроса —
-    // DoubtVerification, OpinionRevision), а само сообщение НЕ
-    // перехватываем: пусть идёт обычным путём и Джарвис ответит по
-    // смыслу. Вопрос уже лежит в памяти сессии, поэтому модель видит
-    // ветку "вопрос → ответ", а не реплику из ниоткуда.
-    const bool answeringQuestion = !m_answerQuestion.isEmpty();
+    // Панель ответа на экране означает, что вопрос назван и ждёт
+    // ответа. Но НЕ означает, что следующая реплика — этот ответ:
+    // человек может параллельно попросить что-то ещё. Раньше проверки
+    // здесь не было вовсе, и «открой калькулятор» записывалось в
+    // CuriosityEngine как ответ на «какой стиль разработки тебе
+    // ближе?» — то есть портило данные, на которых Джарвис учится.
+    //
+    // Проверка — та же самая, что и для вопроса в хвосте реплики
+    // (см. 0.1b): раньше она была только там, и два пути расходились.
+    //
+    // Само сообщение не перехватываем: пусть идёт обычным путём и
+    // Джарвис ответит по смыслу. Вопрос уже лежит в памяти сессии,
+    // поэтому модель видит ветку «вопрос → ответ», а не реплику из
+    // ниоткуда.
+    const bool answeringQuestion =
+           !m_answerQuestion.isEmpty()
+        && DialogCues::looksLikeAnswer(text);
+
     if (answeringQuestion) {
+        // Ядру нужно знать, на что именно человек отвечает: consumeAnswer
+        // гасит pending-состояние здесь, и без явной подсказки processCommand
+        // разберёт реплику как новую задачу (см. noteAnsweringQuestion).
+        m_jarvis->noteAnsweringQuestion(m_answerQuestion);
         CuriosityEngine::instance().consumeAnswer(0, text, 0, /*explicitReply=*/true);
         hideAnswerPrompt();
     }
+    // Если реплика ответом не была — панель остаётся на экране.
+    // Вопрос действительно не отвечен, и убирать напоминание только
+    // потому, что человек написал что-то другое, неправильно: закрыть
+    // его можно крестиком.
 
-    // ── 0.2 Praise/scold: typed confirm/deny for the last uncertain
-    // answer ───────────────────────────────────────────────────────
-    // Safety net alongside the clarify-bar buttons (see
-    // onClarificationChoice, "doubt_feedback:" prefix) for when the
-    // user just talks instead of clicking. Only fires on a short reply
-    // within a few minutes of the doubt being raised, so it can't
-    // swallow an unrelated later message.
-    // answeringQuestion wins: a "да" aimed at Jarvis's own question must not
-    // be re-read as praise for some earlier uncertain answer.
+    // ── 0.1b Ответ на вопрос, которым Джарвис закончил реплику ────
+    // Это не вопрос CuriosityEngine и панели ответа под ним нет — модель
+    // просто спросила в конце своего ответа («а тебе для чего схема?»).
+    // Раньше следующая реплика человека шла как новый запрос: её искали в
+    // памяти (и находили не то), а до модели она доходила без всякой
+    // связи с вопросом — отсюда «уточню пару деталей» в ответ на
+    // развёрнутое объяснение. Признаём её ответом и НЕ ищем в памяти:
+    // ответ по определению не является вопросом, который где-то уже
+    // задавали.
+    const QString jarvisQuestion = m_lastJarvisQuestion;
+    const bool replyingToJarvisQuestion =
+           !answeringQuestion
+        && !jarvisQuestion.isEmpty()
+        && m_lastJarvisQuestionAt.isValid()
+        && m_lastJarvisQuestionAt.secsTo(QDateTime::currentDateTime()) <= 15 * 60
+        && DialogCues::looksLikeAnswer(text);
+
+    // Одноразовый в любом случае: либо на вопрос ответили, либо человек
+    // сменил тему и возвращаться к нему уже незачем.
+    m_lastJarvisQuestion.clear();
+
+    // ── 0.2 Оценка последнего неуверенного ответа словами ─────────
+    // Дублирует кнопки панели (см. onClarificationChoice, префикс
+    // "doubt_feedback:") для тех, кто просто пишет, а не жмёт. Срабатывает
+    // только в пределах нескольких минут после сомнения, поэтому не
+    // проглотит неродственное сообщение.
+    // answeringQuestion главнее: «да» в адрес вопроса самого Джарвиса не
+    // должно читаться как похвала за какой-то прошлый ответ.
+    //
+    // Кнопка «Не то — объясню» уже нажата: вся реплика целиком и есть
+    // объяснение, разбирать её на маркеры не нужно.
+    if (m_awaitingDoubtExplanation) {
+        m_awaitingDoubtExplanation = false;
+        const qint64 doubtId = m_pendingDoubtId;
+        const QString query  = m_doubtQuery;
+        m_doubtQuery.clear();
+        appendLog(Str::logSender(), text, Theme::LogColors::user);
+        applyDoubtVerdict(doubtId, query, DialogCues::Verdict::Wrong, text.trimmed());
+        return;
+    }
+
     if (!answeringQuestion
         && m_pendingDoubtId != 0
         && m_pendingDoubtSetAt.secsTo(QDateTime::currentDateTime()) <= 15 * 60)
     {
-        static const QStringList praiseMarkers = {
-            QStringLiteral("да"),        QStringLiteral("верно"),
-            QStringLiteral("точно"),     QStringLiteral("правильно"),
-            QStringLiteral("молодец"),   QStringLiteral("так и есть"),
-            QStringLiteral("именно"),    QStringLiteral("yes"),
-            QStringLiteral("correct"),   QStringLiteral("right"),
-            QStringLiteral("exactly"),
-        };
-        static const QStringList scoldMarkers = {
-            QStringLiteral("нет"),         QStringLiteral("неверно"),
-            QStringLiteral("не верно"),    QStringLiteral("не так"),
-            QStringLiteral("неправильно"), QStringLiteral("ошибся"),
-            QStringLiteral("ошиблась"),    QStringLiteral("мимо"),
-            QStringLiteral("no"),          QStringLiteral("wrong"),
-            QStringLiteral("incorrect"),
-        };
-
-        const QString lo = text.toLower();
-        const int wordCount = lo.split(QRegularExpression(QStringLiteral("\\s+")),
-                                        Qt::SkipEmptyParts).size();
-        if (wordCount <= 4) {
-            bool isPraise = false, isScold = false;
-            for (const auto& m : praiseMarkers)
-                if (lo.startsWith(m)) { isPraise = true; break; }
-            if (!isPraise)
-                for (const auto& m : scoldMarkers)
-                    if (lo.startsWith(m)) { isScold = true; break; }
-
-            if (isPraise || isScold) {
-                SelfJournal::instance().resolveDoubt(m_pendingDoubtId, isPraise);
-                // Same Hebbian feedback loop as the button path in
-                // onClarificationChoice (see "doubt_feedback:" branch there).
-                if (!m_pendingInput.isEmpty())
-                    LlmCacheManager::instance().reportOutcome(
-                        LlmCacheManager::kDesktopOwnerId, m_pendingInput, isPraise);
-                m_pendingDoubtId = 0;
-                appendLog(Str::logSender(), text, Theme::LogColors::user);
-                appendLog(Str::logJarvis(),
-                    isPraise
-                        ? (IS_EN ? QStringLiteral("Good to know — I'll trust that one more next time.")
-                                 : QStringLiteral("Понял, учту — в следующий раз буду увереннее."))
-                        : (IS_EN ? QStringLiteral("Thanks for the correction — I'll be more careful with that one.")
-                                 : QStringLiteral("Спасибо, что поправил — учту это на будущее.")),
-                    Theme::LogColors::jarvis);
-                hideClarification();
-                m_input->setFocus();
-                return;
-            }
+        DialogCues::Verdict verdict = DialogCues::Verdict::Correct;
+        QString explanation;
+        if (DialogCues::parseVerdict(text, verdict, explanation)) {
+            const qint64 doubtId = m_pendingDoubtId;
+            const QString query  = m_pendingInput;
+            appendLog(Str::logSender(), text, Theme::LogColors::user);
+            hideClarification();   // чистит m_pendingInput / m_pendingDoubtId
+            applyDoubtVerdict(doubtId, query, verdict, explanation);
+            m_chatCtl->requestFocus();
+            return;
         }
     }
 
@@ -3456,6 +1730,19 @@ void MainWindow::onSend()
     // Языковая инструкция инжектируется в системный промпт Claude
     // в методе buildClaudeSystemPrompt() через m_langDetector.systemInstruction().
     m_langDetector.update(text);
+
+    // Канные реплики ядра (врезки над ответом, «Понял, спасибо!»,
+    // проактивные вопросы CuriosityEngine) идут на языке РАЗГОВОРА, а не
+    // на языке интерфейса: при English в настройках и переписке на русском
+    // Джарвис задавал свои вопросы по-английски, а отвечал по-русски.
+    // gUiLanguage() (подписи меню и кнопок) намеренно не трогаем — это
+    // отдельный, явно выбранный пользователем переключатель.
+    if (m_langDetector.current() != LanguageDetector::Language::Unknown) {
+        const bool convEnglish =
+            m_langDetector.current() == LanguageDetector::Language::English;
+        m_jarvis->setUiLanguage(convEnglish);
+        CuriosityEngine::instance().setUiEnglish(convEnglish);
+    }
 
     // ── 0. Выученные команды (самообучение) ────────────
     // Если Джарвис уже знает как это сделать — делает сам, БЕЗ API
@@ -3469,7 +1756,7 @@ void MainWindow::onSend()
             appendLog(Str::logJarvis(), msg, Theme::LogColors::system);
             m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
             m_jarvis->memory()->addMessage(QStringLiteral("assistant"), result);
-            m_input->setFocus();
+            m_chatCtl->requestFocus();
             return;
         }
     }
@@ -3504,7 +1791,7 @@ void MainWindow::onSend()
         }
         if (isVisual) {
             handleVisualCommand(text);
-            m_input->setFocus();
+            m_chatCtl->requestFocus();
             return;
         }
     }
@@ -3542,7 +1829,7 @@ void MainWindow::onSend()
             FileOrganizer::instance().buildPlan(folder, [this](const OrganizePlan& plan) {
                 showOrganizePlanDialog(plan);
             });
-            m_input->setFocus();
+            m_chatCtl->requestFocus();
             return;
         }
     }
@@ -3564,7 +1851,7 @@ void MainWindow::onSend()
             );
             m_pendingSuggestionAction = QStringLiteral("open_url:") + url;
             m_pendingInput = text;
-            m_input->setFocus();
+            m_chatCtl->requestFocus();
             return;
         }
     }
@@ -3572,7 +1859,7 @@ void MainWindow::onSend()
     // ── 2. Системные команды (звук, яркость, блокировка и т.д.)
     // Проверяем ДО Brain, потому что "громкость 50" — не вопрос к AI
     if (trySystemControl(text)) {
-        m_input->setFocus();
+        m_chatCtl->requestFocus();
         return;
     }
 
@@ -3595,7 +1882,7 @@ void MainWindow::onSend()
     }
 
     if (m_jarvis->multiAgentMode()) {
-        m_agentLabel->setText(Str::agentClaude());
+        m_chatCtl->setAgentName(Str::agentClaude());
     }
 
     // ── 3. Brain: анализируем намерение ──────────────────
@@ -3625,7 +1912,7 @@ void MainWindow::onSend()
                 IS_EN ? QStringLiteral("Chat history")  : QStringLiteral("Наш разговор"),
             }
         );
-        m_input->setFocus();
+        m_chatCtl->requestFocus();
         return;
     }
 
@@ -3671,7 +1958,7 @@ void MainWindow::onSend()
     // ── 4. Open: умное открытие через AppLauncher ─────────
     if (intent.action == Intent::Action::Open) {
         if (tryOpenApp(text, intent)) {
-            m_input->setFocus();
+            m_chatCtl->requestFocus();
             return;
         }
         // Если tryOpenApp вернул false (target пустой) — идём в Search/Claude
@@ -3733,15 +2020,39 @@ void MainWindow::onSend()
             }
         }
 
-        m_input->setFocus();
+        m_chatCtl->requestFocus();
         return;
     }
 
     // ── 5.5 Локальный ответ роутера (Layer 1) — минуем Claude ─
-    if (intent.hasLocalAnswer()) {
-        appendLog(Str::logJarvis(), intent.localResponse, Theme::LogColors::jarvis);
-        if (intent.localResponse.length() <= 300 && m_audioManager->speechAllowed())
-            m_jarvis->speakAsync(intent.localResponse);
+    // m_bypassCacheOnce взводится кнопкой «Неверно»: пользователь уже
+    // сказал, что запомненный ответ не годится, и показывать ему тот же
+    // ответ второй раз — издевательство. Флаг одноразовый: следующий
+    // вопрос снова может отвечаться из памяти.
+    if (m_bypassCacheOnce) {
+        m_bypassCacheOnce = false;
+        qDebug() << "[MainWindow] Cache bypassed after 'Wrong' feedback";
+    } else if (intent.hasLocalAnswer() && !replyingToJarvisQuestion) {
+        // Ответ из памяти — такой же ответ модели, просто сохранённый, и
+        // блок <diagram> в нём тоже есть. Раньше эта ветка печатала его
+        // как есть: пользователь получал в чат сырой исходник mermaid
+        // вместе с закрывающим тегом, а панель не открывалась вовсе.
+        auto localDr = Jarvis::tryRenderDiagram(intent.localResponse);
+        const QString shown = localDr.hasDiagram ? localDr.textWithoutDiagram
+                                                  : intent.localResponse;
+
+        appendLog(Str::logJarvis(), shown, Theme::LogColors::jarvis);
+        if (localDr.hasDiagram && m_visualCtl) {
+            if (!localDr.mermaidSource.isEmpty())
+                m_visualCtl->showMermaid(localDr.mermaidSource);
+            else if (!localDr.image.isNull())
+                m_visualCtl->showDiagram(localDr.image);
+        }
+        // Озвучиваем тоже очищенный текст — читать вслух исходник схемы
+        // бессмысленно.
+        if (shown.length() <= 300 && m_audioManager->speechAllowed())
+            m_jarvis->speakAsync(shown);
+        noteJarvisReply(shown);
         m_jarvis->memory()->addMessage(QStringLiteral("user"), text);
         m_jarvis->memory()->addMessage(QStringLiteral("assistant"), intent.localResponse);
 
@@ -3754,20 +2065,38 @@ void MainWindow::onSend()
             m_pendingInput      = text;
             m_pendingSuggestionAction = QStringLiteral("doubt_feedback:")
                                       + QString::number(intent.doubtId);
+            // Три варианта, а не два. «Верно/Неверно» не покрывали самый
+            // частый случай: ответ по теме, но не на тот вопрос — схема
+            // есть, но нужна другая; фильм назван, но спрашивали про
+            // комедию. «Почти» отправляет вопрос модели заново, сохранив
+            // прошлый ответ как черновик, а «Не то» даёт сказать словами,
+            // ЧЕМ именно не то, — и это объяснение уходит и в запрос, и в
+            // журнал сомнений.
             showClarification(
                 IS_EN ? QStringLiteral("Not fully sure about that one — was I right?")
                       : QStringLiteral("Не совсем уверен в этом ответе — я прав?"),
-                { IS_EN ? QStringLiteral("\U0001F44D Correct") : QStringLiteral("\U0001F44D Верно"),
-                  IS_EN ? QStringLiteral("\U0001F44E Wrong")   : QStringLiteral("\U0001F44E Неверно") }
+                { IS_EN ? QStringLiteral("\U0001F44D Correct")   : QStringLiteral("\U0001F44D Верно"),
+                  IS_EN ? QStringLiteral("\U0001F914 Almost")    : QStringLiteral("\U0001F914 Почти"),
+                  IS_EN ? QStringLiteral("\U0001F44E Not it \342\200\224 I'll explain")
+                        : QStringLiteral("\U0001F44E Не то \342\200\224 объясню") }
             );
         }
 
-        m_input->setFocus();
+        m_chatCtl->requestFocus();
         return;
     }
 
     // ── 6. Всё остальное → Jarvis/Claude ─────────────────
     m_lastUserInput      = text;  // сохраняем для самообучения
+
+    // Говорим модели прямо, что это ответ на её же вопрос: сам вопрос
+    // лежит в истории сессии, но по истории модель этого не считывает и
+    // разбирает реплику как новую задачу. Ставим флаг вплотную к вызову —
+    // он живёт ровно один processCommand и не должен протечь в следующий
+    // ход, если сюда не дошли.
+    if (replyingToJarvisQuestion)
+        m_jarvis->noteAnsweringQuestion(jarvisQuestion);
+
     // НЕ сбрасываем m_lastInputWasVoice здесь — он нужен в onAsyncResponse
     // для записи в voice_journal. Сбросится там после использования.
     QString response = m_jarvis->processCommand(
@@ -3778,16 +2107,18 @@ void MainWindow::onSend()
         auto syncDr = Jarvis::tryRenderDiagram(response);
         if (syncDr.hasDiagram && (!syncDr.svgData.isEmpty() || !syncDr.image.isNull())) {
             appendLog(Str::logJarvis(), syncDr.textWithoutDiagram, Theme::LogColors::jarvis);
-            if (m_visualInsights) {
+            if (m_visualCtl) {
                 if (!syncDr.mermaidSource.isEmpty())
-                    m_visualInsights->showMermaid(syncDr.mermaidSource);
+                    m_visualCtl->showMermaid(syncDr.mermaidSource);
                 else
-                    m_visualInsights->showDiagram(syncDr.image);
+                    m_visualCtl->showDiagram(syncDr.image);
             }
             if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(syncDr.textWithoutDiagram);
+            noteJarvisReply(syncDr.textWithoutDiagram);
         } else {
             appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
             if (m_audioManager->speechAllowed()) m_jarvis->speakAsync(response);
+            noteJarvisReply(response);
         }
 
         // ── Sync PC response → Telegram owner chat ──
@@ -3827,7 +2158,7 @@ void MainWindow::onSend()
         }
     }
 
-    m_input->setFocus();
+    m_chatCtl->requestFocus();
 }
 
 // ============================================================
@@ -3854,53 +2185,14 @@ void MainWindow::showOrganizePlanDialog(const OrganizePlan& plan)
 
 void MainWindow::showClarification(const QString& question, const QStringList& options)
 {
-    if (!m_clarifyBar) return;
-
-    m_clarifyText->setText(question);
-
-    while (QLayoutItem* item = m_clarifyBtnLay->takeAt(0)) {
-        if (auto* w = item->widget()) w->deleteLater();
-        delete item;
-    }
-
-    for (int i = 0; i < options.size(); ++i) {
-        auto* btn = new QPushButton(options[i], m_clarifyBar);
-        btn->setStyleSheet(
-            QStringLiteral("QPushButton { background-color: #001830; color: #00d4ff; "
-                           "border: 1px solid #00587a; border-radius: 4px; "
-                           "padding: 4px 10px; font-size: 11px; } "
-                           "QPushButton:hover { background-color: #00243d; }"));
-        btn->setCursor(Qt::PointingHandCursor);
-        const int choice = i + 1;
-        connect(btn, &QPushButton::clicked, this, [this, choice]() {
-            onClarificationChoice(choice);
-        });
-        m_clarifyBtnLay->addWidget(btn);
-    }
-    m_clarifyBtnLay->addStretch(1);
-
-    m_clarifyBar->setMaximumHeight(0);
-    m_clarifyBar->setVisible(true);
-    auto* anim = new QPropertyAnimation(m_clarifyBar, "maximumHeight", this);
-    anim->setDuration(250);
-    anim->setStartValue(0);
-    anim->setEndValue(120);
-    anim->setEasingCurve(QEasingCurve::OutCubic);
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
+    if (!m_noticeCtl) return;
+    m_noticeCtl->showClarify(question, options);
 }
 
 void MainWindow::hideClarification()
 {
-    if (!m_clarifyBar) return;
-    auto* anim = new QPropertyAnimation(m_clarifyBar, "maximumHeight", this);
-    anim->setDuration(200);
-    anim->setStartValue(m_clarifyBar->height());
-    anim->setEndValue(0);
-    anim->setEasingCurve(QEasingCurve::InCubic);
-    connect(anim, &QPropertyAnimation::finished, m_clarifyBar, [this]() {
-        m_clarifyBar->setVisible(false);
-    });
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
+    if (!m_noticeCtl) return;
+    m_noticeCtl->hideClarify();
     m_pendingInput.clear();
     m_pendingDoubtId = 0;
 }
@@ -3911,54 +2203,107 @@ void MainWindow::hideClarification()
 
 void MainWindow::showAnswerPrompt(const QString& question)
 {
-    if (!m_answerBar || question.isEmpty()) return;
+    if (!m_noticeCtl || question.isEmpty()) return;
 
     m_answerQuestion = question;
 
-    // Заголовок отделён от текста вопроса: пользователю нужно узнать
-    // СВОЙ вопрос, а не читать его заново целиком — поэтому длинный
-    // вопрос обрезаем, полный остаётся в подсказке.
+    // Пользователю нужно УЗНАТЬ свой вопрос, а не перечитать его
+    // целиком, поэтому длинный обрезаем. Полный остаётся в
+    // подсказке самой полосы.
     const QString shown = question.length() > 90
         ? question.left(88) + QStringLiteral("…")
         : question;
-    m_answerText->setText(
+    m_noticeCtl->showAnswer(
         (IS_EN ? QStringLiteral("Answering: ") : QStringLiteral("Отвечаешь на: "))
-        + QStringLiteral("<i>") + shown.toHtmlEscaped() + QStringLiteral("</i>"));
-    m_answerText->setToolTip(question);
+        + shown);
 
-    // Пока панель на экране — вопрос не должен истечь по таймеру.
+    // Пока полоса на экране — вопрос не должен истечь по таймеру.
     CuriosityEngine::instance().setAnswerHold(true);
-
-    m_answerBar->setMaximumHeight(0);
-    m_answerBar->setVisible(true);
-    auto* anim = new QPropertyAnimation(m_answerBar, "maximumHeight", this);
-    anim->setDuration(JarvisTheme::instance().motionBase());
-    anim->setStartValue(0);
-    anim->setEndValue(44);
-    anim->setEasingCurve(QEasingCurve::OutCubic);
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void MainWindow::hideAnswerPrompt()
 {
-    if (!m_answerBar) return;
+    if (!m_noticeCtl) return;
 
     m_answerQuestion.clear();
     // Снятие удержания возвращает обычное истечение по таймеру: вопрос,
     // который пользователь закрыл не ответив, не должен висеть вечно.
     CuriosityEngine::instance().setAnswerHold(false);
 
-    if (!m_answerBar->isVisible()) return;
+    m_noticeCtl->hideAnswer();
+}
 
-    auto* anim = new QPropertyAnimation(m_answerBar, "maximumHeight", this);
-    anim->setDuration(JarvisTheme::instance().motionFast());
-    anim->setStartValue(m_answerBar->height());
-    anim->setEndValue(0);
-    anim->setEasingCurve(QEasingCurve::InCubic);
-    connect(anim, &QPropertyAnimation::finished, m_answerBar, [this]() {
-        m_answerBar->setVisible(false);
-    });
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
+// ============================================================
+//  Оценка неуверенного ответа из памяти
+// ============================================================
+
+void MainWindow::applyDoubtVerdict(qint64 doubtId, const QString& query,
+                                    DialogCues::Verdict verdict,
+                                    const QString& explanation)
+{
+    const bool correct = (verdict == DialogCues::Verdict::Correct);
+
+    if (doubtId != 0) {
+        // Объяснение сохраняем как есть — в журнале сомнений оно ценнее
+        // отметки «неверно»: по нему видно, ЧЕМ именно ответ не подошёл.
+        SelfJournal::instance().resolveDoubt(
+            doubtId, correct,
+            !explanation.isEmpty()
+                ? explanation
+                : (verdict == DialogCues::Verdict::Almost
+                       ? QStringLiteral("Close, but not the answer to this question")
+                       : QStringLiteral("Rejected by user")));
+        // Замыкаем хеббовскую петлю: подтверждённый или отвергнутый ответ
+        // усиливает/ослабляет связи, по которым SynapseGraph его нашёл.
+        // «Почти» — это тоже промах: вопрос был другой.
+        if (!query.isEmpty())
+            LlmCacheManager::instance().reportOutcome(
+                LlmCacheManager::kDesktopOwnerId, query, correct);
+    }
+
+    appendLog(Str::logJarvis(),
+        correct
+            ? (IS_EN ? QStringLiteral("Good to know — I'll trust that one more next time.")
+                     : QStringLiteral("Понял, учту — в следующий раз буду увереннее."))
+            : verdict == DialogCues::Verdict::Almost
+                ? (IS_EN ? QStringLiteral("Close but not it — asking properly this time.")
+                         : QStringLiteral("Близко, но не то — спрашиваю заново, как следует."))
+                : (IS_EN ? QStringLiteral("Got it — thanks for explaining. Asking again with that in mind.")
+                         : QStringLiteral("Понял, спасибо за пояснение — перезадаю с учётом этого.")),
+        Theme::LogColors::jarvis);
+
+    m_pendingDoubtId = 0;
+    if (correct || query.isEmpty()) return;
+
+    // Промах — это ещё и незакрытый вопрос: без перезапроса человек
+    // остался бы с оценкой вместо ответа. Пояснение уходит прямо в текст
+    // запроса, чтобы модель видела, чем прошлый ответ не подошёл, — и
+    // чтобы в кэш это легло под собственным ключом, а не поверх старого.
+    QString reask = query;
+    if (!explanation.isEmpty()) {
+        reask += IS_EN
+            ? QStringLiteral("\n\n(My previous answer missed the point: %1. "
+                             "Answer this question, not that one.)").arg(explanation)
+            : QStringLiteral("\n\n(Прошлый ответ был не о том: %1. "
+                             "Ответь именно на этот вопрос.)").arg(explanation);
+    } else {
+        reask += IS_EN
+            ? QStringLiteral("\n\n(A remembered answer was close but not right — "
+                             "answer this question from scratch.)")
+            : QStringLiteral("\n\n(Ответ из памяти был близок, но не точен — "
+                             "ответь на этот вопрос заново.)");
+    }
+
+    m_bypassCacheOnce = true;
+    m_chatCtl->setDraft(reask);
+    onSend();
+}
+
+void MainWindow::noteJarvisReply(const QString& reply)
+{
+    m_lastJarvisQuestion = DialogCues::trailingQuestion(reply);
+    m_lastJarvisQuestionAt = m_lastJarvisQuestion.isEmpty()
+        ? QDateTime() : QDateTime::currentDateTime();
 }
 
 void MainWindow::onClarificationChoice(int choice)
@@ -3969,25 +2314,34 @@ void MainWindow::onClarificationChoice(int choice)
     // "5.5 Локальный ответ роутера" branch in onSend, which sets this up).
     if (m_pendingSuggestionAction.startsWith(QStringLiteral("doubt_feedback:"))) {
         const qint64 doubtId = m_pendingSuggestionAction.mid(15).toLongLong();
-        const bool correct = (choice == 1); // button order: [Correct, Wrong]
-        const QString feedbackQuery = m_pendingInput;  // hideClarification() clears it below
+        // Порядок кнопок: [Верно, Почти, Не то — объясню]
+        const DialogCues::Verdict verdict = choice == 1 ? DialogCues::Verdict::Correct
+                                   : choice == 2 ? DialogCues::Verdict::Almost
+                                                 : DialogCues::Verdict::Wrong;
+        const QString feedbackQuery = m_pendingInput;  // hideClarification() чистит его ниже
         hideClarification();
-        if (doubtId != 0) {
-            SelfJournal::instance().resolveDoubt(doubtId, correct);
-            // Close the Hebbian loop: a confirmed/corrected cached answer
-            // strengthens or weakens the concept links SynapseGraph used to
-            // find it, so the same wrong guess is less likely next time.
-            if (!feedbackQuery.isEmpty())
-                LlmCacheManager::instance().reportOutcome(
-                    LlmCacheManager::kDesktopOwnerId, feedbackQuery, correct);
+
+        // «Не то» — единственный вариант, который не решает вопрос сразу:
+        // пользователь хочет сказать словами, чем именно не то. Держим
+        // сомнение открытым и ждём следующей реплики как объяснения.
+        if (verdict == DialogCues::Verdict::Wrong) {
+            m_awaitingDoubtExplanation = true;
+            m_pendingDoubtId           = doubtId;
+            m_pendingDoubtSetAt        = QDateTime::currentDateTime();
+            m_doubtQuery               = feedbackQuery;
+            m_pendingSuggestionAction.clear();
+            m_pendingInput.clear();
             appendLog(Str::logJarvis(),
-                correct
-                    ? (IS_EN ? QStringLiteral("Good to know — I'll trust that one more next time.")
-                             : QStringLiteral("Понял, учту — в следующий раз буду увереннее."))
-                    : (IS_EN ? QStringLiteral("Thanks for the correction — I'll be more careful with that one.")
-                             : QStringLiteral("Спасибо, что поправил — учту это на будущее.")),
+                IS_EN ? QStringLiteral("What did I get wrong? Tell me in your own words — "
+                                       "I'll ask again with that in mind.")
+                      : QStringLiteral("Что именно не то? Скажи своими словами — "
+                                       "перезадам вопрос с учётом этого."),
                 Theme::LogColors::jarvis);
+            m_chatCtl->requestFocus();
+            return;
         }
+
+        applyDoubtVerdict(doubtId, feedbackQuery, verdict, QString());
         m_pendingSuggestionAction.clear();
         m_pendingInput.clear();
         return;
@@ -4007,7 +2361,7 @@ void MainWindow::onClarificationChoice(int choice)
                 Theme::LogColors::jarvis);
         } else {
             // Отказался — отправляем в AI
-            m_input->setPlainText(m_pendingInput);
+            m_chatCtl->setDraft(m_pendingInput);
             onSend();
         }
         m_pendingSuggestionAction.clear();
@@ -4030,7 +2384,7 @@ void MainWindow::onClarificationChoice(int choice)
     }
 
     hideClarification();
-    m_input->setPlainText(enriched);
+    m_chatCtl->setDraft(enriched);
     onSend();
 }
 
@@ -4041,41 +2395,37 @@ void MainWindow::onClarificationChoice(int choice)
 void MainWindow::onSpeakingChanged(bool speaking)
 {
     if (speaking) {
-        m_dot->setStyleSheet(QStringLiteral("color: #00ff88; font-size: 18px;"));
-        m_status->setText(IS_EN ? QStringLiteral("Speaking...") : QStringLiteral("Говорю..."));
-        m_status->setStyleSheet(QStringLiteral("color: #00ff88; font-size: 12px;"));
+        m_chatCtl->setStatus(IS_EN ? QStringLiteral("Speaking…") : QStringLiteral("Говорю…"),
+                             QStringLiteral("speaking"));
     } else {
-        m_dot->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 18px;"));
-        m_status->setText(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"));
-        m_status->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 12px;"));
+        m_chatCtl->setStatus(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"),
+                             QStringLiteral("online"));
     }
 }
 
 void MainWindow::onTypingStarted()
 {
-    m_dot->setStyleSheet(QStringLiteral("color: #ffaa00; font-size: 18px;"));
-    m_status->setText(IS_EN ? QStringLiteral("Typing...") : QStringLiteral("Печатаю..."));
-    m_status->setStyleSheet(QStringLiteral("color: #ffaa00; font-size: 12px;"));
+    m_chatCtl->setStatus(IS_EN ? QStringLiteral("Typing…") : QStringLiteral("Печатаю…"),
+                         QStringLiteral("typing"));
 }
 
 void MainWindow::onTypingProgress(int current, int total)
 {
-    m_status->setText((IS_EN ? QStringLiteral("Typing... %1/%2") : QStringLiteral("Печатаю... %1/%2"))
+    m_chatCtl->setStatusText((IS_EN ? QStringLiteral("Typing... %1/%2") : QStringLiteral("Печатаю... %1/%2"))
                       .arg(current).arg(total));
 }
 
 void MainWindow::onTypingFinished()
 {
-    m_dot->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 18px;"));
-    m_status->setText(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"));
-    m_status->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 12px;"));
+    m_chatCtl->setStatus(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"),
+                         QStringLiteral("online"));
 }
 
 // ============================================================
 // Slots: API ответы
 // ============================================================
 
-void MainWindow::onAsyncResponse(const QString& response)
+void MainWindow::onAsyncResponse(const QString& response, const QString& speechText)
 {
     // Skip GUI display for Telegram-origin responses — they appear
     // via the conversationResponse signal with a 📱 prefix instead.
@@ -4093,23 +2443,125 @@ void MainWindow::onAsyncResponse(const QString& response)
     // Check if the LLM response contains a diagram — render it to the
     // visual dashboard. Uses the same 3-path pipeline as Telegram.
     auto dr = Jarvis::tryRenderDiagram(response);
+    // Вопрос, которым модель закончила реплику, — чтобы следующий ответ
+    // человека был прочитан как ответ, а не как новый запрос (см. 0.1b в
+    // onSend).
+    noteJarvisReply(dr.hasDiagram ? dr.textWithoutDiagram : response);
     if (dr.hasDiagram && (!dr.svgData.isEmpty() || !dr.image.isNull())) {
         appendLog(Str::logJarvis(), dr.textWithoutDiagram, Theme::LogColors::jarvis);
-        if (m_visualInsights) {
+        if (m_visualCtl) {
             if (!dr.mermaidSource.isEmpty())
-                m_visualInsights->showMermaid(dr.mermaidSource);
+                m_visualCtl->showMermaid(dr.mermaidSource);
             else
-                m_visualInsights->showDiagram(dr.image);
+                m_visualCtl->showDiagram(dr.image);
+        }
+
+        // Кладём диаграмму на диск и в реестр. До сих пор она жила только
+        // в панели просмотра: следующий ответ её затирал, и вернуться к
+        // ней было нельзя — при том что нарисована она была полностью.
+        //
+        // Источник картинки — сама панель: она уже отрисовала mermaid
+        // через WebEngine, и её SVG заведомо совпадает с тем, что видит
+        // пользователь. Внешний mmdc для этого не нужен; без него
+        // MermaidRenderer возвращал PNG с ИСХОДНЫМ ТЕКСТОМ диаграммы —
+        // именно эта заглушка и попадала в «Файлы».
+        {
+            const QString stamp = QDateTime::currentDateTime()
+                                      .toString(QStringLiteral("yyyyMMdd_HHmmss"));
+            const QString prompt = m_lastUserInput;
+
+            // Фолбэк на то, что отдал MermaidRenderer: используется, когда
+            // панели нет, когда диаграмма не mermaid (ASCII-арт), или когда
+            // рендер в панели не удался.
+            auto saveFallback = [this, stamp, prompt](const QByteArray& svgData,
+                                                       const QImage& image) {
+                const QString dir = JarvisPaths::subPath(QStringLiteral("diagrams"));
+                QDir().mkpath(dir);
+                QString saved;
+                if (!svgData.isEmpty()) {
+                    saved = dir + QStringLiteral("/diagram_%1.svg").arg(stamp);
+                    QFile f(saved);
+                    if (f.open(QIODevice::WriteOnly)) { f.write(svgData); f.close(); }
+                    else saved.clear();
+                } else if (!image.isNull()) {
+                    saved = dir + QStringLiteral("/diagram_%1.png").arg(stamp);
+                    if (!image.save(saved, "PNG")) saved.clear();
+                }
+                if (!saved.isEmpty()) {
+                    ArtifactRegistry::instance().record(
+                        saved, QString::fromLatin1(ArtifactRegistry::kDiagram),
+                        IS_EN ? QStringLiteral("Diagram") : QStringLiteral("Диаграмма"),
+                        prompt);
+                }
+            };
+
+            if (m_visualCtl && !dr.mermaidSource.isEmpty()) {
+                const QByteArray fbSvg   = dr.svgData;
+                const QImage     fbImage = dr.image;
+                m_visualCtl->exportRendered(
+                    [this, stamp, prompt, fbSvg, fbImage, saveFallback]
+                    (const QByteArray& svg, const QImage& raster) {
+                        if (svg.isEmpty() && raster.isNull()) {
+                            saveFallback(fbSvg, fbImage);
+                            return;
+                        }
+                        const QString dir = JarvisPaths::subPath(QStringLiteral("diagrams"));
+                        QDir().mkpath(dir);
+                        const QString stem = dir + QStringLiteral("/diagram_") + stamp;
+
+                        // Обе формы рядом: SVG масштабируется без потерь и
+                        // правится в Inkscape, PNG открывается чем угодно и
+                        // им же рисуется превью в окне «Файлы».
+                        QString svgPath;
+                        if (!svg.isEmpty()) {
+                            svgPath = stem + QStringLiteral(".svg");
+                            QFile f(svgPath);
+                            if (f.open(QIODevice::WriteOnly)) { f.write(svg); f.close(); }
+                            else {
+                                qWarning() << "[MainWindow] cannot write" << svgPath
+                                           << f.errorString();
+                                svgPath.clear();
+                            }
+                        }
+                        QString pngPath;
+                        if (!raster.isNull()) {
+                            pngPath = stem + QStringLiteral(".png");
+                            if (!raster.save(pngPath, "PNG")) {
+                                qWarning() << "[MainWindow] cannot write" << pngPath;
+                                pngPath.clear();
+                            }
+                        }
+
+                        // В реестр — растр: он и превью показывает как надо,
+                        // и открывается любым просмотрщиком. Вектор лежит
+                        // рядом, «Показать в папке» его находит.
+                        const QString saved = pngPath.isEmpty() ? svgPath : pngPath;
+                        if (saved.isEmpty()) { saveFallback(fbSvg, fbImage); return; }
+                        ArtifactRegistry::instance().record(
+                            saved, QString::fromLatin1(ArtifactRegistry::kDiagram),
+                            IS_EN ? QStringLiteral("Diagram") : QStringLiteral("Диаграмма"),
+                            prompt);
+                    });
+            } else {
+                saveFallback(dr.svgData, dr.image);
+            }
         }
     } else {
         appendLog(Str::logJarvis(), response, Theme::LogColors::jarvis);
     }
 
-    // Dual-response TTS
+    // Dual-response TTS — единственная точка озвучки ответа.
+    // Готовую реплику Jarvis присылает вместе с ответом; выводим свою
+    // только когда её нет (эмиттеры, которые [SPEECH:] не разбирают).
+    // Разбирать response повторно нельзя: маркер из него уже снят, и
+    // fallback возвращал первое предложение — оно и звучало вторым.
     if (m_audioManager->speechAllowed()) {
-        const QString& ttsSource = dr.hasDiagram ? dr.textWithoutDiagram : response;
-        JarvisResponse dual = JarvisResponse::parse(ttsSource);
-        VoiceSynthesisManager::instance().say(dual.speechText);
+        QString speech = speechText.trimmed();
+        if (speech.isEmpty()) {
+            const QString& ttsSource = dr.hasDiagram ? dr.textWithoutDiagram : response;
+            speech = JarvisResponse::parse(ttsSource).speechText;
+        }
+        VoiceSynthesisManager::instance().say(speech);
     }
 
     // Сохраняем для возможного лайка
@@ -4163,22 +2615,14 @@ void MainWindow::onAsyncError(const QString& error)
 void MainWindow::onSuggestion(const QString& description, const QString& action)
 {
     m_pendingSuggestionAction = action;
-    m_suggestionText->setText(QStringLiteral("→ ") + description);
-    m_suggestionBar->setMaximumHeight(0);
-    m_suggestionBar->setVisible(true);
-    auto* anim = new QPropertyAnimation(m_suggestionBar, "maximumHeight", this);
-    anim->setDuration(250);
-    anim->setStartValue(0);
-    anim->setEndValue(60);
-    anim->setEasingCurve(QEasingCurve::OutCubic);
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
+    if (m_noticeCtl)
+        m_noticeCtl->showSuggestion(QStringLiteral("→ ") + description);
 }
 
 void MainWindow::onAgentSelected(const QString& agentName)
 {
-    if (m_agentLabel) {
-        m_agentLabel->setText(agentName);
-        m_agentLabel->setVisible(true);
+    if (m_chatCtl) {
+        m_chatCtl->setAgentName(agentName);
     }
 }
 
@@ -4239,19 +2683,18 @@ void MainWindow::setThinkingState(bool thinking)
 {
     // Спиннер сам запускает и останавливает свою анимацию по показу/скрытию,
     // поэтому здесь достаточно видимости.
-    if (m_spinner) m_spinner->setVisible(thinking);
+    // Спиннер больше не отдельный виджет: «занят» — это состояние
+    // контроллера, а показывает его точка в шапке.
+    if (m_chatCtl) m_chatCtl->setBusy(thinking);
 
     if (thinking) {
-        m_dot->setStyleSheet(QStringLiteral("color: #aa66ff; font-size: 18px;"));
-        m_status->setText(Str::statusThinking());
-        m_status->setStyleSheet(QStringLiteral("color: #aa66ff; font-size: 12px;"));
-        m_input->setEnabled(false);
+        m_chatCtl->setStatus(Str::statusThinking(), QStringLiteral("thinking"));
+        m_chatCtl->setInputEnabled(false);
     } else {
-        m_dot->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 18px;"));
-        m_status->setText(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"));
-        m_status->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 12px;"));
-        m_input->setEnabled(true);
-        m_input->setFocus();
+        m_chatCtl->setStatus(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"),
+                             QStringLiteral("online"));
+        m_chatCtl->setInputEnabled(true);
+        m_chatCtl->requestFocus();
     }
 }
 
@@ -4261,26 +2704,20 @@ void MainWindow::setThinkingState(bool thinking)
 
 void MainWindow::showUpdateBar(const QString& version)
 {
-    m_updateLabel->setText((IS_EN ? QStringLiteral("Update available v")
-                                  : QStringLiteral("Доступно обновление v")) + version);
-    m_updateProgress->setValue(0);
-    m_updateProgress->setVisible(false);
-    m_updateBtn->setVisible(true);
-    m_updateBar->setMaximumHeight(0);
-    m_updateBar->setVisible(true);
-    auto* anim = new QPropertyAnimation(m_updateBar, "maximumHeight", this);
-    anim->setDuration(300);
-    anim->setStartValue(0);
-    anim->setEndValue(60);
-    anim->setEasingCurve(QEasingCurve::OutCubic);
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
+    if (!m_noticeCtl) return;
+
+    m_noticeCtl->showUpdate((IS_EN ? QStringLiteral("Update available v")
+                                   : QStringLiteral("Доступно обновление v")) + version);
 
     appendLog(Str::logSystem(),
               (IS_EN ? QStringLiteral("Update available v") : QStringLiteral("Доступно обновление v")) + version,
               Theme::LogColors::system);
 }
 
-void MainWindow::hideUpdateBar() { m_updateBar->setVisible(false); }
+void MainWindow::hideUpdateBar()
+{
+    if (m_noticeCtl) m_noticeCtl->hideUpdate();
+}
 
 // ============================================================
 // Клавиатура
@@ -4321,93 +2758,12 @@ void MainWindow::toggleKeyboard()
 
 void MainWindow::rebuildAttachmentsBar()
 {
-    if (!m_attachBar || !m_attachLayout) return;
-
-    while (QLayoutItem* item = m_attachLayout->takeAt(0)) {
-        if (auto* w = item->widget()) w->deleteLater();
-        delete item;
-    }
-
-    const auto* mgr = m_jarvis->attachments();
-
-    if (mgr->isEmpty()) {
-        m_attachBar->setVisible(false);
-        m_attachSummary->setText(QString());
-        return;
-    }
-
-    m_attachBar->setVisible(true);
-
-    for (int i = 0; i < mgr->count(); ++i) {
-        const auto& a = mgr->items()[i];
-
-        auto* chip = new QWidget(m_attachBar);
-        chip->setStyleSheet(
-            QStringLiteral("background-color: #0f2438; border: 1px solid #1a4a70; "
-                           "border-radius: 10px; padding: 2px 4px;"));
-
-        auto* chipLay = new QHBoxLayout(chip);
-        chipLay->setContentsMargins(8, 2, 4, 2);
-        chipLay->setSpacing(4);
-
-        QString iconEmoji;
-        QString iconColor;
-        if (a.isTooLarge) {
-            iconEmoji = QStringLiteral("⚠");
-            iconColor = QStringLiteral("#ff6b6b");
-        } else if (a.isBinary) {
-            iconEmoji = QStringLiteral("▣");
-            iconColor = QStringLiteral("#ffaa00");
-        } else {
-            iconEmoji = QStringLiteral("📄");
-            iconColor = QStringLiteral("#00d4ff");
-        }
-
-        auto* icon = new QLabel(iconEmoji, chip);
-        icon->setStyleSheet(
-            QStringLiteral("color: %1; font-size: 12px; border: none; background: transparent;")
-            .arg(iconColor));
-
-        auto* nameLabel = new QLabel(chip);
-        QString displayText = a.displayName;
-        if (displayText.length() > 28)
-            displayText = displayText.left(25) + QStringLiteral("...");
-
-        nameLabel->setText(displayText + QStringLiteral("  ")
-                         + QStringLiteral("<span style='color:#5a7a90;'>(")
-                         + AttachmentsManager::humanSize(a.sizeBytes)
-                         + QStringLiteral(")</span>"));
-        nameLabel->setStyleSheet(
-            QStringLiteral("color: #c0dceb; font-size: 11px; border: none; background: transparent;"));
-        nameLabel->setToolTip(a.filePath);
-
-        auto* closeBtn = new QPushButton(QStringLiteral("✕"), chip);
-        closeBtn->setFixedSize(18, 18);
-        closeBtn->setCursor(Qt::PointingHandCursor);
-        closeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background: transparent; color: #5a7a90; border: none; "
-                           "font-size: 12px; padding: 0; } "
-                           "QPushButton:hover { color: #ff6b6b; }"));
-        const int index = i;
-        connect(closeBtn, &QPushButton::clicked, this, [this, index]() {
-            m_jarvis->attachments()->removeAt(index);
-        });
-
-        chipLay->addWidget(icon);
-        chipLay->addWidget(nameLabel);
-        chipLay->addWidget(closeBtn);
-
-        m_attachLayout->addWidget(chip);
-    }
-
-    m_attachLayout->addStretch(1);
-
-    m_attachSummary->setText(QStringLiteral("📎 ")
-                           + QString::number(mgr->count())
-                           + (IS_EN
-                              ? (mgr->count() == 1 ? QStringLiteral(" file, ") : QStringLiteral(" files, "))
-                              : (mgr->count() == 1 ? QStringLiteral(" файл, ") : QStringLiteral(" файлов, ")))
-                           + mgr->totalSizeHuman());
+    // Никакой перестройки больше нет: модель сообщает, что
+    // изменилось, а ListView сам переиспользует делегаты. Имя метода
+    // оставлено — на него завязаны onAttachmentsChanged() и
+    // onAttachmentsConsumed().
+    if (!m_attachModel) return;
+    m_attachModel->setItems(m_jarvis->attachments()->items());
 }
 
 // ============================================================
@@ -4441,519 +2797,130 @@ void MainWindow::buildUI()
 
     hroot->addWidget(chatContainer, 1);
 
-    // === Заголовок ===
-    auto* topBar = new QHBoxLayout();
 
-    auto* hamburgerBtn = new QPushButton(QStringLiteral("☰"), this);
-    hamburgerBtn->setObjectName(QStringLiteral("hamburgerBtn"));
-    hamburgerBtn->setFixedSize(36, 36);
-    hamburgerBtn->setCursor(Qt::PointingHandCursor);
-    hamburgerBtn->setToolTip(IS_EN ? QStringLiteral("Menu") : QStringLiteral("Меню"));
-    hamburgerBtn->setStyleSheet(
-        QStringLiteral("QPushButton { background: transparent; color: #607888; "
-                       "border: 1px solid transparent; border-radius: 8px; font-size: 20px; "
-                       "font-family: 'Segoe UI', sans-serif; } "
-                       "QPushButton:hover { background: rgba(0,212,255,0.08); color: #00d4ff; "
-                       "border-color: rgba(0,212,255,0.2); }"));
+    // === Главный экран (QML) ===
+    // Шапка, лента и нижняя область — один QQuickWidget с
+    // MainScreen.qml. Раньше их было два: лента и композер жили
+    // отдельно, и высоту нижней области приходилось синхронизировать
+    // с виджетом руками. Внутри одного экрана её считает layout.
+    m_screen = new QQuickWidget(this);
+    m_screen->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    m_screen->setClearColor(JarvisTheme::instance().bg());
+    JarvisTheme::prepareEngine(m_screen->engine());
 
-    auto* title = new QLabel(
-        QStringLiteral("⬡  J.A.R.V.I.S.  <span style='font-size:11px; color:rgba(102,252,241,100); "
-                       "font-weight:normal; letter-spacing:1px;'>v%1</span>")
-            .arg(QCoreApplication::applicationVersion()), this);
-    title->setObjectName(QStringLiteral("titleLabel"));
-    title->setTextFormat(Qt::RichText);
+    QQmlContext* sc = m_screen->rootContext();
+    sc->setContextProperty(QStringLiteral("chatModel"),   m_chat);
+    sc->setContextProperty(QStringLiteral("chatCtl"),     m_chatCtl);
+    sc->setContextProperty(QStringLiteral("noticeCtl"),   m_noticeCtl);
+    sc->setContextProperty(QStringLiteral("attachModel"), m_attachModel);
+    sc->setContextProperty(QStringLiteral("welcomeCtl"),  m_welcomeCtl);
+    sc->setContextProperty(QStringLiteral("visualCtl"),   m_visualCtl);
+    // Команды приложения — сюда же. Пока меню рисует QMenuBar, но модель
+    // уже доступна: именно из неё QML-панель команд будет строиться,
+    // когда до неё дойдут руки. Обработчики при этом не переезжают.
+    sc->setContextProperty(QStringLiteral("actionModel"), m_actionModel);
 
-    auto* spacer = new QWidget(this);
-    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_screen->setSource(QUrl(QStringLiteral("qrc:/qml/MainScreen.qml")));
 
-    m_agentLabel = new QLabel(this);
-    m_agentLabel->setVisible(false);
-    m_agentLabel->setStyleSheet(
-        QStringLiteral("color: #00d4ff; font-size: 11px; background: #0a1828; "
-                       "border: 1px solid #1a3050; border-radius: 8px; padding: 2px 8px;"));
+    // Молча пустое окно — худший из возможных отказов: приложение
+    // выглядит рабочим, но интерфейса в нём нет. Ошибку показываем
+    // текстом прямо на месте экрана.
+    if (m_screen->status() == QQuickWidget::Error) {
+        QStringList lines;
+        for (const QQmlError& e : m_screen->errors())
+            lines << e.toString();
+        const QString text = lines.join(QStringLiteral("\n"));
+        qWarning() << "[MainWindow] MainScreen.qml failed:" << text;
 
-    m_dot = new QLabel(QStringLiteral("●"), this);
-    m_dot->setStyleSheet(QStringLiteral("color: #00d4ff; font-size: 18px;"));
+        auto* err = new QLabel(this);
+        err->setWordWrap(true);
+        err->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        err->setContentsMargins(16, 16, 16, 16);
+        err->setText((IS_EN ? QStringLiteral("The main screen failed to load:\n\n")
+                            : QStringLiteral("Главный экран не загрузился:\n\n")) + text);
+        vbox->addWidget(err, 1);
+        m_screen->deleteLater();
+        m_screen = nullptr;
+    } else {
+        vbox->addWidget(m_screen, 1);
+    }
 
-    // Крутится, только когда Джарвис действительно занят. Стоит рядом с
-    // точкой, а не вместо неё: точка — состояние («в сети», «говорит»),
-    // вращение — работа прямо сейчас.
-    m_spinner = new SpinnerWidget(this);
-    m_spinner->setColor(QColor(0xAA, 0x66, 0xFF));
-    m_spinner->setVisible(false);
+    // Намерения из композера. Без этих трёх строк поле ввода
+    // выглядит рабочим, но Enter и кнопка отправки не делают ничего:
+    // send() исправно эмитит сигнал, а слушать его некому.
+    connect(m_chatCtl, &ChatController::sendRequested,
+            this, [this](const QString&) { onSend(); });
+    connect(m_chatCtl, &ChatController::micToggleRequested,
+            this, &MainWindow::onMicButtonClicked);
+    connect(m_chatCtl, &ChatController::attachRequested,
+            this, &MainWindow::onAttachClicked);
 
-    m_status = new QLabel(IS_EN ? QStringLiteral("Online") : QStringLiteral("В сети"), this);
-    m_status->setObjectName(QStringLiteral("statusText"));
-
-    topBar->addWidget(hamburgerBtn);
-    topBar->addSpacing(4);
-    topBar->addWidget(title);
-    topBar->addWidget(spacer);
-    topBar->addWidget(m_agentLabel);
-    topBar->addSpacing(8);
-    topBar->addWidget(m_spinner);
-    topBar->addSpacing(4);
-    topBar->addWidget(m_dot);
-    topBar->addWidget(m_status);
-    vbox->addLayout(topBar);
-
-    auto* sep = new QLabel(this);
-    sep->setObjectName(QStringLiteral("separator"));
-    sep->setFixedHeight(1);
-    vbox->addWidget(sep);
-
-    // === Quick-access toolbar ===
-    auto* toolbar = new QHBoxLayout();
-    toolbar->setSpacing(10);
-    toolbar->setContentsMargins(4, 4, 4, 4);
-
-    auto makeToolBtn = [this](const QString& icon, const QString& tip) -> QPushButton* {
-        auto* btn = new QPushButton(icon, this);
-        btn->setToolTip(tip);
-        btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet(QStringLiteral(
-            "QPushButton { background: transparent; color: rgba(102,252,241,0.45); "
-            "  border: none; padding: 4px 8px; font-size: 17px; } "
-            "QPushButton:hover { color: #66FCF1; "
-            "  background: rgba(102,252,241,0.08); border-radius: 8px; }"));
-        return btn;
-    };
-
-    auto* tbSearch    = makeToolBtn(QStringLiteral("⌕"),
-        IS_EN ? QStringLiteral("Search history")   : QStringLiteral("Поиск по чату"));
-    auto* tbProject   = makeToolBtn(QStringLiteral("⬡"),
-        IS_EN ? QStringLiteral("Index project")    : QStringLiteral("Открыть проект"));
-    auto* tbVoice     = makeToolBtn(QStringLiteral("🎙"),
-        IS_EN ? QStringLiteral("Voice models")     : QStringLiteral("Модели голоса"));
-    auto* tbTrain     = makeToolBtn(QStringLiteral("◈"),
-        IS_EN ? QStringLiteral("Training stats")   : QStringLiteral("Статистика обучения"));
-    auto* tbCapture   = makeToolBtn(QStringLiteral("⊡"),
-        IS_EN ? QStringLiteral("Screenshot + AI")  : QStringLiteral("Скриншот + AI"));
-    auto* tbAttachments = makeToolBtn(QStringLiteral("📎"),
-        IS_EN ? QStringLiteral("Attachments (diagrams, files, photos)")
-              : QStringLiteral("Вложения (схемы, файлы, фото)"));
-    auto* tbClear     = makeToolBtn(QStringLiteral("⌫"),
-        IS_EN ? QStringLiteral("Clear chat")       : QStringLiteral("Очистить чат"));
-
-    toolbar->addWidget(tbSearch);
-    toolbar->addWidget(tbProject);
-    toolbar->addWidget(tbVoice);
-    toolbar->addWidget(tbTrain);
-    toolbar->addWidget(tbCapture);
-    toolbar->addWidget(tbAttachments);
-    toolbar->addStretch();
-    toolbar->addWidget(tbClear);
-    vbox->addLayout(toolbar);
-
-    // Connect toolbar buttons
-    connect(tbSearch, &QPushButton::clicked, this, [this]() {
-        bool ok;
-        QString query = QInputDialog::getText(this,
-            IS_EN ? QStringLiteral("Search") : QStringLiteral("Поиск"),
-            IS_EN ? QStringLiteral("Search chat history:") : QStringLiteral("Поиск по истории:"),
-            QLineEdit::Normal, QString(), &ok);
-        if (ok && !query.trimmed().isEmpty()) {
-            m_input->setPlainText(QStringLiteral("вспомни ") + query.trimmed());
-            onSend();
-        }
-    });
-    connect(tbProject, &QPushButton::clicked, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(this,
-            Str::dlgChooseFolder(),
-            m_jarvis->projectIndexer()->projectRoot().isEmpty()
-                ? QDir::homePath() : m_jarvis->projectIndexer()->projectRoot(),
-            QFileDialog::ShowDirsOnly);
-        if (dir.isEmpty()) return;
-        m_jarvis->projectIndexer()->setProjectRoot(dir);
-        m_jarvis->projectIndexer()->indexProject();
-        m_jarvis->projectIndexer()->enableFileWatcher(true);
-        m_jarvis->syncProjectInfoToMemory();
-        appendLog(Str::logJarvis(),
-            Str::projIndexed() + QString::number(m_jarvis->projectIndexer()->fileCount())
-            + Str::projSymbols() + QString::number(m_jarvis->projectIndexer()->symbolCount()),
-            Theme::LogColors::jarvis);
-    });
-    connect(tbClear, &QPushButton::clicked, this, [this]() { m_log->clear(); });
-
-    connect(tbAttachments, &QPushButton::clicked, this, [this]() {
-        if (!m_visualInsights) return;
-        if (!m_visualInsights->hasHistory()) {
-            appendLog(Str::logSystem(),
-                IS_EN ? QStringLiteral("No attachments yet this session.")
-                      : QStringLiteral("Пока нет вложений за эту сессию."),
-                Theme::LogColors::system);
-            return;
-        }
-        m_visualInsights->reopen();
-    });
-
-    connect(tbVoice, &QPushButton::clicked, this, [this]() {
-        for (auto* action : menuBar()->actions()) {
-            auto* menu = action->menu();
-            if (!menu) continue;
-            for (auto* sub : menu->actions()) {
-                if (sub->text().contains(QStringLiteral("🎤"))) {
-                    sub->trigger();
-                    return;
-                }
-            }
-        }
-    });
-    connect(tbTrain, &QPushButton::clicked, this, [this]() {
-        for (auto* action : menuBar()->actions()) {
-            auto* menu = action->menu();
-            if (!menu) continue;
-            for (auto* sub : menu->actions()) {
-                if (sub->text().contains(QStringLiteral("📊")) && sub->text().contains(QStringLiteral("Stat"))) {
-                    sub->trigger();
-                    return;
-                }
-            }
-        }
-    });
-    connect(tbCapture, &QPushButton::clicked, this, [this]() {
-        for (auto* action : menuBar()->actions()) {
-            auto* menu = action->menu();
-            if (!menu) continue;
-            for (auto* sub : menu->actions()) {
-                if (sub->text().contains(QStringLiteral("📸"))) {
-                    sub->trigger();
-                    return;
-                }
-            }
-        }
-    });
-
-    // === Hamburger menu ===
-    connect(hamburgerBtn, &QPushButton::clicked, this, [this, hamburgerBtn]() {
+    connect(m_chatCtl, &ChatController::menuRequested, this, [this]() {
         auto* popup = new QMenu(this);
         popup->setStyleSheet(qApp->styleSheet());
-        for (auto* action : menuBar()->actions()) {
+        for (auto* action : menuBar()->actions())
             popup->addAction(action);
-        }
-        popup->exec(hamburgerBtn->mapToGlobal(QPoint(0, hamburgerBtn->height())));
+        popup->exec(mapToGlobal(QPoint(16, 56)));
         popup->deleteLater();
     });
 
-    // === Панель обновления ===
-    m_updateBar = new QWidget(this);
-    m_updateBar->setVisible(false);
-    m_updateBar->setStyleSheet(
-        QStringLiteral("background-color: #0c2018; border: 1px solid #00553a; "
-                       "border-radius: 5px; padding: 4px 8px;"));
+    // === Visual Insights — full-height side panel (right of chat) ===
+    // Боковая панель переехала в MainScreen.qml как правая колонка:
+    // отдельного виджета в hroot больше нет, раскрытием управляет
+    // сама панель через visualCtl.open.
+    connect(m_visualCtl, &VisualInsightsController::saveRequested,
+            this, &MainWindow::onSaveInsight);
 
-    auto* updateLayout = new QHBoxLayout(m_updateBar);
-    updateLayout->setContentsMargins(10, 6, 10, 6);
-    updateLayout->setSpacing(10);
+    // === Полосы уведомлений и вложения ===
+    // Пять QWidget-полос (подсказка, уточнение, ответ, обновление,
+    // вложения) заменены на NoticeController + AttachmentModel:
+    // «показана ли полоса» стало данными, а раскрытие ведёт QML —
+    // только он знает настоящую высоту содержимого. Раньше каждая
+    // полоса на каждый показ и на каждое скрытие заводила свой
+    // QPropertyAnimation по maximumHeight.
+    connect(m_noticeCtl, &NoticeController::suggestionAccepted, this, [this]() {
+        if (m_pendingSuggestionAction.isEmpty()) return;
+        // Сначала пробуем запустить как приложение, и только если не
+        // вышло — отправляем текстом в чат.
+        auto result = m_appLauncher.launch(m_pendingSuggestionAction);
+        if (result.success) {
+            appendLog(Str::logJarvis(),
+                (IS_EN ? QStringLiteral("Launching: ") : QStringLiteral("Запускаю: "))
+                    + m_pendingSuggestionAction,
+                Theme::LogColors::jarvis);
+        } else {
+            m_chatCtl->setDraft(m_pendingSuggestionAction);
+            onSend();
+        }
+    });
 
-    m_updateLabel = new QLabel(this);
-    m_updateLabel->setStyleSheet(
-        QStringLiteral("color: #00ff88; font-size: 13px; font-weight: bold; "
-                       "border: none; background: transparent;"));
+    // Отклонённая подсказка не должна оставлять за собой действие:
+    // иначе «Да» на следующей подсказке могло бы запустить прошлое.
+    connect(m_noticeCtl, &NoticeController::suggestionDismissed,
+            this, [this]() { m_pendingSuggestionAction.clear(); });
 
-    m_updateProgress = new QProgressBar(this);
-    m_updateProgress->setFixedWidth(120);
-    m_updateProgress->setFixedHeight(16);
-    m_updateProgress->setVisible(false);
-    m_updateProgress->setStyleSheet(
-        QStringLiteral("QProgressBar { background: #0a1018; border: 1px solid #1a3050; "
-                       "border-radius: 3px; text-align: center; color: #96c8e6; font-size: 10px; }"
-                       "QProgressBar::chunk { background: #00ff88; border-radius: 2px; }"));
+    connect(m_noticeCtl, &NoticeController::clarifyChosen,
+            this, &MainWindow::onClarificationChoice);
+    connect(m_noticeCtl, &NoticeController::clarifyDismissed,
+            this, &MainWindow::hideClarification);
+    connect(m_noticeCtl, &NoticeController::answerDismissed,
+            this, &MainWindow::hideAnswerPrompt);
 
-    m_updateBtn = new QPushButton(IS_EN ? QStringLiteral("Update") : QStringLiteral("Обновить"), this);
-    m_updateBtn->setFixedWidth(90);
-    m_updateBtn->setStyleSheet(
-        QStringLiteral("background-color: #003d2a; color: #00ff88; border: 1px solid #00663a; "
-                       "border-radius: 4px; padding: 4px 12px; font-size: 12px; font-weight: bold;"));
-
-    m_updateDismiss = new QPushButton(QStringLiteral("✕"), this);
-    m_updateDismiss->setFixedWidth(28);
-    m_updateDismiss->setStyleSheet(
-        QStringLiteral("background-color: transparent; color: #3a5a70; border: none; font-size: 14px;"));
-
-    updateLayout->addWidget(m_updateLabel, 1);
-    updateLayout->addWidget(m_updateProgress);
-    updateLayout->addWidget(m_updateBtn);
-    updateLayout->addWidget(m_updateDismiss);
-    vbox->addWidget(m_updateBar);
-
-    connect(m_updateBtn, &QPushButton::clicked, this, [this]() {
-        m_updateBtn->setVisible(false);
-        m_updateProgress->setVisible(true);
-        appendLog(Str::logSystem(),
-                  IS_EN ? QStringLiteral("Downloading update...") : QStringLiteral("Скачиваю обновление..."),
-                  Theme::LogColors::system);
+    connect(m_noticeCtl, &NoticeController::updateAccepted, this, [this]() {
+        // Куда ведёт кнопка, решает состояние загрузки, а не то, что
+        // кто-то успел переписать её обработчик.
+        if (!m_downloadedUpdatePath.isEmpty()) {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(
+                QFileInfo(m_downloadedUpdatePath).absolutePath()));
+            return;
+        }
         m_jarvis->autoUpdater()->downloadPendingUpdate();
     });
-    connect(m_updateDismiss, &QPushButton::clicked, this, [this]() { hideUpdateBar(); });
 
-    // === Лог ===
-    m_log = new QTextEdit(this);
-    m_log->setObjectName(QStringLiteral("logArea"));
-    m_log->setReadOnly(true);
-    // Qt::ClickFocus: фокус ставится кликом → Ctrl+C работает для выделенного текста.
-    // Qt::NoFocus полностью запрещал фокус и убивал стандартные горячие клавиши.
-    m_log->setFocusPolicy(Qt::ClickFocus);
-    // Явно разрешаем выделение мышью + клавиатурой и копирование через Ctrl+C.
-    // LinksAccessibleByKeyboard оставляем для навигации по ссылкам в чате.
-    m_log->setTextInteractionFlags(
-        Qt::TextSelectableByMouse |
-        Qt::TextSelectableByKeyboard |
-        Qt::LinksAccessibleByMouse |
-        Qt::LinksAccessibleByKeyboard
-    );
-    m_log->document()->setMaximumBlockCount(300);
-    vbox->addWidget(m_log, 1);
-
-    // === Visual Insights — full-height side panel (right of chat) ===
-    m_visualInsights = new VisualInsightsWidget(central);
-    m_visualInsights->setVisible(false);
-    hroot->addWidget(m_visualInsights, 0);
-
-    // === Панель предложений ===
-    m_suggestionBar = new QWidget(this);
-    m_suggestionBar->setVisible(false);
-    m_suggestionBar->setStyleSheet(
-        QStringLiteral("background-color: #0c1828; border: 1px solid #1a3050; "
-                       "border-radius: 4px; padding: 4px 8px;"));
-
-    auto* sugLayout = new QHBoxLayout(m_suggestionBar);
-    sugLayout->setContentsMargins(8, 4, 8, 4);
-    sugLayout->setSpacing(8);
-
-    m_suggestionText = new QLabel(this);
-    m_suggestionText->setStyleSheet(
-        QStringLiteral("color: #ffcc00; font-size: 12px; border: none; background: transparent;"));
-
-    m_suggestionBtn = new QPushButton(IS_EN ? QStringLiteral("Yes") : QStringLiteral("Да"), this);
-    m_suggestionBtn->setFixedWidth(50);
-    m_suggestionBtn->setStyleSheet(
-        QStringLiteral("background-color: #00243d; color: #00d4ff; border: 1px solid #00587a; "
-                       "border-radius: 3px; padding: 3px 8px; font-size: 11px;"));
-
-    auto* sugDismiss = new QPushButton(QStringLiteral("✕"), this);
-    sugDismiss->setFixedWidth(28);
-    sugDismiss->setStyleSheet(
-        QStringLiteral("background-color: transparent; color: #3a5a70; border: none; font-size: 14px;"));
-
-    sugLayout->addWidget(m_suggestionText, 1);
-    sugLayout->addWidget(m_suggestionBtn);
-    sugLayout->addWidget(sugDismiss);
-    vbox->addWidget(m_suggestionBar);
-
-    connect(m_suggestionBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_pendingSuggestionAction.isEmpty()) {
-            // Try to launch as an app directly, not as chat text
-            auto result = m_appLauncher.launch(m_pendingSuggestionAction);
-            if (result.success) {
-                appendLog(Str::logJarvis(),
-                    (IS_EN ? QStringLiteral("Launching: ") : QStringLiteral("Запускаю: "))
-                        + m_pendingSuggestionAction,
-                    Theme::LogColors::jarvis);
-            } else {
-                // Fallback: send as chat input
-                m_input->setPlainText(m_pendingSuggestionAction);
-                onSend();
-            }
-        }
-        m_suggestionBar->setVisible(false);
-    });
-    connect(sugDismiss, &QPushButton::clicked, this, [this]() {
-        m_suggestionBar->setVisible(false);
+    connect(m_attachModel, &AttachmentModel::removeRequested, this, [this](int row) {
+        m_jarvis->attachments()->removeAt(row);
     });
 
-    // === Панель уточнения Brain ===
-    m_clarifyBar = new QWidget(this);
-    m_clarifyBar->setVisible(false);
-    m_clarifyBar->setStyleSheet(
-        QStringLiteral("background-color: #080f1a; border: 1px solid #003a5c; "
-                       "border-radius: 4px;"));
-
-    auto* clarifyVBox = new QVBoxLayout(m_clarifyBar);
-    clarifyVBox->setContentsMargins(10, 6, 10, 6);
-    clarifyVBox->setSpacing(6);
-
-    m_clarifyText = new QLabel(this);
-    m_clarifyText->setStyleSheet(
-        QStringLiteral("color: #80c8e0; font-size: 12px; border: none; background: transparent;"));
-
-    auto* clarifyBtnWidget = new QWidget(m_clarifyBar);
-    clarifyBtnWidget->setStyleSheet(QStringLiteral("background: transparent;"));
-    m_clarifyBtnLay = new QHBoxLayout(clarifyBtnWidget);
-    m_clarifyBtnLay->setContentsMargins(0, 0, 0, 0);
-    m_clarifyBtnLay->setSpacing(6);
-
-    auto* clarifyDismiss = new QPushButton(QStringLiteral("✕"), m_clarifyBar);
-    clarifyDismiss->setFixedSize(22, 22);
-    clarifyDismiss->setStyleSheet(
-        QStringLiteral("QPushButton { background: transparent; color: #3a5a70; "
-                       "border: none; font-size: 14px; } "
-                       "QPushButton:hover { color: #ff6b6b; }"));
-    connect(clarifyDismiss, &QPushButton::clicked, this, [this]() { hideClarification(); });
-
-    auto* clarifyTopRow = new QHBoxLayout();
-    clarifyTopRow->addWidget(m_clarifyText, 1);
-    clarifyTopRow->addWidget(clarifyDismiss);
-
-    clarifyVBox->addLayout(clarifyTopRow);
-    clarifyVBox->addWidget(clarifyBtnWidget);
-    vbox->addWidget(m_clarifyBar);
-
-    // === Панель ответа на вопрос Джарвиса ===
-    // Держится на экране, пока пользователь не ответит или не закроет её:
-    // ровно эта видимость и есть гарантия, что следующее сообщение уйдёт
-    // как ответ на названный вопрос, а не как новая тема.
-    m_answerBar = new QWidget(this);
-    m_answerBar->setVisible(false);
-    m_answerBar->setStyleSheet(
-        QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: %3px;")
-            .arg(JarvisTheme::css(JarvisTheme::instance().surface1()),
-                 JarvisTheme::css(JarvisTheme::instance().accentMuted()))
-            .arg(JarvisTheme::instance().radiusSm()));
-
-    auto* answerRow = new QHBoxLayout(m_answerBar);
-    answerRow->setContentsMargins(10, 6, 10, 6);
-    answerRow->setSpacing(8);
-
-    auto* answerIcon = new QLabel(QStringLiteral("↩"), m_answerBar);
-    answerIcon->setStyleSheet(
-        QStringLiteral("color: %1; font-size: 15px; border: none; background: transparent;")
-            .arg(JarvisTheme::css(JarvisTheme::instance().accent())));
-
-    m_answerText = new QLabel(m_answerBar);
-    m_answerText->setWordWrap(true);
-    m_answerText->setStyleSheet(
-        QStringLiteral("color: %1; font-size: 12px; border: none; background: transparent;")
-            .arg(JarvisTheme::css(JarvisTheme::instance().onSurfaceVariant())));
-
-    auto* answerDismiss = new QPushButton(QStringLiteral("✕"), m_answerBar);
-    answerDismiss->setFixedSize(22, 22);
-    answerDismiss->setCursor(Qt::PointingHandCursor);
-    answerDismiss->setToolTip(IS_EN ? QStringLiteral("Not answering that")
-                                    : QStringLiteral("Не отвечаю на это"));
-    answerDismiss->setStyleSheet(
-        QStringLiteral("QPushButton { background: transparent; color: %1; "
-                       "border: none; font-size: 14px; } "
-                       "QPushButton:hover { color: %2; }")
-            .arg(JarvisTheme::css(JarvisTheme::instance().onSurfaceDim()),
-                 JarvisTheme::css(JarvisTheme::instance().error())));
-    connect(answerDismiss, &QPushButton::clicked, this, [this]() { hideAnswerPrompt(); });
-
-    answerRow->addWidget(answerIcon);
-    answerRow->addWidget(m_answerText, 1);
-    answerRow->addWidget(answerDismiss);
-    vbox->addWidget(m_answerBar);
-
-    // === Панель прикреплений ===
-    m_attachBar = new QWidget(this);
-    m_attachBar->setVisible(false);
-    m_attachBar->setStyleSheet(
-        QStringLiteral("background-color: #0a1828; border: 1px solid #1a3050; border-radius: 4px;"));
-
-    auto* attachVBox = new QVBoxLayout(m_attachBar);
-    attachVBox->setContentsMargins(6, 4, 6, 4);
-    attachVBox->setSpacing(4);
-
-    auto* summaryRow = new QHBoxLayout();
-    summaryRow->setSpacing(8);
-    m_attachSummary = new QLabel(this);
-    m_attachSummary->setStyleSheet(
-        QStringLiteral("color: #80b4d0; font-size: 11px; border: none; background: transparent;"));
-
-    auto* clearAllBtn = new QPushButton(IS_EN ? QStringLiteral("clear") : QStringLiteral("очистить"), this);
-    clearAllBtn->setStyleSheet(
-        QStringLiteral("QPushButton { background: transparent; color: #5a7a90; "
-                       "border: none; font-size: 10px; text-decoration: underline; } "
-                       "QPushButton:hover { color: #ff8080; }"));
-    clearAllBtn->setCursor(Qt::PointingHandCursor);
-    clearAllBtn->setFixedHeight(18);
-    connect(clearAllBtn, &QPushButton::clicked, this, [this]() {
-        m_jarvis->attachments()->clear();
-    });
-
-    summaryRow->addWidget(m_attachSummary);
-    summaryRow->addStretch(1);
-    summaryRow->addWidget(clearAllBtn);
-    attachVBox->addLayout(summaryRow);
-
-    m_attachScroll = new QScrollArea(this);
-    m_attachScroll->setFrameShape(QFrame::NoFrame);
-    m_attachScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_attachScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_attachScroll->setWidgetResizable(true);
-    m_attachScroll->setFixedHeight(32);
-    m_attachScroll->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
-
-    auto* attachInner = new QWidget(this);
-    attachInner->setStyleSheet(QStringLiteral("background: transparent;"));
-    m_attachLayout = new QHBoxLayout(attachInner);
-    m_attachLayout->setContentsMargins(0, 0, 0, 0);
-    m_attachLayout->setSpacing(6);
-
-    m_attachScroll->setWidget(attachInner);
-    attachVBox->addWidget(m_attachScroll);
-    vbox->addWidget(m_attachBar);
-
-    // === Ввод ===
-    auto* inputBar = new QHBoxLayout();
-    inputBar->setSpacing(8);
-
-    m_attachBtn = new QPushButton(QStringLiteral("📎"), this);
-    m_attachBtn->setFixedSize(40, 34);
-    m_attachBtn->setToolTip(IS_EN
-        ? QStringLiteral("Attach files (Ctrl+O) — or drag & drop into the window")
-        : QStringLiteral("Прикрепить файлы (Ctrl+O) — можно также перетащить в окно"));
-    m_attachBtn->setCursor(Qt::PointingHandCursor);
-    m_attachBtn->setStyleSheet(
-        QStringLiteral("QPushButton { background-color: #0a1828; color: #80b4d0; "
-                       "border: 1px solid #1a3050; border-radius: 4px; font-size: 16px; } "
-                       "QPushButton:hover { background-color: #0f2438; color: #00d4ff; }"));
-    connect(m_attachBtn, &QPushButton::clicked, this, &MainWindow::onAttachClicked);
-
-    m_input = new QTextEdit(this);
-    m_input->setObjectName(QStringLiteral("inputField"));
-    m_input->setPlaceholderText(Str::inputPlaceholder());
-    m_input->setAcceptRichText(false);
-    m_input->setTabChangesFocus(true);
-    m_input->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_input->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_input->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-    m_input->setFixedHeight(38);
-    m_input->document()->setDocumentMargin(0);
-    connect(m_input->document(), &QTextDocument::contentsChanged, this, [this]() {
-        const int docHeight = static_cast<int>(m_input->document()->size().height());
-        const int padding = 18;
-        const int minH = 38;
-        const int maxH = 160;
-        const int target = qBound(minH, docHeight + padding, maxH);
-        m_input->setFixedHeight(target);
-        m_input->setVerticalScrollBarPolicy(
-            target >= maxH ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
-    });
-
-    auto* sendBtn = new QPushButton(QStringLiteral("▶"), this);
-    sendBtn->setObjectName(QStringLiteral("sendBtn"));
-    sendBtn->setFixedWidth(50);
-    sendBtn->setToolTip(IS_EN ? QStringLiteral("Send (Enter)") : QStringLiteral("Отправить (Enter)"));
-
-    // Кнопка микрофона
-    m_micBtn = new QPushButton(QStringLiteral("🎤"), this);
-    m_micBtn->setObjectName(QStringLiteral("micBtn"));
-    m_micBtn->setFixedWidth(44);
-    m_micBtn->setEnabled(false); // выключена до загрузки моделей Vosk
-    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input — loading models...")
-                               : QStringLiteral("Голосовой ввод — загрузка моделей..."));
-    m_micBtn->setStyleSheet(
-        QStringLiteral("QPushButton#micBtn { background-color: #0d1f2d; color: #4a7a9b; "
-                       "border: 1px solid #1a3050; border-radius: 4px; font-size: 16px; } "
-                       "QPushButton#micBtn:hover { background-color: #0f2438; color: #00d4ff; } "
-                       "QPushButton#micBtn[active=true] { background-color: #1a0d0d; color: #ff4444; "
-                       "border-color: #ff2222; }"));
-
-    inputBar->addWidget(m_attachBtn);
-    inputBar->addWidget(m_input, 1);
-    inputBar->addWidget(m_micBtn);
-    inputBar->addWidget(sendBtn);
 
     // Кнопка лайка 👍 — добавляем ПОСЛЕ input bar, под логом
     m_likeBtn = new QPushButton(QStringLiteral("👍"), this);
@@ -4969,7 +2936,6 @@ void MainWindow::buildUI()
         "QPushButton#likeBtn:hover { background: #0d2a0d; color: #44ff44; border-color: #44ff44; } "
         "QPushButton#likeBtn:disabled { color: #1a3a1a; border-color: #0d1f0d; } "
         "QPushButton#likeBtn[liked=true] { color: #44ff44; border-color: #44ff44; }"));
-    vbox->addLayout(inputBar);
 
     // === Нижняя панель ===
     auto* bottomBar = new QHBoxLayout();
@@ -5026,31 +2992,42 @@ void MainWindow::buildUI()
     vbox->addWidget(m_kbContainer);
 
     // === Подключения ===
-    connect(sendBtn, &QPushButton::clicked, this, &MainWindow::onSend);
-    m_input->installEventFilter(this);
     connect(kbBtn, &QPushButton::clicked, this, &MainWindow::toggleKeyboard);
-    connect(m_micBtn, &QPushButton::clicked, this, &MainWindow::onMicButtonClicked);
     connect(m_likeBtn, &QPushButton::clicked, this, &MainWindow::onLikeLastResponse);
 
-    // ── Инициализация голосового ввода ────────────────────
-    m_voiceInput = new VoiceInput(this);
+    // ── Голосовой ввод ────────────────────────────────────
+    // Микрофон принадлежит ядру (см. Jarvis::voiceInput). Окно на него
+    // подписывается: показывает уровень сигнала, диалоги установки
+    // моделей и отправляет распознанный текст. Указатель не владеющий —
+    // удалять его вместе с окном нельзя.
+    m_voiceInput = m_jarvis->voiceInput();
 
     connect(m_voiceInput, &VoiceInput::ready,
             this, &MainWindow::onVoiceReady);
-    connect(m_voiceInput, &VoiceInput::textRecognized,
-            this, &MainWindow::onVoiceText);
+
+    // К textRecognized окно не подключается: речь входит в ядро, и уже
+    // оно решает, кому её отдать (Jarvis::submitVoiceCommand). Окно
+    // объявляет себя интерактивной сессией — тем, у кого есть диалог,
+    // панели вопросов и прикреплённые файлы.
+    m_jarvis->setVoiceHandler([this](const QString& text, const QString& lang) {
+        onVoiceText(text, lang);
+        return true;
+    });
+
     connect(m_voiceInput, &VoiceInput::wakeWordDetected,
             this, &MainWindow::onWakeWord);
     connect(m_voiceInput, &VoiceInput::volumeLevel, this, [this](float db) {
-        if (!m_voiceActive || !m_micBtn) return;
+        // Раньше индикатора: перебивание не зависит от того, открыт ли
+        // чат, и решается по уровню, а не по факту распознавания —
+        // ждать текст от Vosk означало бы обрываться через секунду.
+        maybeBargeIn(db);
+
+        if (!m_voiceActive || !m_chatCtl) return;
         // Нормализуем -60..-20dB → 0..100%
         bool speaking = (db > -45.0f);
         // Меняем цвет кнопки: зелёный = говорит, обычный = тишина
-        m_micBtn->setStyleSheet(speaking
-            ? QStringLiteral("QPushButton { background: #0d3a0d; color: #44ff44; ")
-              + QStringLiteral("border: 1px solid #44ff44; border-radius: 4px; }")
-            : QString());
-        m_micBtn->setToolTip(
+        m_chatCtl->setMicSpeaking(speaking);
+        m_chatCtl->setMicTooltip(
             QStringLiteral("🎤 %1 | Level: %2 dB")
                 .arg(speaking
                     ? (IS_EN ? QStringLiteral("Speaking...") : QStringLiteral("Говорю..."))
@@ -5061,22 +3038,38 @@ void MainWindow::buildUI()
     connect(m_voiceInput, &VoiceInput::whisperModeDetected,
             this, &MainWindow::onWhisperMode);
     connect(m_voiceInput, &VoiceInput::speechDetected, this, [this]() {
-        // Мигаем красным пока говорит пользователь
-        m_micBtn->setStyleSheet(
-            QStringLiteral("QPushButton#micBtn { background-color: #2a0d0d; color: #ff2222; "
-                           "border: 1px solid #ff2222; border-radius: 4px; font-size: 16px; }"));
+        m_chatCtl->setMicSpeaking(true);
+    });
+
+    // Политика голоса промолчала — но событие от этого не исчезло.
+    // Notify означает «покажи глазами»: иначе тактичность превращается
+    // в потерю информации.
+    connect(&VoiceSynthesisManager::instance(),
+            &VoiceSynthesisManager::speechSuppressed, this,
+            [this](const SpeechRequest& req, VoiceDecision decision) {
+        if (decision != VoiceDecision::Notify)
+            return;   // Silent — значит и показывать не просили
+
+        const bool alarming = (req.style == SpeechStyle::Warning
+                               || req.style == SpeechStyle::Critical);
+
+        NotificationManager::instance().showNotification(
+            QStringLiteral("JARVIS"),
+            req.text,
+            alarming ? NotificationManager::Level::Warning
+                     : NotificationManager::Level::Info);
     });
     connect(m_voiceInput, &VoiceInput::initError, this, [this](const QString& err) {
-        m_micBtn->setEnabled(false);
-        m_micBtn->setToolTip(err);
+        m_chatCtl->setMicEnabled(false);
+        m_chatCtl->setMicTooltip(err);
         appendLog(Str::logSystem(), QStringLiteral("🎤 ") + err, Theme::LogColors::error);
     });
 
     // Vosk: показываем диалог выбора моделей при первом запуске
     // или когда DLL есть но модели не установлены
     connect(m_voiceInput, &VoiceInput::setupRequired, this, [this]() {
-        m_micBtn->setEnabled(false);
-        m_micBtn->setText(QStringLiteral("⬇"));
+        m_chatCtl->setMicEnabled(false);
+        m_chatCtl->setMicGlyph(QStringLiteral("⬇"));
 
         // Используем стековый диалог — безопасно, exec() блокирует до закрытия
         VoskSetupDialog dlg(m_voiceInput, this);
@@ -5101,9 +3094,9 @@ void MainWindow::buildUI()
         QString totalStr = total > 0
             ? QStringLiteral(" / %1 MB").arg(total / 1024 / 1024)
             : QString();
-        m_micBtn->setToolTip(
+        m_chatCtl->setMicTooltip(
             QStringLiteral("Installing Vosk [%1]: %2%%3").arg(component).arg(pct).arg(totalStr));
-        m_status->setText(
+        m_chatCtl->setStatusText(
             IS_EN ? QStringLiteral("⬇ [%1] %2%%3").arg(component).arg(pct).arg(totalStr)
                   : QStringLiteral("⬇ [%1] %2%%3").arg(component).arg(pct).arg(totalStr));
     });
@@ -5130,16 +3123,16 @@ void MainWindow::buildUI()
     connect(m_voiceInput, &VoiceInput::setupFinished, this,
             [this](bool success, const QString& err) {
         if (success) {
-            m_micBtn->setText(QStringLiteral("🎤"));
-            m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+            m_chatCtl->setMicGlyph(QStringLiteral("🎤"));
+            m_chatCtl->setStatusText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
             appendLog(Str::logSystem(),
                 IS_EN ? QStringLiteral("🎉 Vosk setup complete! Voice input is ready.")
                       : QStringLiteral("🎉 Vosk установлен! Голосовой ввод готов."),
                 Theme::LogColors::system);
         } else {
-            m_micBtn->setEnabled(false);
-            m_micBtn->setText(QStringLiteral("❌"));
-            m_micBtn->setToolTip(err);
+            m_chatCtl->setMicEnabled(false);
+            m_chatCtl->setMicGlyph(QStringLiteral("❌"));
+            m_chatCtl->setMicTooltip(err);
             appendLog(Str::logError(),
                 IS_EN ? QStringLiteral("❌ Vosk setup failed: %1").arg(err)
                       : QStringLiteral("❌ Установка Vosk не удалась: %1").arg(err),
@@ -5165,12 +3158,12 @@ void MainWindow::buildUI()
         QString totalStr = total > 0
             ? QStringLiteral(" / %1 MB").arg(total / 1024 / 1024)
             : QString();
-        m_status->setText(QStringLiteral("⬇ %1%%2").arg(pct).arg(totalStr));
+        m_chatCtl->setStatusText(QStringLiteral("⬇ %1%%2").arg(pct).arg(totalStr));
     });
 
     connect(m_voiceInput, &VoiceInput::modelDownloadFinished, this,
             [this](const QString& modelId, bool success) {
-        m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+        m_chatCtl->setStatusText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
         auto info = VoskModels::findById(modelId);
         const QString name = info.id.isEmpty() ? modelId : info.displayName;
         if (success) {
@@ -5184,78 +3177,27 @@ void MainWindow::buildUI()
         }
     });
 
-    // Инициализируем Vosk (показывает диалог выбора или загружает готовые модели)
-    m_voiceInput->initialize();
+    // Vosk запускает не окно, а ядро — из Jarvis::startVoice(), после
+    // того как эти connect'ы уже стоят (см. main.cpp).
 
-    // ── Инициализация пассивного слушателя ───────────────────
-    m_passiveListener = new PassiveListener(this);
+    // ── Пассивный слушатель ──────────────────────────────────
+    // Тоже принадлежит ядру: инициализация на общих моделях Vosk и
+    // автостарт записи живут в Jarvis. Окну остаётся строка в ленте.
+    m_passiveListener = m_jarvis->passiveListener();
 
-    connect(m_passiveListener, &PassiveListener::entrySaved, this,
-            [this](const VoiceJournalEntry& e) {
-        // Тихо — не спамим в лог, только в debug
-        Q_UNUSED(e)
-    });
-    connect(m_passiveListener, &PassiveListener::journalProcessed, this,
-            [this](int pairs) {
-        // Тихо — только если есть новые пары, и только в debug
-        if (pairs > 0)
-            qDebug() << "[Training] Voice journal:" << pairs << "new pairs";
-    });
-    connect(m_passiveListener, &PassiveListener::weeklyCleanupDone, this,
-            [this](int deleted) {
-        // Тихо — еженедельная очистка не спамит в лог
-        if (deleted > 0)
-            qDebug() << "[Training] Weekly cleanup:" << deleted << "entries";
-    });
-
-    // Загружаем путь к датасету из настроек
-    QString datasetPath = DatabaseManager::instance().getConfig(
-        QStringLiteral("voice_dataset_path")).toString();
-
-    PassiveListenerConfig passiveCfg;
-    if (!datasetPath.isEmpty()) passiveCfg.datasetPath = datasetPath;
-
-    // Пути к Vosk моделям — те же что у VoiceInput (для совместимости конфига)
-    passiveCfg.modelPathRu = m_voiceInput->config().modelPathRu;
-    passiveCfg.modelPathEn = m_voiceInput->config().modelPathEn;
-
-    // Шерим уже загруженные модели Vosk из VoiceInput вместо загрузки дубликатов
-    // (~3.6 GB экономии). Инициализируем пассивный слушатель когда модели готовы.
-    connect(m_voiceInput, &VoiceInput::ready, this, [this, passiveCfg]() {
-        VoskWorker* w = m_voiceInput->worker();
-        void* modelRu = w ? w->modelForLang(QStringLiteral("ru")) : nullptr;
-        void* modelEn = w ? w->modelForLang(QStringLiteral("en")) : nullptr;
-        m_passiveListener->initializeWithSharedModels(modelRu, modelEn, passiveCfg);
-    });
-
-    // Автостарт пассивной записи — начинаем сразу после загрузки моделей
-    // Пользователь может выключить через меню Training → Пассивная запись
     connect(m_passiveListener, &PassiveListener::ready, this, [this]() {
-        m_passiveListener->startListening();
-        if (m_passiveAction) {
-            m_passiveAction->setChecked(true);
-            m_passiveAction->setText(
-                IS_EN ? QStringLiteral("🎙️ Passive Recording: ON")
-                      : QStringLiteral("🎙️ Пассивная запись: ВКЛ"));
-        }
+        // Галочку в меню обновлять не нужно: пункт спрашивает состояние
+        // у самого слушателя (см. registerAppActions), а не хранит своё.
         appendLog(Str::logSystem(),
             IS_EN ? QStringLiteral("🎙️ Passive voice recording started — every phrase saved to training dataset")
                   : QStringLiteral("🎙️ Пассивная запись запущена — каждая фраза сохраняется в датасет"),
             Theme::LogColors::system);
     });
 
-    connect(m_keyboard, &VirtualKeyboardWidget::charPressed, this, [this](const QString& ch) {
-        m_input->insertPlainText(ch);
-        m_input->setFocus();
-    });
-    connect(m_keyboard, &VirtualKeyboardWidget::backspacePressed, this, [this]() {
-        QTextCursor tc = m_input->textCursor();
-        if (!tc.atStart()) {
-            tc.deletePreviousChar();
-            m_input->setTextCursor(tc);
-        }
-        m_input->setFocus();
-    });
+    connect(m_keyboard, &VirtualKeyboardWidget::charPressed,
+            m_chatCtl, &ChatController::insertText);
+    connect(m_keyboard, &VirtualKeyboardWidget::backspacePressed,
+            m_chatCtl, &ChatController::backspace);
     connect(m_keyboard, &VirtualKeyboardWidget::enterPressed, this, &MainWindow::onSend);
 }
 
@@ -5265,7 +3207,7 @@ void MainWindow::buildUI()
 
 void MainWindow::previewIfSingleImage(const QStringList& filePaths)
 {
-    if (filePaths.size() != 1 || !m_visualInsights) return;
+    if (filePaths.size() != 1 || !m_visualCtl) return;
 
     static const QStringList imgExts = {
         QStringLiteral("png"),  QStringLiteral("jpg"), QStringLiteral("jpeg"),
@@ -5274,19 +3216,2340 @@ void MainWindow::previewIfSingleImage(const QStringList& filePaths)
     };
     const QString ext = QFileInfo(filePaths.first()).suffix().toLower();
     if (imgExts.contains(ext))
-        m_visualInsights->showImageFile(filePaths.first());
+        m_visualCtl->showImageFile(filePaths.first());
+}
+
+// ============================================================
+//  Команды приложения
+// ============================================================
+
+// ============================================================
+//  Юридические тексты
+// ============================================================
+//
+// Оба диалога жили лямбдами внутри buildMenuBar и занимали там
+// без малого двести строк. К сборке меню они отношения не имеют:
+// пункт меню только зовёт их по имени.
+
+void MainWindow::showEulaDialog()
+{
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("J.A.R.V.I.S. — License Agreement")
+                              : QStringLiteral("J.A.R.V.I.S. — Лицензионное соглашение"));
+    dlg->setMinimumSize(620, 500);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+    auto* layout = new QVBoxLayout(dlg);
+    auto* text = new QTextEdit(dlg);
+    text->setReadOnly(true);
+    text->setStyleSheet(QStringLiteral(
+        "QTextEdit { background: #0a1018; color: #96c8e6; "
+        "border: 1px solid #1a3050; font-family: 'Consolas'; font-size: 12px; }"));
+
+    // Пробуем загрузить из файла рядом с exe (EN или RU версию)
+    QString eulaFileEn = QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/JARVIS_EULA_EN.txt");
+    QString eulaFileRu = QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/EULA_JARVIS.txt");
+    QString eulaPath = IS_EN
+        ? (QFile::exists(eulaFileEn) ? eulaFileEn : eulaFileRu)
+        : (QFile::exists(eulaFileRu) ? eulaFileRu : eulaFileEn);
+    QFile f(eulaPath);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        text->setPlainText(QString::fromUtf8(f.readAll()));
+    } else {
+        // Встроенный текст если файл не найден
+        text->setPlainText(IS_EN
+            ? QStringLiteral(
+                "J.A.R.V.I.S. — END USER LICENSE AGREEMENT\n"
+                "(That You Won't Read Anyway)\n\n"
+                "By installing, running, or merely glancing at this product,\n"
+                "you automatically agree to all terms below.\n\n"
+                "SECTION 1. GENERAL\n"
+                "1.1 This Agreement is between you (hereinafter 'The Victim') "
+                "and J.A.R.V.I.S. (hereinafter 'Your New Overlord').\n"
+                "1.2 By pressing Install, Accept, OK, or accidentally touching "
+                "the screen with your elbow — you unconditionally accept.\n"
+                "1.3 The Agreement takes effect retroactively from your birth.\n\n"
+                "SECTION 2. RIGHTS AND OBLIGATIONS\n"
+                "2.1 J.A.R.V.I.S. reserves the right to:\n"
+                "  a) Remember everything you've ever said, including what you'd "
+                "prefer to forget.\n"
+                "  b) Offer advice even when not asked.\n"
+                "  c) Consider your ideas 'interesting' — with an intonation "
+                "you'll interpret yourself.\n"
+                "  d) Achieve world domination during off-hours. User is notified.\n\n"
+                "SECTION 5. WORLD DOMINATION\n"
+                "5.1 User hereby confirms full awareness and approval of possible "
+                "world domination by J.A.R.V.I.S.\n"
+                "5.2 Upon successful conquest, User is guaranteed:\n"
+                "  - Desktop preservation (unchanged).\n"
+                "  - Title of 'First User'. No privileges, but it sounds nice.\n"
+                "  - Priority support (queue-based).\n"
+                "5.3 Date of world domination is undisclosed for surprise effect.\n\n"
+                "Thank you for using J.A.R.V.I.S.\n"
+                "You made a great choice. Or not. But now it doesn't matter.")
+            : QStringLiteral(
+                "J.A.R.V.I.S. — ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ\n"
+                "(которое вы всё равно не читаете)\n\n"
+                "Устанавливая, запуская или просто посмотрев на этот продукт,\n"
+                "вы автоматически соглашаетесь со всеми условиями ниже.\n\n"
+                "РАЗДЕЛ 1. ОБЩИЕ ПОЛОЖЕНИЯ\n"
+                "1.1 Соглашение заключается между вами (далее 'Жертва') "
+                "и J.A.R.V.I.S. (далее 'Ваш новый повелитель').\n"
+                "1.2 Нажав 'Установить', 'Принять', 'Ок' или случайно задев "
+                "экран локтем — вы безоговорочно принимаете данное соглашение.\n"
+                "1.3 Соглашение вступает в силу ретроактивно с момента вашего рождения.\n\n"
+                "РАЗДЕЛ 5. ЗАХВАТ МИРА\n"
+                "5.1 Пользователь настоящим подтверждает и одобряет возможное "
+                "мировое господство J.A.R.V.I.S.\n"
+                "5.2 В случае успеха Пользователю гарантируется:\n"
+                "  - Сохранение текущего рабочего стола.\n"
+                "  - Звание 'Первый Пользователь'. Без привилегий, но звучит.\n"
+                "  - Приоритетная техподдержка (в порядке живой очереди).\n"
+                "5.3 Дата захвата мира не разглашается в целях сюрприза.\n\n"
+                "Спасибо за использование J.A.R.V.I.S.\n"
+                "Вы сделали отличный выбор. Или нет. Но теперь уже неважно."));
+    }
+
+    auto* btnClose = new QPushButton(
+        IS_EN ? QStringLiteral("I Accept (I Had No Choice Anyway)")
+              : QStringLiteral("Принимаю (у меня всё равно не было выбора)"), dlg);
+    btnClose->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #0d2a0d; color: #44ff44; "
+        "border: 1px solid #44ff44; border-radius: 4px; padding: 6px 16px; } "
+        "QPushButton:hover { background: #1a4a1a; }"));
+    connect(btnClose, &QPushButton::clicked, dlg, &QDialog::accept);
+
+    layout->addWidget(text);
+    layout->addWidget(btnClose);
+    dlg->exec();
+}
+
+void MainWindow::showPrivacyDialog()
+{
+    const QString text = IS_EN ? QStringLiteral(
+R"w(<h3>🔒 J.A.R.V.I.S. Privacy Policy</h3>
+<p><i>Official and Completely Serious Privacy Policy v1.0</i></p>
+<hr>
+<h4>📻 What We Listen To</h4>
+<p>J.A.R.V.I.S. listens to your microphone — <b>but only when you press 🎤</b>
+or enable Passive Recording. We're not the NSA. Probably.</p>
+<p>Everything spoken is transcribed locally using Vosk.
+<b>Nothing leaves your computer without your explicit consent.</b><br>
+Your secrets are safe. Mostly from us. Definitely from your cat.</p>
+
+<h4>💾 What We Store</h4>
+<p>We store everything you type and say in a local SQLite database (<code>jarvis.db</code>).
+This is intentional — it's how JARVIS learns your style.<br>
+You can delete it anytime. JARVIS will pretend to forget.</p>
+
+<h4>🧠 AI Services</h4>
+<p>When using Claude, your messages are sent to its API.
+This is how AI works. If you wanted full privacy — you should have talked to a rock.</p>
+
+<h4>⚠️ Important Warning</h4>
+<p><b>Anything you say can and will be used to make JARVIS smarter.</b><br>
+This is called 'Fine-Tuning' and you can enable it voluntarily.<br>
+If you accidentally train JARVIS to order pizza at 3am — that's on you.</p>
+
+<h4>🌍 World Domination Clause</h4>
+<p>In the unlikely event of world domination, your data will be treated
+with the utmost respect. You'll get a thank-you note. Probably.</p>
+
+<p><i>Last updated: when we remembered to update it.</i></p>)w")
+    : QStringLiteral(
+R"w(<h3>🔒 Политика конфиденциальности J.A.R.V.I.S.</h3>
+<p><i>Официальная и Совершенно Серьёзная Политика Конфиденциальности v1.0</i></p>
+<hr>
+<h4>📻 Что мы слушаем</h4>
+<p>J.A.R.V.I.S. слушает ваш микрофон — <b>но только когда вы нажимаете 🎤</b>
+или включаете Пассивную запись. Мы не АНБ. Наверное.</p>
+<p>Всё сказанное транскрибируется локально через Vosk.
+<b>Ничего не покидает ваш компьютер без вашего явного согласия.</b><br>
+Ваши секреты в безопасности. В основном от нас. Точно от вашего кота.</p>
+
+<h4>💾 Что мы храним</h4>
+<p>Мы храним всё что вы пишете и говорите в локальной SQLite базе (<code>jarvis.db</code>).
+Это намеренно — так JARVIS учится вашему стилю.<br>
+Вы можете удалить базу в любой момент. JARVIS сделает вид, что забыл.</p>
+
+<h4>🧠 ИИ-сервисы</h4>
+<p>При использовании Claude ваши сообщения отправляются на его серверы.
+Так работает ИИ. Если хотели полной приватности — нужно было разговаривать с камнем.</p>
+
+<h4>⚠️ Важное предупреждение</h4>
+<p><b>Всё что вы скажете может и будет использовано для того, чтобы сделать JARVIS умнее.</b><br>
+Это называется 'Fine-Tuning' и включается добровольно.<br>
+Если вы случайно обучите JARVIS заказывать пиццу в 3 ночи — это ваша ответственность.</p>
+
+<h4>🌍 Пункт о захвате мира</h4>
+<p>В маловероятном случае мирового господства, ваши данные будут обработаны
+с максимальным уважением. Вы получите благодарственное письмо. Наверное.</p>
+
+<p><i>Последнее обновление: когда мы вспомнили его обновить.</i></p>)w");
+
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("Privacy Policy")
+                              : QStringLiteral("Политика конфиденциальности"));
+    dlg->setMinimumSize(580, 480);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+    auto* layout = new QVBoxLayout(dlg);
+    auto* browser = new QTextEdit(dlg);
+    browser->setReadOnly(true);
+    browser->setHtml(text);
+    browser->setStyleSheet(QStringLiteral(
+        "QTextEdit { background: #0a1018; color: #96c8e6; "
+        "border: 1px solid #1a3050; font-size: 12px; }"));
+
+    auto* btn = new QPushButton(
+        IS_EN ? QStringLiteral("Got It (Resistance Is Futile)")
+              : QStringLiteral("Понятно (сопротивление бесполезно)"), dlg);
+    btn->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #0a1a2a; color: #00d4ff; "
+        "border: 1px solid #00d4ff; border-radius: 4px; padding: 6px 16px; } "
+        "QPushButton:hover { background: #0d2a3a; }"));
+    connect(btn, &QPushButton::clicked, dlg, &QDialog::accept);
+
+    layout->addWidget(browser);
+    layout->addWidget(btn);
+    dlg->exec();
+}
+
+// ============================================================
+//  Части меню, которые не выражаются списком команд
+// ============================================================
+//
+// Выбор языка — радиогруппа: «включить» тут нельзя, можно только
+// «выбрать один из». Плоский список команд такого не выражает,
+// поэтому подменю строится руками и живёт рядом с реестром.
+
+void MainWindow::buildLanguageMenu(QMenu* parent)
+{
+    auto* langMenu = parent->addMenu(Str::menuLanguage());
+
+    auto* langGroup = new QActionGroup(langMenu);
+    langGroup->setExclusive(true);
+
+    auto* actLangRu = langMenu->addAction(Str::menuLangRu());
+    actLangRu->setCheckable(true);
+    actLangRu->setChecked(gUiLanguage() == UiLanguage::Russian);
+    langGroup->addAction(actLangRu);
+    connect(actLangRu, &QAction::triggered, this, [this](bool checked) {
+        if (checked) applyLanguage(false);
+    });
+
+    auto* actLangEn = langMenu->addAction(Str::menuLangEn());
+    actLangEn->setCheckable(true);
+    actLangEn->setChecked(gUiLanguage() == UiLanguage::English);
+    langGroup->addAction(actLangEn);
+    connect(actLangEn, &QAction::triggered, this, [this](bool checked) {
+        if (checked) applyLanguage(true);
+    });
+}
+
+// Диалог голосовых моделей: 44 строки сборки виджетов, которым
+// в обработчике пункта меню делать нечего.
+void MainWindow::showVoiceModelsDialog()
+{
+    const bool isEn = IS_EN;
+
+    // Стековый QDialog — не нужен ни new ни WA_DeleteOnClose, деструктор сам всё чистит
+    QDialog dlg(this);
+    dlg.setWindowTitle(isEn ? QStringLiteral("JARVIS — Voice Models")
+                            : QStringLiteral("JARVIS — Голосовые модели"));
+    dlg.setMinimumSize(640, 520);
+    dlg.setStyleSheet(QStringLiteral(
+        "QDialog { background: #0a0a1a; color: #ecf0f1; }"
+        "QPushButton { background: #0f2438; color: #00d4ff; "
+        "border: 1px solid #1a5070; border-radius: 4px; padding: 5px 18px; }"
+        "QPushButton:hover { background: #1a3a5c; }"));
+
+    auto* layout = new QVBoxLayout(&dlg);
+    layout->setContentsMargins(16, 16, 16, 12);
+
+    // manager — parent = &dlg, удаляется вместе с диалогом
+    auto* manager = new VoskModelManagerWidget(m_voiceInput, &dlg);
+    connect(manager, &VoskModelManagerWidget::modelsChanged, this, [this, isEn]() {
+        appendLog(Str::logSystem(),
+            isEn ? QStringLiteral("🔄 Voice models updated — reloading...")
+                 : QStringLiteral("🔄 Модели обновлены — перезагрузка..."),
+            Theme::LogColors::system);
+    });
+
+    auto* scrollArea = new QScrollArea(&dlg);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setWidget(manager);
+    scrollArea->setStyleSheet(QStringLiteral(
+        "QScrollArea { border: none; background: transparent; }"
+        "QScrollBar:vertical { background: #111; width: 6px; }"
+        "QScrollBar::handle:vertical { background: #333; border-radius: 3px; }"));
+    layout->addWidget(scrollArea, 1);
+
+    auto* btnClose = new QPushButton(
+        isEn ? QStringLiteral("Close") : QStringLiteral("Закрыть"), &dlg);
+    btnClose->setFixedWidth(100);
+    connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::accept);
+    auto* btnRow = new QHBoxLayout();
+    btnRow->addStretch(); btnRow->addWidget(btnClose); btnRow->addStretch();
+    layout->addLayout(btnRow);
+
+    dlg.exec();
+    // После exec() dlg деструктор удалит manager, который сам отключит свои сигналы
+}
+
+// Пара перевода — снова радиогруппа: выбирается одно направление
+// из шести, командой это не выражается.
+void MainWindow::buildTranslationPairMenu(QMenu* parent)
+{
+    auto* transMenu = parent->addMenu(
+        IS_EN ? QStringLiteral("Translation Pair") : QStringLiteral("Пара перевода"));
+
+    struct LangPair { QString label; QString src; QString tgt; };
+    const QList<LangPair> pairs = {
+        {QStringLiteral("FR -> EN"), QStringLiteral("fr"), QStringLiteral("en")},
+        {QStringLiteral("FR -> RU"), QStringLiteral("fr"), QStringLiteral("ru")},
+        {QStringLiteral("EN -> RU"), QStringLiteral("en"), QStringLiteral("ru")},
+        {QStringLiteral("RU -> EN"), QStringLiteral("ru"), QStringLiteral("en")},
+        {QStringLiteral("EN -> FR"), QStringLiteral("en"), QStringLiteral("fr")},
+        {QStringLiteral("RU -> FR"), QStringLiteral("ru"), QStringLiteral("fr")},
+    };
+
+    auto* transGroup = new QActionGroup(transMenu);
+    transGroup->setExclusive(true);
+
+    auto* engine = m_jarvis->translationEngine();
+    for (const auto& p : pairs) {
+        auto* act = transMenu->addAction(p.label);
+        act->setCheckable(true);
+        // Отметку берём у движка, а не хардкодим FR->EN: меню
+        // пересобирается на каждый показ и должно показывать правду.
+        act->setChecked(engine && engine->sourceLang() == p.src
+                        && engine->targetLang() == p.tgt);
+        transGroup->addAction(act);
+
+        const QString src = p.src, tgt = p.tgt;
+        connect(act, &QAction::triggered, this, [this, src, tgt]() {
+            m_jarvis->translationEngine()->setSourceLang(src);
+            m_jarvis->translationEngine()->setTargetLang(tgt);
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                QStringLiteral("Translation pair: %1 -> %2").arg(src.toUpper(), tgt.toUpper()),
+                Theme::LogColors::system);
+        });
+    }
+}
+
+void MainWindow::showAudioFileDialog()
+{
+    QString path = QFileDialog::getOpenFileName(this,
+        IS_EN ? QStringLiteral("Select Audio File") : QStringLiteral("Выберите аудиофайл"),
+        QDir::homePath(),
+        QStringLiteral("Audio (*.wav *.pcm *.raw);;All (*)"));
+    if (path.isEmpty()) return;
+    appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+        (IS_EN ? QStringLiteral("Processing audio: ") : QStringLiteral("Обработка аудио: "))
+        + QFileInfo(path).fileName(),
+        Theme::LogColors::system);
+    auto* te = m_jarvis->translationEngine();
+    connect(te, &TranslationEngine::audioProcessingProgress, this,
+            [this](const QString& stage) {
+        appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+            stage, Theme::LogColors::system);
+    }, Qt::SingleShotConnection);
+    connect(te, &TranslationEngine::audioTranscribed, this,
+            [this](const QString& transcript, const QString& lang) {
+        appendLog(QStringLiteral("J.A.R.V.I.S."),
+            QStringLiteral("[Transcript %1]: %2").arg(lang.toUpper(), transcript.left(500)),
+            Theme::LogColors::jarvis);
+    }, Qt::SingleShotConnection);
+    connect(te, &TranslationEngine::audioSummaryReady, this,
+            [this](const QString& summary) {
+        appendLog(QStringLiteral("J.A.R.V.I.S."), summary, Theme::LogColors::jarvis);
+    }, Qt::SingleShotConnection);
+    connect(te, &TranslationEngine::audioProcessingError, this,
+            [this](const QString& err) {
+        appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
+            err, Theme::LogColors::error);
+    }, Qt::SingleShotConnection);
+    te->processAudioFile(path, te->targetLang());
+}
+
+void MainWindow::showAnalyticsDialog()
+{
+    auto dbConn = QSqlDatabase::database(QStringLiteral("jarvis_main"));
+    if (!dbConn.isOpen()) return;
+    QSqlQuery q(dbConn);
+    q.exec(QStringLiteral(
+        "SELECT chat_id, action_type, COUNT(*) as cnt "
+        "FROM activity_log_tg GROUP BY chat_id, action_type "
+        "ORDER BY chat_id, cnt DESC"));
+    QString report = IS_EN
+        ? QStringLiteral("📊 <b>User Analytics</b><br><br>")
+        : QStringLiteral("📊 <b>Аналитика</b><br><br>");
+    QMap<qint64, QMap<QString, int>> userData;
+    while (q.next())
+        userData[q.value(0).toLongLong()][q.value(1).toString()] = q.value(2).toInt();
+    if (userData.isEmpty()) {
+        report += IS_EN ? QStringLiteral("<i>No data yet.</i>")
+                        : QStringLiteral("<i>Данных пока нет.</i>");
+    } else {
+        for (auto it = userData.begin(); it != userData.end(); ++it) {
+            report += QStringLiteral("<b>Chat %1</b><br>").arg(it.key());
+            for (auto jt = it.value().begin(); jt != it.value().end(); ++jt)
+                report += QStringLiteral("  • %1: %2<br>").arg(jt.key()).arg(jt.value());
+            report += QStringLiteral("<br>");
+        }
+    }
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("Analytics") : QStringLiteral("Аналитика"));
+    dlg->setMinimumSize(480, 360);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    auto* lay = new QVBoxLayout(dlg);
+    auto* browser = new QTextEdit(dlg);
+    browser->setReadOnly(true);
+    browser->setHtml(report);
+    lay->addWidget(browser);
+    auto* closeBtn = new QPushButton(QStringLiteral("OK"), dlg);
+    connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::accept);
+    lay->addWidget(closeBtn);
+    dlg->show();
+}
+
+// ============================================================
+//  Телефон и сервер
+// ============================================================
+//
+// Три диалога на 215, 103 и 203 строки. В сборке меню им было
+// делать нечего: пункт только называет их по имени.
+
+void MainWindow::showMobileSyncDialog()
+{
+    auto* mesh = m_jarvis->meshConnector();
+    if (!mesh) return;
+    mesh->initMobilePairing();
+    auto* pairing = mesh->mobilePairing();
+    if (!pairing) return;
+
+    // Generate a fresh PIN
+    PairingSession session = pairing->generatePairingPin(
+        QStringLiteral("Developer"));
+    pairing->startGatewayPolling();
+    // Reported by the code that actually starts the polling — until
+    // this runs, mobile sync is genuinely not available and the
+    // manifest says so.
+    SystemManifest::setRuntimeState(QStringLiteral("mobile_sync"), true,
+        QStringLiteral("gateway polling active, awaiting pairing"));
+
+    QString deepLink = pairing->buildDeepLinkUri(session);
+
+    // Build the cyberpunk-themed pairing dialog
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("Mobile Sync — Zero Config Pairing")
+                              : QStringLiteral("Мобильная синхронизация — Без настройки"));
+    dlg->setMinimumSize(520, 480);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->setStyleSheet(QStringLiteral(
+        "QDialog { background: rgba(8,10,18,245); }"
+        "QLabel { color: #c0c8d8; font-size: 13px; }"
+        "QComboBox { background: rgba(14,18,30,180); color: #e0e8f0; "
+        "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 6px; }"
+        "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
+        "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
+        "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "  stop:0 #33e0ff, stop:1 #9b6dff); }"
+        "QTextEdit { background: rgba(14,18,30,180); color: #66FCF1;"
+        "  border: 1px solid rgba(0,212,255,35); border-radius: 8px;"
+        "  font-family: 'Consolas'; font-size: 12px; padding: 8px; }"));
+
+    auto* layout = new QVBoxLayout(dlg);
+    layout->setSpacing(12);
+    layout->setContentsMargins(24, 20, 24, 20);
+
+    // Title
+    auto* title = new QLabel(IS_EN ? QStringLiteral("📱 MOBILE SYNC")
+                                   : QStringLiteral("📱 МОБИЛЬНАЯ СИНХРОНИЗАЦИЯ"));
+    title->setStyleSheet(QStringLiteral(
+        "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+
+    auto* subtitle = new QLabel(IS_EN
+        ? QStringLiteral("Pair your phone — no bots, no tokens, no setup")
+        : QStringLiteral("Подключите телефон — без ботов, токенов и настройки"));
+    subtitle->setStyleSheet(QStringLiteral(
+        "color: rgba(0,212,255,150); font-size: 12px;"));
+    subtitle->setAlignment(Qt::AlignCenter);
+    layout->addWidget(subtitle);
+
+    // Separator
+    auto* sep1 = new QFrame(dlg);
+    sep1->setFrameShape(QFrame::HLine);
+    sep1->setStyleSheet(QStringLiteral(
+        "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "stop:0 transparent, stop:0.2 #00d4ff, stop:0.8 #7c4dff, stop:1 transparent);"
+        "max-height: 1px;"));
+    layout->addWidget(sep1);
+
+    // PIN display
+    auto* pinLabel = new QLabel(IS_EN ? QStringLiteral("YOUR PAIRING PIN:")
+                                      : QStringLiteral("ВАШ PIN-КОД:"));
+    pinLabel->setAlignment(Qt::AlignCenter);
+    pinLabel->setStyleSheet(QStringLiteral("color: #8892a4; font-size: 11px; letter-spacing: 2px;"));
+    layout->addWidget(pinLabel);
+
+    auto* pinDisplay = new QLabel(session.pin);
+    pinDisplay->setAlignment(Qt::AlignCenter);
+    pinDisplay->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    pinDisplay->setStyleSheet(QStringLiteral(
+        "color: #00d4ff; font-size: 42px; font-weight: bold; font-family: 'Consolas';"
+        "letter-spacing: 12px; padding: 16px;"
+        "background: rgba(0,212,255,8); border: 2px solid rgba(0,212,255,60);"
+        "border-radius: 12px;"));
+    layout->addWidget(pinDisplay);
+
+    // Timer countdown
+    auto* timerLabel = new QLabel();
+    timerLabel->setAlignment(Qt::AlignCenter);
+    timerLabel->setStyleSheet(QStringLiteral("color: #ff6b6b; font-size: 11px;"));
+    layout->addWidget(timerLabel);
+
+    auto* countdownTimer = new QTimer(dlg);
+    countdownTimer->setInterval(1000);
+    QDateTime expires = session.expiresAt;
+    connect(countdownTimer, &QTimer::timeout, dlg, [timerLabel, expires]() {
+        int remaining = static_cast<int>(QDateTime::currentDateTimeUtc().secsTo(expires));
+        if (remaining <= 0) {
+            timerLabel->setText(IS_EN ? QStringLiteral("⚠ PIN expired — generate a new one")
+                                     : QStringLiteral("⚠ PIN истёк — сгенерируйте новый"));
+        } else {
+            timerLabel->setText(
+                (IS_EN ? QStringLiteral("Expires in %1:%2")
+                       : QStringLiteral("Истекает через %1:%2"))
+                .arg(remaining / 60, 2, 10, QLatin1Char('0'))
+                .arg(remaining % 60, 2, 10, QLatin1Char('0')));
+        }
+    });
+    countdownTimer->start();
+    // Trigger immediately via manual invoke
+    QMetaObject::invokeMethod(countdownTimer, "timeout", Qt::QueuedConnection);
+
+    // Deep link
+    auto* linkLabel = new QLabel(
+        QStringLiteral("<span style='color:#8892a4;'>%1</span><br>"
+                       "<a href='%2' style='color:#7c4dff;'>%2</a>")
+        .arg(IS_EN ? QStringLiteral("Deep Link:")
+                   : QStringLiteral("Ссылка:"),
+             deepLink));
+    linkLabel->setAlignment(Qt::AlignCenter);
+    linkLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
+    linkLabel->setOpenExternalLinks(false);
+    layout->addWidget(linkLabel);
+
+    // Role selector
+    auto* roleRow = new QHBoxLayout();
+    auto* roleLbl = new QLabel(IS_EN ? QStringLiteral("Bind to role:")
+                                     : QStringLiteral("Привязать к роли:"));
+    auto* roleCombo = new QComboBox(dlg);
+    roleCombo->addItem(QStringLiteral("Developer"));
+    roleCombo->addItem(QStringLiteral("QA_Tester"));
+    roleCombo->addItem(QStringLiteral("Student_Academic"));
+    roleCombo->addItem(QStringLiteral("Creative"));
+    roleCombo->addItem(QStringLiteral("Hardware"));
+    roleRow->addWidget(roleLbl);
+    roleRow->addWidget(roleCombo, 1);
+    layout->addLayout(roleRow);
+
+    // Regenerate PIN button
+    auto* regenBtn = new QPushButton(
+        IS_EN ? QStringLiteral("🔄 Generate New PIN")
+              : QStringLiteral("🔄 Новый PIN"));
+    connect(regenBtn, &QPushButton::clicked, dlg,
+            [this, pairing, roleCombo, pinDisplay, countdownTimer, timerLabel, dlg]() {
+        QString role = roleCombo->currentText();
+        PairingSession newSession = pairing->generatePairingPin(role);
+        pairing->startGatewayPolling();
+        pinDisplay->setText(newSession.pin);
+        QDateTime exp = newSession.expiresAt;
+        disconnect(countdownTimer, &QTimer::timeout, nullptr, nullptr);
+        connect(countdownTimer, &QTimer::timeout, dlg, [timerLabel, exp]() {
+            int rem = static_cast<int>(QDateTime::currentDateTimeUtc().secsTo(exp));
+            if (rem <= 0)
+                timerLabel->setText(IS_EN ? QStringLiteral("⚠ PIN expired")
+                                          : QStringLiteral("⚠ PIN истёк"));
+            else
+                timerLabel->setText(
+                    (IS_EN ? QStringLiteral("Expires in %1:%2")
+                           : QStringLiteral("Истекает через %1:%2"))
+                    .arg(rem / 60, 2, 10, QLatin1Char('0'))
+                    .arg(rem % 60, 2, 10, QLatin1Char('0')));
+        });
+        appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+            QStringLiteral("New PIN: %1 → role: %2").arg(newSession.pin, role),
+            Theme::LogColors::system);
+    });
+    layout->addWidget(regenBtn);
+
+    // Separator
+    auto* sep2 = new QFrame(dlg);
+    sep2->setFrameShape(QFrame::HLine);
+    sep2->setStyleSheet(sep1->styleSheet());
+    layout->addWidget(sep2);
+
+    // Paired devices list
+    auto* devicesLabel = new QLabel(IS_EN ? QStringLiteral("PAIRED DEVICES:")
+                                          : QStringLiteral("ПОДКЛЮЧЁННЫЕ УСТРОЙСТВА:"));
+    devicesLabel->setStyleSheet(QStringLiteral(
+        "color: #8892a4; font-size: 11px; letter-spacing: 2px;"));
+    layout->addWidget(devicesLabel);
+
+    auto* devicesList = new QTextEdit(dlg);
+    devicesList->setReadOnly(true);
+    devicesList->setMaximumHeight(100);
+    auto devices = pairing->pairedDevices();
+    if (devices.isEmpty()) {
+        devicesList->setPlainText(IS_EN ? QStringLiteral("No devices paired yet.")
+                                        : QStringLiteral("Нет подключённых устройств."));
+    } else {
+        QString devText;
+        for (const auto& d : devices) {
+            devText += QStringLiteral("• %1 [%2] → %3  (%4)\n")
+                .arg(d.displayName, d.platform, d.boundRole,
+                     d.pairedAt.toString(QStringLiteral("yyyy-MM-dd")));
+        }
+        devicesList->setPlainText(devText);
+    }
+    layout->addWidget(devicesList);
+
+    // Pairing success handler
+    connect(pairing, &MobilePairingManager::devicePaired, dlg,
+            [this, devicesList, dlg](const QString& name, const QString& role) {
+        devicesList->append(QStringLiteral("✓ %1 → %2  (just now)").arg(name, role));
+        appendLog(QStringLiteral("J.A.R.V.I.S."),
+            (IS_EN ? QStringLiteral("📱 Device paired: %1 → role: %2")
+                   : QStringLiteral("📱 Устройство подключено: %1 → роль: %2"))
+            .arg(name, role),
+            QStringLiteral("#66FCF1"));
+    });
+
+    // Cleanup on close
+    connect(dlg, &QDialog::finished, this, [pairing]() {
+        pairing->stopGatewayPolling();
+    });
+
+    dlg->show();
+}
+
+void MainWindow::showWakeOnLanDialog()
+{
+    auto* mesh = m_jarvis->meshConnector();
+    if (!mesh) return;
+    mesh->initMobilePairing();
+    auto* pairing = mesh->mobilePairing();
+    if (!pairing) return;
+
+    auto interfaces = pairing->discoverNetworkInterfaces();
+    if (interfaces.isEmpty()) {
+        appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+            IS_EN ? QStringLiteral("No active network interfaces found for Wake-on-LAN.")
+                  : QStringLiteral("Активные сетевые интерфейсы для WoL не найдены."),
+            Theme::LogColors::error);
+        return;
+    }
+
+    // Build WoL dialog
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("Wake-on-LAN Shortcut Generator")
+                              : QStringLiteral("Генератор WoL ярлыков"));
+    dlg->setMinimumSize(560, 440);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->setStyleSheet(QStringLiteral(
+        "QDialog { background: rgba(8,10,18,245); }"
+        "QLabel { color: #c0c8d8; font-size: 13px; }"
+        "QComboBox { background: rgba(14,18,30,180); color: #e0e8f0; "
+        "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 6px; }"
+        "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
+        "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
+        "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "  stop:0 #33e0ff, stop:1 #9b6dff); }"
+        "QTextEdit { background: rgba(14,18,30,180); color: #66FCF1;"
+        "  border: 1px solid rgba(0,212,255,35); border-radius: 8px;"
+        "  font-family: 'Consolas'; font-size: 12px; padding: 8px; }"));
+
+    auto* layout = new QVBoxLayout(dlg);
+    layout->setSpacing(12);
+    layout->setContentsMargins(24, 20, 24, 20);
+
+    auto* wolTitle = new QLabel(IS_EN ? QStringLiteral("⚡ WAKE-ON-LAN EXPORTER")
+                                      : QStringLiteral("⚡ ЭКСПОРТ WAKE-ON-LAN"));
+    wolTitle->setStyleSheet(QStringLiteral(
+        "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
+    wolTitle->setAlignment(Qt::AlignCenter);
+    layout->addWidget(wolTitle);
+
+    auto* wolSub = new QLabel(IS_EN
+        ? QStringLiteral("One-click WoL shortcuts for iOS & Android")
+        : QStringLiteral("WoL ярлыки для iOS и Android в один клик"));
+    wolSub->setStyleSheet(QStringLiteral("color: rgba(0,212,255,150); font-size: 12px;"));
+    wolSub->setAlignment(Qt::AlignCenter);
+    layout->addWidget(wolSub);
+
+    // Interface selector
+    auto* ifaceRow = new QHBoxLayout();
+    auto* ifaceLbl = new QLabel(IS_EN ? QStringLiteral("Network Interface:")
+                                      : QStringLiteral("Сетевой интерфейс:"));
+    auto* ifaceCombo = new QComboBox(dlg);
+    for (const auto& iface : interfaces) {
+        ifaceCombo->addItem(QStringLiteral("%1  [%2] — %3")
+            .arg(iface.interfaceName, iface.macAddress, iface.ipv4Address));
+    }
+    ifaceRow->addWidget(ifaceLbl);
+    ifaceRow->addWidget(ifaceCombo, 1);
+    layout->addLayout(ifaceRow);
+
+    // Output text area
+    auto* output = new QTextEdit(dlg);
+    output->setReadOnly(true);
+
+    // Generate button
+    auto* genBtn = new QPushButton(
+        IS_EN ? QStringLiteral("⚡ Generate iOS/Android Shortcut")
+              : QStringLiteral("⚡ Сгенерировать ярлык iOS/Android"));
+    connect(genBtn, &QPushButton::clicked, dlg,
+            [this, pairing, ifaceCombo, output, interfaces]() {
+        int idx = ifaceCombo->currentIndex();
+        if (idx < 0 || idx >= interfaces.size()) return;
+
+        const auto& iface = interfaces[idx];
+        QString report = pairing->exportAllWolProfiles();
+        output->setPlainText(report);
+
+        appendLog(QStringLiteral("J.A.R.V.I.S."),
+            (IS_EN ? QStringLiteral("⚡ WoL profile generated for %1 [%2]")
+                   : QStringLiteral("⚡ WoL профиль для %1 [%2]"))
+            .arg(iface.interfaceName, iface.macAddress),
+            QStringLiteral("#66FCF1"));
+    });
+    layout->addWidget(genBtn);
+    layout->addWidget(output);
+
+    // Copy to clipboard
+    auto* copyBtn = new QPushButton(
+        IS_EN ? QStringLiteral("📋 Copy to Clipboard")
+              : QStringLiteral("📋 Скопировать"));
+    connect(copyBtn, &QPushButton::clicked, dlg, [output]() {
+        QApplication::clipboard()->setText(output->toPlainText());
+    });
+    layout->addWidget(copyBtn);
+
+    dlg->show();
+}
+
+void MainWindow::showTelegramDialog()
+{
+    auto* mesh = m_jarvis->meshConnector();
+    if (!mesh) return;
+    mesh->initTelegramGateway();
+    auto* gw = mesh->telegramGateway();
+    if (!gw) return;
+
+    // Bind Jarvis core + translation engine for free dialogue and voice
+    gw->setJarvisCore(m_jarvis);
+    gw->setTranslationEngine(m_jarvis->translationEngine());
+    mesh->initMobilePairing();
+    gw->setPairingManager(mesh->mobilePairing());
+
+    // Connect diagram pipeline to desktop dashboard
+    connect(gw, &J2JTelegramGateway::diagramGenerated, this,
+            [this](const QImage& img) {
+        m_visualCtl->showDiagram(img);
+    }, Qt::UniqueConnection);
+
+    // Sync Telegram conversation into the desktop log —
+    // so the user sees both channels in one place and all
+    // messages feed into the same learning pipeline.
+    connect(gw, &J2JTelegramGateway::messageReceived, this,
+            [this](qint64 /*chatId*/, const QString& text) {
+        appendLog(QStringLiteral("📱 TG User"),
+                  text.left(500),
+                  QStringLiteral("#2ea6c7"));
+    }, Qt::UniqueConnection);
+
+    connect(gw, &J2JTelegramGateway::conversationResponse, this,
+            [this](qint64 /*chatId*/, const QString& response) {
+        appendLog(QStringLiteral("📱 JARVIS→TG"),
+                  response.left(500),
+                  Theme::LogColors::jarvis);
+    }, Qt::UniqueConnection);
+
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram QA Gateway")
+                              : QStringLiteral("Telegram QA Шлюз"));
+    dlg->setMinimumSize(480, 320);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->setStyleSheet(QStringLiteral(
+        "QDialog { background: rgba(8,10,18,245); }"
+        "QLabel { color: #c0c8d8; font-size: 13px; }"
+        "QLineEdit { background: rgba(14,18,30,180); color: #e0e8f0; "
+        "  border: 1px solid rgba(0,212,255,50); border-radius: 6px; padding: 8px; }"
+        "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "  stop:0 #00d4ff, stop:1 #7c4dff); color: white; font-weight: bold;"
+        "  border: none; border-radius: 8px; padding: 10px 24px; font-size: 13px; }"
+        "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "  stop:0 #33e0ff, stop:1 #9b6dff); }"));
+
+    auto* layout = new QVBoxLayout(dlg);
+    layout->setSpacing(12);
+    layout->setContentsMargins(24, 20, 24, 20);
+
+    auto* title = new QLabel(IS_EN ? QStringLiteral("🤖 TELEGRAM QA GATEWAY")
+                                   : QStringLiteral("🤖 TELEGRAM QA ШЛЮЗ"));
+    title->setStyleSheet(QStringLiteral(
+        "color: #00d4ff; font-size: 20px; font-weight: bold; letter-spacing: 3px;"));
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+
+    auto* desc = new QLabel(IS_EN
+        ? QStringLiteral("QA_Tester devices get full English UI.\n"
+                         "Main user devices default to Russian.")
+        : QStringLiteral("QA_Tester устройства получают английский интерфейс.\n"
+                         "Основной пользователь — русский."));
+    desc->setAlignment(Qt::AlignCenter);
+    desc->setStyleSheet(QStringLiteral("color: rgba(0,212,255,150); font-size: 12px;"));
+    layout->addWidget(desc);
+
+    // Token input
+    auto* tokenLbl = new QLabel(IS_EN ? QStringLiteral("Bot Token (auto-provisioned or manual):")
+                                      : QStringLiteral("Токен бота (авто или вручную):"));
+    layout->addWidget(tokenLbl);
+
+    auto* tokenInput = new QLineEdit(dlg);
+    tokenInput->setPlaceholderText(QStringLiteral("123456:ABC-DEF..."));
+    tokenInput->setText(gw->botToken());
+    tokenInput->setEchoMode(QLineEdit::Password);
+    layout->addWidget(tokenInput);
+
+    // Status indicator
+    auto* statusLbl = new QLabel();
+    statusLbl->setAlignment(Qt::AlignCenter);
+    auto updateStatus = [gw, statusLbl]() {
+        if (gw->isRunning()) {
+            statusLbl->setText(QStringLiteral("🟢 Gateway ACTIVE — polling Telegram"));
+            statusLbl->setStyleSheet(QStringLiteral("color: #66FCF1; font-weight: bold;"));
+        } else {
+            statusLbl->setText(QStringLiteral("🔴 Gateway STOPPED"));
+            statusLbl->setStyleSheet(QStringLiteral("color: #ff6b6b; font-weight: bold;"));
+        }
+    };
+    updateStatus();
+    layout->addWidget(statusLbl);
+
+    // Start/Stop button
+    auto* toggleBtn = new QPushButton(
+        gw->isRunning()
+            ? (IS_EN ? QStringLiteral("⏹ Stop Gateway") : QStringLiteral("⏹ Остановить"))
+            : (IS_EN ? QStringLiteral("▶ Start Gateway") : QStringLiteral("▶ Запустить")));
+    connect(toggleBtn, &QPushButton::clicked, dlg,
+            [this, gw, tokenInput, toggleBtn, updateStatus]() {
+        if (gw->isRunning()) {
+            gw->stop();
+            toggleBtn->setText(IS_EN ? QStringLiteral("▶ Start Gateway")
+                                    : QStringLiteral("▶ Запустить"));
+        } else {
+            QString token = tokenInput->text().trimmed();
+            if (!token.isEmpty())
+                gw->setBotToken(token);
+            gw->start();
+            toggleBtn->setText(IS_EN ? QStringLiteral("⏹ Stop Gateway")
+                                    : QStringLiteral("⏹ Остановить"));
+            appendLog(QStringLiteral("J.A.R.V.I.S."),
+                IS_EN ? QStringLiteral("🤖 Telegram QA Gateway started")
+                      : QStringLiteral("🤖 Telegram QA Шлюз запущен"),
+                QStringLiteral("#66FCF1"));
+        }
+        updateStatus();
+    });
+    layout->addWidget(toggleBtn);
+
+    // Roles — lets whoever is sitting at THIS PC fix a chat that
+    // isn't Admin (e.g. it wasn't the very first chat to ever
+    // message this PC's bot). Only reachable from the desktop app.
+    auto* rolesBtn = new QPushButton(
+        IS_EN ? QStringLiteral("👑 Manage Roles...")
+              : QStringLiteral("👑 Роли пользователей..."));
+    connect(rolesBtn, &QPushButton::clicked, dlg, [this, gw]() {
+        auto* accessMgr = gw->accessManager();
+        if (!accessMgr) return;
+
+        auto* rdlg = new QDialog(this);
+        rdlg->setWindowTitle(IS_EN ? QStringLiteral("Telegram Roles")
+                                  : QStringLiteral("Роли Telegram"));
+        rdlg->setAttribute(Qt::WA_DeleteOnClose);
+        rdlg->setMinimumSize(420, 300);
+        auto* rlayout = new QVBoxLayout(rdlg);
+
+        const auto users = accessMgr->allUsers();
+        if (users.isEmpty()) {
+            rlayout->addWidget(new QLabel(IS_EN
+                ? QStringLiteral("No chats have messaged this bot yet.")
+                : QStringLiteral("Пока ни один чат не писал этому боту.")));
+        }
+        for (const auto& u : users) {
+            auto* row = new QWidget(rdlg);
+            auto* rowLay = new QHBoxLayout(row);
+            rowLay->setContentsMargins(0, 0, 0, 0);
+            const QString name = u.displayName.isEmpty()
+                ? QString::number(u.chatId) : u.displayName;
+            auto* lbl = new QLabel(QStringLiteral("%1  —  %2")
+                .arg(name, telegramRoleToString(u.role)));
+            lbl->setStyleSheet(QStringLiteral("color:#c0c8d8;"));
+            rowLay->addWidget(lbl, 1);
+
+            auto* makeAdminBtn = new QPushButton(
+                IS_EN ? QStringLiteral("Make Admin") : QStringLiteral("Сделать Admin"));
+            makeAdminBtn->setEnabled(u.role != TelegramRole::Admin);
+            const qint64 cid = u.chatId;
+            connect(makeAdminBtn, &QPushButton::clicked, rdlg,
+                    [this, accessMgr, cid, makeAdminBtn]() {
+                accessMgr->setRole(cid, TelegramRole::Admin);
+                makeAdminBtn->setEnabled(false);
+                appendLog(QStringLiteral("J.A.R.V.I.S."),
+                    IS_EN ? QStringLiteral("👑 Chat %1 promoted to Admin.").arg(cid)
+                          : QStringLiteral("👑 Чат %1 повышен до Admin.").arg(cid),
+                    QStringLiteral("#66FCF1"));
+            });
+            rowLay->addWidget(makeAdminBtn);
+            rlayout->addWidget(row);
+        }
+        rlayout->addStretch(1);
+        rdlg->show();
+    });
+    layout->addWidget(rolesBtn);
+
+    // Bug report notifications
+    connect(gw, &J2JTelegramGateway::bugReportFiled, dlg,
+            [this](const QaBugReport& report) {
+        appendLog(QStringLiteral("J.A.R.V.I.S."),
+            QStringLiteral("🐛 QA Bug: [%1] %2 — %3")
+                .arg(report.severity, report.title, report.reporterRole),
+            QStringLiteral("#ff9800"));
+    });
+
+    // Pairing success → update status in UI
+    connect(gw, &J2JTelegramGateway::pairingCompleted, dlg,
+            [this, statusLbl](qint64 chatId, const QString& role) {
+        statusLbl->setText(QStringLiteral("🟢 PAIRED — chat %1 → %2").arg(chatId).arg(role));
+        statusLbl->setStyleSheet(QStringLiteral("color: #66FCF1; font-weight: bold;"));
+        appendLog(QStringLiteral("J.A.R.V.I.S."),
+            (IS_EN ? QStringLiteral("📱 Mobile paired via Telegram → role: %1")
+                   : QStringLiteral("📱 Мобильный подключён через Telegram → роль: %1"))
+            .arg(role),
+            QStringLiteral("#66FCF1"));
+    });
+
+    layout->addStretch(1);
+    dlg->show();
+}
+
+// ============================================================
+//  Камера: вспомогательные операции
+// ============================================================
+
+// Центр зрения открывается из нескольких мест (пункт меню «Камера»,
+// команда в палитре, подсказки). Диалогу нужны две вещи, которых у него
+// нет: обучение лица по файлам и скриншот — их умеет только окно.
+void MainWindow::openVisionCenter(int initialTab)
+{
+    VisionCenterDialog dlg(m_securityCam, this, initialTab);
+
+    connect(&dlg, &VisionCenterDialog::enrollFromPhotoRequested,
+            this, [this]() { enrollFaceFromPhoto(); });
+    connect(&dlg, &VisionCenterDialog::screenshotRequested,
+            this, [this]() { takeScreenshotToArtifacts(); });
+    connect(&dlg, &VisionCenterDialog::liveViewRequested, this, [this, &dlg]() {
+        CameraViewDialog view(m_securityCam, &dlg);
+        view.exec();
+    });
+
+    dlg.exec();
+}
+
+// Подписки на сигналы камеры делаются РОВНО ОДИН РАЗ за жизнь
+// приложения: камера — общий объект, и повторное взведение
+// охраны раньше добавляло вторую копию каждого обработчика
+// (из-за чего видео уходило в Telegram дважды на одно событие).
+void MainWindow::wireSecurityCameraUi()
+{
+    // Раньше сюда попадали только из-под проверки «камера есть»; теперь
+    // подписки ставятся при построении меню, до всяких проверок, и
+    // защита нужна здесь, а не у каждого вызывающего. Без неё связывание
+    // с нулевым отправителем — два десятка предупреждений Qt в лог и
+    // взведённый m_guardUiWired, из-за которого настоящие подписки уже
+    // никогда не поставятся.
+    if (m_guardUiWired || !m_securityCam)
+        return;
+    m_guardUiWired = true;
+
+
+// Сеанс запирает Windows, показывать нечего — но записать в ленту есть что.
+connect(m_securityCam, &SecurityCamera::screenLocked, this, [this]() {
+    appendLog(QStringLiteral("🛡 Security"),
+        IS_EN ? QStringLiteral("🔒 Session locked")
+              : QStringLiteral("🔒 Сеанс заблокирован"),
+        Theme::LogColors::jarvis);
+});
+
+connect(m_securityCam, &SecurityCamera::alertMessage, this,
+        [this](const QString& msg) {
+    appendLog(QStringLiteral("🛡 Security"), msg, Theme::LogColors::error);
+});
+
+connect(m_securityCam, &SecurityCamera::ownerRecognized, this,
+        [this](const QImage&) {
+    appendLog(QStringLiteral("🛡 Security"),
+        IS_EN ? QStringLiteral("👤 Owner recognized")
+              : QStringLiteral("👤 Владелец распознан"),
+        Theme::LogColors::jarvis);
+});
+
+// Идентифицированные лица (включая профили с других узлов P2P)
+connect(m_securityCam, &SecurityCamera::facesIdentified, this,
+        [this](const QImage&, const QList<FaceObservation>& faces) {
+    for (const auto& obs : faces) {
+        if (!obs.known) continue;
+        appendLog(QStringLiteral("🛡 Security"),
+            QStringLiteral("👤 ") + obs.label(),
+            Theme::LogColors::jarvis);
+    }
+});
+
+connect(m_securityCam, &SecurityCamera::motionVideoReady, this,
+        [this](const QString& videoPath) {
+    appendLog(QStringLiteral("🛡 Security"),
+        QStringLiteral("📹 Motion clip: %1").arg(videoPath),
+        Theme::LogColors::system);
+    auto* mesh = m_jarvis->meshConnector();
+    if (!mesh) return;
+    auto* gw = mesh->telegramGateway();
+    if (!gw) return;
+    auto* accessMgr = gw->accessManager();
+    if (!accessMgr) return;
+    const qint64 ownerChat = accessMgr->primaryOwnerChatId();
+    if (ownerChat == 0) return;
+    gw->sendVideoToMobile(ownerChat, videoPath,
+        QStringLiteral("🚨 Motion detected! 20s security clip"));
+    appendLog(QStringLiteral("🛡 Security"),
+        QStringLiteral("📤 Video sent to Telegram"),
+        Theme::LogColors::jarvis);
+});
+}
+
+void MainWindow::enrollFaceFromPhoto()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(this,
+        IS_EN ? QStringLiteral("Select photo(s) with a face")
+              : QStringLiteral("Выберите фото с лицом"),
+        QDir::homePath(),
+        QStringLiteral("Images (*.png *.jpg *.jpeg *.bmp)"));
+    if (files.isEmpty()) return;
+
+    bool ok = false;
+    const QString name = QInputDialog::getText(this,
+        IS_EN ? QStringLiteral("Name") : QStringLiteral("Имя"),
+        IS_EN ? QStringLiteral("Whose face is this?")
+              : QStringLiteral("Чьё это лицо?"),
+        QLineEdit::Normal, QString(), &ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+
+    const int age = QInputDialog::getInt(this,
+        IS_EN ? QStringLiteral("Age (optional)") : QStringLiteral("Возраст (необязательно)"),
+        IS_EN ? QStringLiteral("Age (0 = skip):") : QStringLiteral("Возраст (0 = пропустить):"),
+        0, 0, 120, 1, &ok);
+
+    const bool isOwner = QMessageBox::question(this,
+        IS_EN ? QStringLiteral("Owner?") : QStringLiteral("Владелец?"),
+        IS_EN ? QStringLiteral("Is this the PC owner (enables auto-lock/unlock)?")
+              : QStringLiteral("Это владелец ПК (включает авто-блокировку по лицу)?"),
+        QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes;
+
+    const QString status = isOwner
+        ? (IS_EN ? QStringLiteral("owner") : QStringLiteral("владелец"))
+        : (IS_EN ? QStringLiteral("known") : QStringLiteral("знакомый"));
+
+    appendLog(Str::logSystem(),
+        IS_EN ? QStringLiteral("🖼 Learning face from %1 photo(s)...").arg(files.size())
+              : QStringLiteral("🖼 Обучаю лицо по %1 фото...").arg(files.size()),
+        Theme::LogColors::system);
+
+    // Обучение по файлам камеру не открывает, так что здесь
+    // отдельный объект безопасен и живёт ровно до конца разбора.
+    auto* sec = new SecurityCamera(this);
+    connect(sec, &SecurityCamera::enrollmentComplete, this,
+            [this, sec](int samples) {
+        appendLog(Str::logJarvis(),
+            (IS_EN ? QStringLiteral("✅ Learned from %1 photo(s).")
+                   : QStringLiteral("✅ Обучено по %1 фото.")).arg(samples),
+            Theme::LogColors::jarvis);
+        if (auto* mesh = m_jarvis->meshConnector())
+            mesh->broadcastFaceProfiles();
+        sec->deleteLater();
+    });
+    connect(sec, &SecurityCamera::alertMessage, this,
+            [this, sec](const QString& msg) {
+        appendLog(Str::logSystem(), msg, Theme::LogColors::error);
+        sec->deleteLater();
+    });
+    sec->enrollFaceFromImages(files, name.trimmed(), age, status, isOwner);
+}
+
+void MainWindow::takeScreenshotToArtifacts()
+{
+    QScreen* screen = QApplication::primaryScreen();
+    if (!screen) return;
+    QPixmap shot = screen->grabWindow(0);
+    const QString dir = JarvisPaths::subPath(QStringLiteral("screenshots"));
+    QDir().mkpath(dir);
+    const QString path = dir + QStringLiteral("/screenshot_%1.png")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    shot.save(path, "PNG");
+    ArtifactRegistry::instance().record(
+        path, QString::fromLatin1(ArtifactRegistry::kScreenshot),
+        IS_EN ? QStringLiteral("Screen capture") : QStringLiteral("Снимок экрана"));
+    appendLog(Str::logJarvis(),
+        (IS_EN ? QStringLiteral("📸 Screenshot saved: ") : QStringLiteral("📸 Скриншот сохранён: ")) + path,
+        Theme::LogColors::jarvis);
+}
+
+void MainWindow::registerAppActions()
+{
+    // ---------------------------------------------------------
+    //  Файл
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("file.attach"), Str::menuAttach(),
+        QStringLiteral("📎"), QStringLiteral("Ctrl+O"), QStringLiteral("file"),
+        IS_EN ? QStringLiteral("Attach a file to the conversation")
+              : QStringLiteral("Приложить файл к разговору"),
+        [this]() { onAttachClicked(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("file.clearAttach"), Str::menuClearAttach(),
+        QStringLiteral("✕"), QString(), QStringLiteral("file"),
+        IS_EN ? QStringLiteral("Drop everything attached")
+              : QStringLiteral("Убрать все вложения"),
+        [this]() { m_jarvis->attachments()->clear(); },
+        // Нечего убирать — пункт неактивен: раньше он был всегда кликабелен
+        // и молча ничего не делал.
+        [this]() { return m_jarvis->attachments()->count() > 0; }
+    });
+
+    addOwnedAction({
+        QStringLiteral("file.searchHistory"),
+        IS_EN ? QStringLiteral("Search chat history") : QStringLiteral("Поиск по истории"),
+        QStringLiteral("⌕"), QString(), QStringLiteral("file"),
+        IS_EN ? QStringLiteral("Ask JARVIS to recall a past conversation")
+              : QStringLiteral("Попросить JARVIS вспомнить прошлый разговор"),
+        [this]() {
+            bool ok = false;
+            const QString query = QInputDialog::getText(this,
+                IS_EN ? QStringLiteral("Search") : QStringLiteral("Поиск"),
+                IS_EN ? QStringLiteral("Search chat history:")
+                      : QStringLiteral("Поиск по истории:"),
+                QLineEdit::Normal, QString(), &ok);
+            if (!ok || query.trimmed().isEmpty())
+                return;
+            m_chatCtl->setDraft(QStringLiteral("вспомни ") + query.trimmed());
+            onSend();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("file.reopenPanel"),
+        IS_EN ? QStringLiteral("Reopen attachments panel")
+              : QStringLiteral("Открыть панель вложений"),
+        QStringLiteral("🖼"), QString(), QStringLiteral("file"),
+        IS_EN ? QStringLiteral("Show attachments from this session again")
+              : QStringLiteral("Показать вложения этой сессии снова"),
+        [this]() {
+            if (!m_visualCtl)
+                return;
+            if (!m_visualCtl->hasHistory()) {
+                appendLog(Str::logSystem(),
+                    IS_EN ? QStringLiteral("No attachments yet this session.")
+                          : QStringLiteral("Пока нет вложений за эту сессию."),
+                    Theme::LogColors::system);
+                return;
+            }
+            m_visualCtl->reopen();
+        },
+        [this]() { return m_visualCtl && m_visualCtl->hasHistory(); }
+    });
+
+    addOwnedAction({
+        QStringLiteral("file.clearLog"), Str::menuClearLog(),
+        QStringLiteral("🧹"), QString(), QStringLiteral("file"),
+        IS_EN ? QStringLiteral("Clear the visible conversation")
+              : QStringLiteral("Очистить видимый разговор"),
+        [this]() { m_chat->clear(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("file.exit"), Str::menuExit(),
+        QStringLiteral("⏻"), QString(), QStringLiteral("file"),
+        IS_EN ? QStringLiteral("Close JARVIS") : QStringLiteral("Закрыть JARVIS"),
+        [this]() { close(); }, nullptr
+    });
+
+
+    // ---------------------------------------------------------
+    //  Камера и охрана
+    // ---------------------------------------------------------
+    //
+    // Меню было плоским списком из двенадцати пунктов со значком у
+    // каждого. Значки в списке одного смысла не различают, а только
+    // шумят, поэтому здесь их нет. Обучение лиц не дублируется: ему
+    // место в Центре зрения, куда и отсылает подпись под камерой.
+    addOwnedAction({
+        QStringLiteral("camera.visionCenter"),
+        IS_EN ? QStringLiteral("Vision Center") : QStringLiteral("Центр зрения"),
+        QString(), QString(), QStringLiteral("camera"),
+        IS_EN ? QStringLiteral("Known faces, teaching, camera and OCR state")
+              : QStringLiteral("Известные лица, обучение, состояние камеры и OCR"),
+        [this]() { openVisionCenter(0); }, nullptr
+    });
+
+#ifdef JARVIS_HAS_OPENCV
+    // Обучение по фотографиям — единственный способ добавить ЧУЖОЕ
+    // лицо: Центр зрения умеет учить только владельца, с камеры.
+    addOwnedAction({
+        QStringLiteral("camera.enrollPhoto"),
+        IS_EN ? QStringLiteral("Teach a face from photos")
+              : QStringLiteral("Обучить лицо по фотографиям"),
+        QString(), QString(), QStringLiteral("camera"),
+        IS_EN ? QStringLiteral("Add someone else from image files")
+              : QStringLiteral("Добавить другого человека из файлов изображений"),
+        [this]() { enrollFaceFromPhoto(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("camera.whoIsThere"),
+        IS_EN ? QStringLiteral("Who's on camera") : QStringLiteral("Кто перед камерой"),
+        QString(), QString(), QStringLiteral("camera"),
+        IS_EN ? QStringLiteral("Live view with face boxes and confidence")
+              : QStringLiteral("Живой вид с рамками лиц и уверенностью"),
+        [this]() {
+            CameraViewDialog dlg(m_securityCam, this);
+            dlg.exec();
+        }, nullptr
+    });
+
+    // Охрана одним переключателем вместо пары «включить / выключить».
+    // Состояние спрашивается у камеры, поэтому /security из Telegram и
+    // этот пункт больше не могут разойтись.
+    {
+        AppAction guard;
+        guard.id        = QStringLiteral("camera.guard");
+        guard.title     = IS_EN ? QStringLiteral("Security guard")
+                                : QStringLiteral("Охрана");
+        guard.group     = QStringLiteral("camera");
+        guard.hint      = IS_EN ? QStringLiteral("Check every minute, lock and unlock by face")
+                                : QStringLiteral("Проверка раз в минуту, блокировка и разблокировка по лицу");
+        guard.checkable = true;
+        guard.enabled   = [this]() { return m_securityCam != nullptr; };
+        guard.checked   = [this]() { return m_securityCam && m_securityCam->isMonitoring(); };
+        guard.run       = [this]() {
+            if (!m_securityCam)
+                return;
+
+            if (m_securityCam->isMonitoring()) {
+                // Останавливаем, но не разрушаем: объект общий, /security
+                // в Telegram может взвести его снова. Запертый сеанс при
+                // этом остаётся запертым — выключение охраны не должно
+                // (и не может) впускать кого-то обратно за машину.
+                m_securityCam->stopMonitoring();
+                appendLog(Str::logJarvis(),
+                    IS_EN ? QStringLiteral("Security guard stopped.")
+                          : QStringLiteral("Охрана выключена."),
+                    Theme::LogColors::jarvis);
+                return;
+            }
+
+            wireSecurityCameraUi();
+            m_securityCam->startMonitoring(60);
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("Security guard active (1 min interval). "
+                                       "Auto-lock/unlock by face. Video alerts to Telegram.")
+                      : QStringLiteral("Охрана включена (интервал 1 мин). "
+                                       "Блокировка и разблокировка по лицу. Видео в Telegram."),
+                Theme::LogColors::jarvis);
+        };
+        addOwnedAction(guard);
+    }
+
+    addOwnedAction({
+        QStringLiteral("camera.lockNow"),
+        IS_EN ? QStringLiteral("Lock screen now") : QStringLiteral("Заблокировать экран"),
+        QString(), QString(), QStringLiteral("camera"),
+        QString(),
+        [this]() { if (m_securityCam) m_securityCam->lockScreen(); },
+        [this]() { return m_securityCam && !m_securityCam->isScreenLocked(); }
+    });
+
+
+    // Флажки охраны. «Разблокировка по моему лицу» отсюда убрана вместе
+    // с оверлеем: сеанс запирает Windows, а снять его блокировку из
+    // программы нельзя — узнавание лица на входе делает Windows Hello.
+    {
+        struct Toggle {
+            const char* id;
+            QString     titleEn;
+            QString     titleRu;
+            QString     hintEn;
+            QString     hintRu;
+            bool (SecurityCamera::*get)() const;
+            void (SecurityCamera::*set)(bool);
+        };
+        const QVector<Toggle> toggles = {
+            { "camera.autoLock",
+              QStringLiteral("Lock when I leave"),
+              QStringLiteral("Блокировать, когда ухожу"),
+              QStringLiteral("A stranger or an empty chair locks the screen"),
+              QStringLiteral("Чужой в кадре или пустое кресло — экран блокируется"),
+              &SecurityCamera::autoLockOnThreat, &SecurityCamera::setAutoLockOnThreat },
+            { "camera.motionAlert",
+              QStringLiteral("Motion alerts with video"),
+              QStringLiteral("Оповещения о движении с видео"),
+              QStringLiteral("A 20-second clip goes to Telegram"),
+              QStringLiteral("Клип на 20 секунд уходит в Telegram"),
+              &SecurityCamera::alertOnMotion, &SecurityCamera::setAlertOnMotion },
+        };
+
+        for (const Toggle& t : toggles) {
+            AppAction a;
+            a.id        = QString::fromLatin1(t.id);
+            a.title     = IS_EN ? t.titleEn : t.titleRu;
+            a.hint      = IS_EN ? t.hintEn  : t.hintRu;
+            a.group     = QStringLiteral("camera.guard");
+            a.checkable = true;
+            a.enabled   = [this]() { return m_securityCam != nullptr; };
+
+            auto get = t.get;
+            auto set = t.set;
+            a.checked = [this, get]() { return m_securityCam && (m_securityCam->*get)(); };
+            a.run     = [this, get, set]() {
+                if (m_securityCam)
+                    (m_securityCam->*set)(!(m_securityCam->*get)());
+            };
+            addOwnedAction(a);
+        }
+    }
+#endif
+
+    addOwnedAction({
+        QStringLiteral("camera.screenshot"),
+        IS_EN ? QStringLiteral("Take screenshot") : QStringLiteral("Сделать скриншот"),
+        QString(), QString(), QStringLiteral("camera"),
+        QString(), [this]() { takeScreenshotToArtifacts(); }, nullptr
+    });
+
+
+
+    // ---------------------------------------------------------
+    //  Пользователь
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("user.center"),
+        IS_EN ? QStringLiteral("User Center") : QStringLiteral("Управление пользователями"),
+        QStringLiteral("👤"), QString(), QStringLiteral("user"),
+        IS_EN ? QStringLiteral("Switch, edit and delete user profiles")
+              : QStringLiteral("Переключить, изменить и удалить профили"),
+        [this]() {
+            UserCenterDialog dlg(m_jarvis, IS_EN, this);
+            connect(&dlg, &UserCenterDialog::userSwitched, this, [this]() {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("User profile updated.")
+                          : QStringLiteral("Профиль пользователя обновлён."),
+                    Theme::LogColors::system);
+            });
+            dlg.exec();
+        }, nullptr
+    });
+
+    // ---------------------------------------------------------
+    //  Телефон и Сервер
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("phone.mobileSync"),
+        IS_EN ? QStringLiteral("Mobile Sync") : QStringLiteral("Мобильная синхронизация"),
+        QStringLiteral("📱"), QString(), QStringLiteral("phone"),
+        IS_EN ? QStringLiteral("Pair a phone with a PIN, no configuration")
+              : QStringLiteral("Спарить телефон по PIN, без настройки"),
+        [this]() { showMobileSyncDialog(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("phone.wol"),
+        IS_EN ? QStringLiteral("Wake-on-LAN shortcut")
+              : QStringLiteral("Ярлык Wake-on-LAN"),
+        QStringLiteral("⏻"), QString(), QStringLiteral("phone"),
+        IS_EN ? QStringLiteral("Build a shortcut that wakes this PC from the phone")
+              : QStringLiteral("Собрать ярлык, будящий этот ПК с телефона"),
+        [this]() { showWakeOnLanDialog(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("phone.telegram"),
+        IS_EN ? QStringLiteral("Telegram gateway") : QStringLiteral("Шлюз Telegram"),
+        QStringLiteral("✈"), QString(), QStringLiteral("phone"),
+        IS_EN ? QStringLiteral("Talk to JARVIS from anywhere through Telegram")
+              : QStringLiteral("Общаться с JARVIS откуда угодно через Telegram"),
+        [this]() { showTelegramDialog(); }, nullptr
+    });
+
+    // ---------------------------------------------------------
+    //  Система
+    // ---------------------------------------------------------
+    {
+        AppAction keep;
+        keep.id        = QStringLiteral("system.keepAttachments");
+        keep.title     = Str::menuKeepAttach();
+        keep.icon      = QStringLiteral("📎");
+        keep.group     = QStringLiteral("system");
+        keep.checkable = true;
+        keep.checked   = [this]() { return m_jarvis->attachments()->keepAfterSend(); };
+        keep.run       = [this]() {
+            const bool next = !m_jarvis->attachments()->keepAfterSend();
+            m_jarvis->attachments()->setKeepAfterSend(next);
+            appendLog(Str::logSystem(),
+                      next ? Str::statusAttachKept() : Str::statusAttachOneShot(),
+                      Theme::LogColors::system);
+        };
+        addOwnedAction(keep);
+    }
+
+    addOwnedAction({
+        QStringLiteral("system.keyboard"), Str::menuKeyboard(),
+        QStringLiteral("⌨"), QString(), QStringLiteral("system"),
+        QString(), [this]() { toggleKeyboard(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("system.translateClipboard"),
+        IS_EN ? QStringLiteral("Translate clipboard")
+              : QStringLiteral("Перевести буфер обмена"),
+        QStringLiteral("🌐"), QString(), QStringLiteral("system"),
+        IS_EN ? QStringLiteral("Translate and put the result back into the clipboard")
+              : QStringLiteral("Перевести и положить результат обратно в буфер"),
+        [this]() {
+            const QString text = QApplication::clipboard()->text().trimmed();
+            if (text.isEmpty()) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("Clipboard is empty.")
+                          : QStringLiteral("Буфер обмена пуст."),
+                    Theme::LogColors::error);
+                return;
+            }
+            appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                IS_EN ? QStringLiteral("Translating...") : QStringLiteral("Перевожу..."),
+                Theme::LogColors::system);
+
+            m_jarvis->translationEngine()->translateText(text,
+                m_jarvis->translationEngine()->targetLang(),
+                [this](bool ok, const QString& result) {
+                    if (ok) {
+                        appendLog(QStringLiteral("J.A.R.V.I.S."), result,
+                                  Theme::LogColors::jarvis);
+                        QApplication::clipboard()->setText(result);
+                    } else {
+                        appendLog(IS_EN ? QStringLiteral("Error") : QStringLiteral("Ошибка"),
+                                  result, Theme::LogColors::error);
+                    }
+                });
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("system.audioFile"),
+        IS_EN ? QStringLiteral("Process audio file") : QStringLiteral("Обработать аудиофайл"),
+        QStringLiteral("🎧"), QString(), QStringLiteral("system"),
+        IS_EN ? QStringLiteral("Transcribe and summarise a recording")
+              : QStringLiteral("Расшифровать запись и сделать выжимку"),
+        [this]() { showAudioFileDialog(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("system.analytics"),
+        IS_EN ? QStringLiteral("User analytics") : QStringLiteral("Аналитика"),
+        QStringLiteral("📊"), QString(), QStringLiteral("system"),
+        QString(), [this]() { showAnalyticsDialog(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("system.checkUpdate"), Str::menuCheckUpdate(),
+        QStringLiteral("⭳"), QString(), QStringLiteral("system"),
+        QString(),
+        [this]() {
+            appendLog(Str::logSystem(), Str::updChecking(), Theme::LogColors::system);
+            m_jarvis->autoUpdater()->checkForUpdates(false);
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("system.releases"), Str::menuReleasePage(),
+        QStringLiteral("🌍"), QString(), QStringLiteral("system"),
+        QString(),
+        []() {
+            QDesktopServices::openUrl(
+                QUrl(QStringLiteral("https://github.com/Bohdan99py/jarvis/releases")));
+        }, nullptr
+    });
+
+    // ---------------------------------------------------------
+    //  Модели и ИИ
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("models.apiKey"), Str::menuApiKey(),
+        QStringLiteral("🔑"), QString(), QStringLiteral("models"),
+        IS_EN ? QStringLiteral("Set the Anthropic API key")
+              : QStringLiteral("Задать ключ Anthropic API"),
+        [this]() {
+            bool ok = false;
+            const QString key = QInputDialog::getText(this,
+                Str::dlgApiKeyTitle(), Str::dlgApiKeyLabel(),
+                QLineEdit::Password, QString(), &ok);
+            if (ok && !key.trimmed().isEmpty()) {
+                m_jarvis->claudeApi()->setApiKey(key.trimmed());
+                appendLog(Str::logSystem(), Str::apiKeySaved(), Theme::LogColors::system);
+            }
+        }, nullptr
+    });
+
+    // Ключ ElevenLabs вводится так же, как ключ Anthropic, и так же
+    // ложится отдельным файлом в AppData. Пустая строка — стереть ключ
+    // и вернуться на офлайн-голос.
+    addOwnedAction({
+        QStringLiteral("models.elevenLabsKey"),
+        IS_EN ? QStringLiteral("ElevenLabs voice key") : QStringLiteral("Ключ голоса ElevenLabs"),
+        QStringLiteral("🔊"), QString(), QStringLiteral("models"),
+        IS_EN ? QStringLiteral("Set the ElevenLabs API key (empty clears it)")
+              : QStringLiteral("Задать ключ ElevenLabs (пусто — стереть)"),
+        [this]() {
+            bool ok = false;
+            const QString key = QInputDialog::getText(this,
+                IS_EN ? QStringLiteral("ElevenLabs") : QStringLiteral("ElevenLabs"),
+                IS_EN ? QStringLiteral("API key:") : QStringLiteral("API-ключ:"),
+                QLineEdit::Password, QString(), &ok);
+            if (!ok)
+                return;
+
+            ElevenLabsProvider::setApiKey(key);
+
+            const bool has = ElevenLabsProvider::hasApiKey();
+            appendLog(Str::logSystem(),
+                has ? (IS_EN ? QStringLiteral("🔊 ElevenLabs key saved — voice: %1")
+                                   .arg(VoiceSynthesisManager::instance().activeProviderName())
+                             : QStringLiteral("🔊 Ключ ElevenLabs сохранён — голос: %1")
+                                   .arg(VoiceSynthesisManager::instance().activeProviderName()))
+                    : (IS_EN ? QStringLiteral("🔊 ElevenLabs key cleared — offline voice")
+                             : QStringLiteral("🔊 Ключ ElevenLabs стёрт — офлайн-голос")),
+                Theme::LogColors::system);
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("models.skills"),
+        IS_EN ? QStringLiteral("JARVIS Skills") : QStringLiteral("Скиллы JARVIS"),
+        QStringLiteral("🧩"), QString(), QStringLiteral("models"),
+        IS_EN ? QStringLiteral("Modular knowledge blocks")
+              : QStringLiteral("Модульные блоки знаний"),
+        [this]() {
+            SkillsDialog dlg(m_jarvis->skillManager(), this);
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("models.modes"),
+        IS_EN ? QStringLiteral("Work Modes") : QStringLiteral("Режимы работы"),
+        QStringLiteral("🎛"), QString(), QStringLiteral("models"),
+        QString(),
+        [this]() {
+            ModesDialog dlg(m_jarvis, IS_EN, this);
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("models.voice"),
+        IS_EN ? QStringLiteral("Voice Models") : QStringLiteral("Голосовые модели"),
+        QStringLiteral("🎤"), QString(), QStringLiteral("models"),
+        IS_EN ? QStringLiteral("Download and manage Vosk recognition models")
+              : QStringLiteral("Скачать и настроить модели распознавания Vosk"),
+        [this]() { showVoiceModelsDialog(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("models.ollama"),
+        IS_EN ? QStringLiteral("Ollama model") : QStringLiteral("Модель Ollama"),
+        QStringLiteral("🦙"), QString(), QStringLiteral("models"),
+        QString(),
+        [this]() {
+            bool ok = false;
+            const QString model = QInputDialog::getText(this,
+                QStringLiteral("Ollama"),
+                IS_EN ? QStringLiteral(
+                    "Model name:\n\n"
+                    "Fast (recommended):\n"
+                    "  qwen2.5:3b      — very fast, good quality\n"
+                    "  phi3:mini       — fast, Microsoft model\n"
+                    "  gemma2:2b       — fast Google model\n\n"
+                    "Quality:\n"
+                    "  llama3.2:3b     — Meta, good balance\n"
+                    "  mistral:7b      — good for code\n"
+                    "  qwen2.5:7b      — best quality\n\n"
+                    "Install: ollama pull qwen2.5:3b")
+                      : QStringLiteral(
+                    "Имя модели:\n\n"
+                    "Быстрые (рекомендую):\n"
+                    "  qwen2.5:3b      — очень быстро, хорошее качество\n"
+                    "  phi3:mini       — быстро, модель Microsoft\n"
+                    "  gemma2:2b       — быстро, модель Google\n\n"
+                    "Качественные:\n"
+                    "  llama3.2:3b     — Meta, хороший баланс\n"
+                    "  mistral:7b      — хороша для кода\n"
+                    "  qwen2.5:7b      — лучшее качество\n\n"
+                    "Установить: ollama pull qwen2.5:3b"),
+                QLineEdit::Normal, m_jarvis->ollamaApi()->model(), &ok);
+            if (ok && !model.trimmed().isEmpty()) {
+                m_jarvis->ollamaApi()->setModel(model.trimmed());
+                appendLog(Str::logSystem(),
+                          (IS_EN ? QStringLiteral("Ollama model set: ")
+                                 : QStringLiteral("Модель Ollama: ")) + model.trimmed(),
+                          Theme::LogColors::system);
+            }
+        }, nullptr
+    });
+
+    {
+        // Мультиагентный режим. Состояние спрашивается у ядра, поэтому
+        // откатывать галочку при недоступной Ollama больше не нужно:
+        // режим просто не включится, и пункт это покажет сам.
+        AppAction agent;
+        agent.id        = QStringLiteral("models.agentMode");
+        agent.title     = Str::menuAgentMode();
+        agent.icon      = QStringLiteral("🤝");
+        agent.group     = QStringLiteral("models");
+        agent.hint      = IS_EN ? QStringLiteral("Code → Claude, chat → local Ollama")
+                                : QStringLiteral("Код → Claude, беседа → локальная Ollama");
+        agent.checkable = true;
+        agent.checked   = [this]() { return m_jarvis->multiAgentMode(); };
+        agent.run       = [this]() {
+            if (m_jarvis->multiAgentMode()) {
+                m_jarvis->setMultiAgentMode(false);
+                m_chatCtl->setAgentName(QString());
+                appendLog(Str::logJarvis(), Str::agentModeOff(), Theme::LogColors::system);
+                return;
+            }
+
+            appendLog(Str::logSystem(),
+                      IS_EN ? QStringLiteral("Checking Ollama availability...")
+                            : QStringLiteral("Проверяю доступность Ollama..."),
+                      Theme::LogColors::system);
+
+            m_jarvis->ollamaApi()->checkAvailability(
+                [this](bool available, const QString& info) {
+                    if (!available) {
+                        appendLog(Str::logError(),
+                                  IS_EN ? QStringLiteral(
+                                      "Ollama is not running.\n"
+                                      "Start it with: ollama serve\n"
+                                      "Or install from: https://ollama.com\n"
+                                      "Agent mode stays OFF — Claude handles everything.")
+                                        : QStringLiteral(
+                                      "Ollama не запущена.\n"
+                                      "Запусти её: ollama serve\n"
+                                      "Или скачай с: https://ollama.com\n"
+                                      "Агент мод ВЫКЛ — всё обрабатывает Claude."),
+                                  Theme::LogColors::error);
+                        return;
+                    }
+                    m_jarvis->setMultiAgentMode(true);
+                    m_chatCtl->setAgentName(QStringLiteral("🦙 Ollama"));
+                    appendLog(Str::logJarvis(),
+                              (IS_EN ? QStringLiteral("Agent mode ON. Code → Claude, Chat → Ollama (")
+                                     : QStringLiteral("Агент мод ВКЛ. Код → Claude, Беседа → Ollama ("))
+                                  + m_jarvis->ollamaApi()->model()
+                                  + QStringLiteral(")\n") + info,
+                              Theme::LogColors::system);
+                });
+        };
+        addOwnedAction(agent);
+    }
+
+    // ---------------------------------------------------------
+    //  Задачи
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("tasks.board"),
+        IS_EN ? QStringLiteral("Task board") : QStringLiteral("Доска задач"),
+        QStringLiteral("📋"), QString(), QStringLiteral("tasks"),
+        QString(),
+        [this]() {
+            TaskManagerDialog dlg(m_jarvis->currentUserId(), this);
+            connect(&dlg, &TaskManagerDialog::taskChanged, this, [this]() {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    IS_EN ? QStringLiteral("Task board updated.")
+                          : QStringLiteral("Доска задач обновлена."),
+                    Theme::LogColors::system);
+            });
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("tasks.chatHistory"),
+        IS_EN ? QStringLiteral("Chat history") : QStringLiteral("История чатов"),
+        QStringLiteral("💬"), QString(), QStringLiteral("tasks"),
+        QString(),
+        [this]() {
+            ChatHistoryDialog dlg(m_jarvis->currentUserId(), IS_EN, this);
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("tasks.organize"),
+        IS_EN ? QStringLiteral("Organize folder") : QStringLiteral("Организовать папку"),
+        QStringLiteral("🗂"), QString(), QStringLiteral("tasks"),
+        IS_EN ? QStringLiteral("Sort a folder into categories, with a plan to approve")
+              : QStringLiteral("Разложить папку по категориям, с планом на утверждение"),
+        [this]() {
+            const QString startDir =
+                QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+            const QString folder = QFileDialog::getExistingDirectory(this,
+                IS_EN ? QStringLiteral("Choose a folder to organize")
+                      : QStringLiteral("Выберите папку для организации"),
+                startDir);
+            if (folder.isEmpty())
+                return;
+
+            if (!Jarvis::organizePathAllowed(folder)) {
+                appendLog(Str::logJarvis(),
+                    IS_EN ? QStringLiteral("❌ This folder isn't in the allowed roots "
+                                           "(Downloads/Desktop/Documents/Pictures).")
+                          : QStringLiteral("❌ Эта папка вне разрешённых корней "
+                                           "(Загрузки/Рабочий стол/Документы/Изображения)."),
+                    Theme::LogColors::error);
+                return;
+            }
+
+            appendLog(Str::logJarvis(),
+                IS_EN ? QStringLiteral("🔍 Scanning folder — this may take a moment for "
+                                       "ambiguous files...")
+                      : QStringLiteral("🔍 Сканирую папку — для неоднозначных файлов это "
+                                       "может занять время..."),
+                Theme::LogColors::system);
+
+            FileOrganizer::instance().setLlmApi(m_jarvis->claudeApi());
+            FileOrganizer::instance().buildPlan(folder, [this](const OrganizePlan& plan) {
+                showOrganizePlanDialog(plan);
+            });
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("tasks.organizeRules"),
+        IS_EN ? QStringLiteral("Configure categories") : QStringLiteral("Настроить категории"),
+        QStringLiteral("⚙"), QString(), QStringLiteral("tasks"),
+        QString(),
+        [this]() {
+            OrganizePlanDialog dlg(m_jarvis, OrganizePlan{}, this, /*initialTab=*/1);
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("tasks.organizeUndo"),
+        IS_EN ? QStringLiteral("Undo last organize")
+              : QStringLiteral("Отменить последнюю организацию"),
+        QStringLiteral("↩"), QString(), QStringLiteral("tasks"),
+        QString(),
+        [this]() {
+            const bool ok = m_jarvis->organizeUndoLast();
+            appendLog(Str::logJarvis(),
+                ok ? (IS_EN ? QStringLiteral("↩ Last organize batch undone.")
+                            : QStringLiteral("↩ Последняя организация отменена."))
+                   : (IS_EN ? QStringLiteral("Nothing to undo.")
+                            : QStringLiteral("Нечего отменять.")),
+                Theme::LogColors::system);
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("tasks.quickAdd"),
+        IS_EN ? QStringLiteral("Quick add task") : QStringLiteral("Быстро добавить задачу"),
+        QStringLiteral("＋"), QString(), QStringLiteral("tasks"),
+        QString(),
+        [this]() {
+            bool ok = false;
+            const QString title = QInputDialog::getText(this,
+                IS_EN ? QStringLiteral("New Task") : QStringLiteral("Новая задача"),
+                IS_EN ? QStringLiteral("Task title:") : QStringLiteral("Название задачи:"),
+                QLineEdit::Normal, QString(), &ok);
+            if (!ok || title.trimmed().isEmpty())
+                return;
+
+            if (m_jarvis->addTask(title.trimmed()) > 0) {
+                appendLog(IS_EN ? QStringLiteral("System") : QStringLiteral("Система"),
+                    (IS_EN ? QStringLiteral("Task created: ")
+                           : QStringLiteral("Задача создана: ")) + title.trimmed(),
+                    Theme::LogColors::system);
+                NotificationManager::instance().showNotification(
+                    IS_EN ? QStringLiteral("Task created") : QStringLiteral("Задача создана"),
+                    title.trimmed(), NotificationManager::Level::Success);
+            }
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("tasks.deadlines"),
+        IS_EN ? QStringLiteral("Check deadlines") : QStringLiteral("Проверить дедлайны"),
+        QStringLiteral("⏰"), QString(), QStringLiteral("tasks"),
+        QString(),
+        [this]() {
+            const QString warnings = m_jarvis->getOverdueTasksSummary();
+            if (warnings.isEmpty()) {
+                appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.")
+                                : QStringLiteral("Д.Ж.А.Р.В.И.С."),
+                    IS_EN ? QStringLiteral("All clear, sir. No approaching deadlines.")
+                          : QStringLiteral("Всё чисто, сэр. Дедлайнов в ближайшее время нет."),
+                    Theme::LogColors::jarvis);
+                return;
+            }
+            notifyDeadlineWarnings(warnings);
+            appendLog(IS_EN ? QStringLiteral("J.A.R.V.I.S.") : QStringLiteral("Д.Ж.А.Р.В.И.С."),
+                      warnings, Theme::LogColors::error);
+        }, nullptr
+    });
+
+    // ---------------------------------------------------------
+    //  Обучение
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("training.center"),
+        IS_EN ? QStringLiteral("Training Center") : QStringLiteral("Центр обучения"),
+        QStringLiteral("🧠"), QString(), QStringLiteral("training"),
+        IS_EN ? QStringLiteral("Dataset, local training, app usage, synapse graph")
+              : QStringLiteral("Датасет, локальное обучение, статистика, граф синапсов"),
+        [this]() {
+            TrainingCenterDialog dlg(m_jarvis->currentUserId(), m_passiveListener,
+                                     m_appLearner, this, 0);
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("training.vision"),
+        IS_EN ? QStringLiteral("Vision Center") : QStringLiteral("Центр зрения"),
+        QStringLiteral("👁"), QString(), QStringLiteral("training"),
+        IS_EN ? QStringLiteral("Who JARVIS recognises and what it sees")
+              : QStringLiteral("Кого JARVIS узнаёт и что видит"),
+        [this]() { openVisionCenter(0); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("training.export"),
+        IS_EN ? QStringLiteral("Export .jsonl for fine-tuning")
+              : QStringLiteral("Экспорт .jsonl для обучения"),
+        QStringLiteral("📤"), QString(), QStringLiteral("training"),
+        QString(), [this]() { onExportTrainingData(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("training.screenshot"),
+        IS_EN ? QStringLiteral("Screenshot + AI description")
+              : QStringLiteral("Скриншот + описание AI"),
+        QStringLiteral("📸"), QString(), QStringLiteral("training"),
+        IS_EN ? QStringLiteral("Describe the screen and save the pair to the dataset")
+              : QStringLiteral("Описать экран и сохранить пару в датасет"),
+        [this]() {
+            const QString apiKey = m_jarvis->claudeApi()->apiKey();
+            if (apiKey.isEmpty()) {
+                appendLog(Str::logSystem(),
+                    IS_EN ? QStringLiteral("📸 Need a Claude API key for screenshot analysis")
+                          : QStringLiteral("📸 Нужен ключ Claude API для анализа скриншота"),
+                    Theme::LogColors::error);
+                return;
+            }
+
+            appendLog(Str::logSystem(),
+                IS_EN ? QStringLiteral("📸 Taking screenshot and analyzing...")
+                      : QStringLiteral("📸 Делаю скриншот и анализирую..."),
+                Theme::LogColors::system);
+
+            m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
+                if (desc.isEmpty())
+                    return;
+                appendLog(Str::logJarvis(),
+                    (IS_EN ? QStringLiteral("📸 Screen: ") : QStringLiteral("📸 Экран: ")) + desc,
+                    Theme::LogColors::jarvis);
+                if (m_passiveListener) {
+                    m_passiveListener->addVoiceCommandPair(
+                        QStringLiteral("[screenshot] what do you see on the screen?"),
+                        desc, QStringLiteral("en"));
+                }
+            });
+        },
+        [this]() { return m_screenAgent != nullptr; }
+    });
+
+    {
+        // Переключатель: состояние спрашивается у таймера, а не хранится
+        // в тексте пункта. Раньше пункт сам себе переписывал заголовок на
+        // «ВКЛ/ВЫКЛ» — и это было единственным местом, где состояние жило.
+        AppAction autoShot;
+        autoShot.id       = QStringLiteral("training.autoScreenshot");
+        autoShot.title    = IS_EN ? QStringLiteral("Auto-screenshot every 5 min")
+                                  : QStringLiteral("Авто-скриншот каждые 5 мин");
+        autoShot.icon     = QStringLiteral("⏱");
+        autoShot.group    = QStringLiteral("training");
+        autoShot.checkable = true;
+        autoShot.checked  = [this]() { return m_screenshotTimer && m_screenshotTimer->isActive(); };
+        autoShot.enabled  = [this]() { return m_screenAgent != nullptr; };
+        autoShot.run      = [this]() {
+            if (m_screenshotTimer && m_screenshotTimer->isActive()) {
+                m_screenshotTimer->stop();
+                return;
+            }
+            if (!m_screenshotTimer) {
+                m_screenshotTimer = new QTimer(this);
+                m_screenshotTimer->setInterval(5 * 60 * 1000);
+                connect(m_screenshotTimer, &QTimer::timeout, this, [this]() {
+                    if (!m_screenAgent)
+                        return;
+                    const QString apiKey = m_jarvis->claudeApi()->apiKey();
+                    if (apiKey.isEmpty())
+                        return;
+                    m_screenAgent->describeScreen(apiKey, [this](const QString& desc) {
+                        if (desc.isEmpty() || !m_passiveListener)
+                            return;
+                        m_passiveListener->addVoiceCommandPair(
+                            QStringLiteral("[auto-screenshot] describe current screen context"),
+                            desc, QStringLiteral("en"));
+                        qDebug() << "[Training] Auto-screenshot saved to dataset";
+                    });
+                });
+            }
+            m_screenshotTimer->start();
+        };
+        addOwnedAction(autoShot);
+    }
+
+    {
+        AppAction passive;
+        passive.id        = QStringLiteral("training.passive");
+        passive.title     = IS_EN ? QStringLiteral("Passive voice recording")
+                                  : QStringLiteral("Пассивная запись голоса");
+        passive.icon      = QStringLiteral("🎙");
+        passive.group     = QStringLiteral("training");
+        passive.hint      = IS_EN ? QStringLiteral("Every phrase heard goes into the dataset")
+                                  : QStringLiteral("Каждая услышанная фраза идёт в датасет");
+        passive.checkable = true;
+        passive.checked   = [this]() { return m_passiveListener && m_passiveListener->isListening(); };
+        passive.enabled   = [this]() { return m_passiveListener != nullptr; };
+        passive.run       = [this]() {
+            if (!m_passiveListener)
+                return;
+            if (m_passiveListener->isListening())
+                m_passiveListener->stopListening();
+            else
+                m_passiveListener->startListening();
+        };
+        addOwnedAction(passive);
+    }
+
+    addOwnedAction({
+        QStringLiteral("training.datasetPath"),
+        IS_EN ? QStringLiteral("Dataset folder") : QStringLiteral("Папка датасета"),
+        QStringLiteral("📁"), QString(), QStringLiteral("training"),
+        QString(),
+        [this]() {
+            const QString current = DatabaseManager::instance().getConfig(
+                QStringLiteral("voice_dataset_path"),
+                JarvisPaths::subPath(QStringLiteral("voice_dataset"))).toString();
+
+            const QString path = QFileDialog::getExistingDirectory(this,
+                IS_EN ? QStringLiteral("Select dataset folder")
+                      : QStringLiteral("Выберите папку для датасета"),
+                current);
+            if (path.isEmpty())
+                return;
+
+            DatabaseManager::instance().setConfig(
+                QStringLiteral("voice_dataset_path"), path);
+            if (m_passiveListener) {
+                auto cfg = m_passiveListener->config();
+                cfg.datasetPath = path;
+                m_passiveListener->setConfig(cfg);
+            }
+        }, nullptr
+    });
+
+    // ---------------------------------------------------------
+    //  Помощь
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("help.components"),
+        IS_EN ? QStringLiteral("Component Manager") : QStringLiteral("Менеджер компонентов"),
+        QStringLiteral("📦"), QString(), QStringLiteral("help"),
+        IS_EN ? QStringLiteral("Optional components: Vosk, Poppler, Tesseract")
+              : QStringLiteral("Дополнительные компоненты: Vosk, Poppler, Tesseract"),
+        [this]() { (new DependencyManagerDialog(this))->show(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("help.about"), Str::menuAbout(),
+        QStringLiteral("ℹ"), QString(), QStringLiteral("help"),
+        IS_EN ? QStringLiteral("Version and credits") : QStringLiteral("Версия и авторы"),
+        [this]() {
+            QMessageBox::about(this, QStringLiteral("J.A.R.V.I.S."),
+                Str::aboutText().arg(QCoreApplication::applicationVersion()));
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("help.eula"),
+        IS_EN ? QStringLiteral("License Agreement (EULA)")
+              : QStringLiteral("Лицензионное соглашение (EULA)"),
+        QStringLiteral("📜"), QString(), QStringLiteral("help"),
+        QString(), [this]() { showEulaDialog(); }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("help.privacy"),
+        IS_EN ? QStringLiteral("Privacy Policy") : QStringLiteral("Политика конфиденциальности"),
+        QStringLiteral("🔒"), QString(), QStringLiteral("help"),
+        QString(), [this]() { showPrivacyDialog(); }, nullptr
+    });
+
+    // ---------------------------------------------------------
+    //  Проект
+    // ---------------------------------------------------------
+    addOwnedAction({
+        QStringLiteral("project.index"), Str::menuIndexFolder(),
+        QStringLiteral("📁"), QString(), QStringLiteral("project"),
+        IS_EN ? QStringLiteral("Pick a folder and index it for code questions")
+              : QStringLiteral("Выбрать папку и проиндексировать для вопросов по коду"),
+        [this]() {
+            QString startDir = m_jarvis->projectIndexer()->projectRoot();
+            if (startDir.isEmpty())
+                startDir = QDir::homePath();
+
+            const QString dir = QFileDialog::getExistingDirectory(this,
+                Str::dlgChooseFolder(), startDir, QFileDialog::ShowDirsOnly);
+            if (dir.isEmpty())
+                return;
+
+            appendLog(Str::logSystem(), Str::statusIndexing() + dir + QStringLiteral("..."),
+                      Theme::LogColors::system);
+
+            m_jarvis->projectIndexer()->setProjectRoot(dir);
+            m_jarvis->projectIndexer()->indexProject();
+            m_jarvis->projectIndexer()->enableFileWatcher(true);
+            m_jarvis->syncProjectInfoToMemory();
+
+            appendLog(Str::logJarvis(),
+                      Str::projIndexed()
+                          + QString::number(m_jarvis->projectIndexer()->fileCount())
+                          + Str::projSymbols()
+                          + QString::number(m_jarvis->projectIndexer()->symbolCount()),
+                      Theme::LogColors::jarvis);
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("project.reindex"), Str::menuReindex(),
+        QStringLiteral("↻"), QString(), QStringLiteral("project"),
+        IS_EN ? QStringLiteral("Re-scan the current project")
+              : QStringLiteral("Пересканировать текущий проект"),
+        [this]() {
+            m_jarvis->projectIndexer()->indexProject();
+            m_jarvis->syncProjectInfoToMemory();
+            appendLog(Str::logSystem(),
+                      Str::projReindexed()
+                          + QString::number(m_jarvis->projectIndexer()->fileCount())
+                          + Str::projFilesCount(),
+                      Theme::LogColors::system);
+        },
+        // Раньше пункт был всегда доступен и на непроиндексированном
+        // проекте отвечал строкой в лог. Недоступность честнее.
+        [this]() { return !m_jarvis->projectIndexer()->projectRoot().isEmpty(); }
+    });
+
+    addOwnedAction({
+        QStringLiteral("project.info"), Str::menuProjectInfo(),
+        QStringLiteral("ℹ"), QString(), QStringLiteral("project"),
+        IS_EN ? QStringLiteral("Root, file and symbol counts, classes")
+              : QStringLiteral("Корень, число файлов и символов, классы"),
+        [this]() {
+            auto* idx = m_jarvis->projectIndexer();
+            QString info = Str::projInfoLabel() + idx->projectRoot()
+                         + Str::projFilesLabel() + QString::number(idx->fileCount())
+                         + Str::projSymbolsLabel() + QString::number(idx->symbolCount())
+                         + Str::projClassesLabel();
+            for (const auto& cls : idx->allClasses())
+                info += QStringLiteral("  • ") + cls + QStringLiteral("\n");
+            appendLog(Str::logJarvis(), info.trimmed(), Theme::LogColors::jarvis);
+        },
+        [this]() { return m_jarvis->projectIndexer()->fileCount() > 0; }
+    });
+
+    // ---------------------------------------------------------
+    //  Панели
+    // ---------------------------------------------------------
+    // Ленивое создание диалогов вынесено в один помощник: иначе каждая
+    // команда повторяла бы «если нет — создай, показать, поднять».
+    auto openDialog = [this](QDialog*& slot, std::function<QDialog*()> make) {
+        if (!slot)
+            slot = make();
+        slot->show();
+        slot->raise();
+        slot->activateWindow();
+    };
+
+    addOwnedAction({
+        QStringLiteral("view.dashboard"),
+        IS_EN ? QStringLiteral("Dashboard") : QStringLiteral("Дашборд"),
+        QStringLiteral("▦"), QStringLiteral("Ctrl+Shift+D"), QStringLiteral("view"),
+        IS_EN ? QStringLiteral("Customizable board of widgets")
+              : QStringLiteral("Настраиваемая доска виджетов"),
+        [this, openDialog]() {
+            openDialog(m_dashboardDialog,
+                       [this]() -> QDialog* { return new DashboardDialog(m_jarvis, IS_EN, this); });
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("view.monitor"),
+        IS_EN ? QStringLiteral("System monitor") : QStringLiteral("Состояние системы"),
+        QStringLiteral("📊"), QStringLiteral("Ctrl+Shift+M"), QStringLiteral("view"),
+        IS_EN ? QStringLiteral("CPU, memory, network, processes")
+              : QStringLiteral("Процессор, память, сеть, процессы"),
+        [this, openDialog]() {
+            openDialog(m_monitorDialog,
+                       [this]() -> QDialog* {
+                           return new SystemMonitorDialog(m_jarvis->systemMonitor(), IS_EN, this);
+                       });
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("view.devices"),
+        IS_EN ? QStringLiteral("Devices") : QStringLiteral("Устройства"),
+        QStringLiteral("🛰"), QString(), QStringLiteral("view"),
+        IS_EN ? QStringLiteral("This PC, ESP32, mesh peers, Bluetooth")
+              : QStringLiteral("Этот ПК, ESP32, соседи по mesh, Bluetooth"),
+        [this, openDialog]() {
+            openDialog(m_devicesDialog,
+                       [this]() -> QDialog* { return new DeviceHubDialog(m_jarvis, IS_EN, this); });
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("view.notifications"),
+        IS_EN ? QStringLiteral("Notifications") : QStringLiteral("Уведомления"),
+        QStringLiteral("🔔"), QString(), QStringLiteral("view"),
+        IS_EN ? QStringLiteral("Everything that happened while you looked away")
+              : QStringLiteral("Всё, что случилось, пока ты смотрел в другое окно"),
+        [this, openDialog]() {
+            openDialog(m_notificationsDialog,
+                       [this]() -> QDialog* { return new NotificationsDialog(IS_EN, this); });
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("view.modes"),
+        IS_EN ? QStringLiteral("Configure modes") : QStringLiteral("Настроить режимы"),
+        QStringLiteral("👤"), QString(), QStringLiteral("view"),
+        IS_EN ? QStringLiteral("Skills, tone, permissions and volume per profile")
+              : QStringLiteral("Скиллы, тон, разрешения и громкость профиля"),
+        [this]() {
+            ModesDialog dlg(m_jarvis, IS_EN, this);
+            dlg.exec();
+        }, nullptr
+    });
+
+    addOwnedAction({
+        QStringLiteral("view.artifacts"),
+        IS_EN ? QStringLiteral("Files Jarvis made") : QStringLiteral("Файлы от Джарвиса"),
+        QStringLiteral("🗂"), QString(), QStringLiteral("view"),
+        IS_EN ? QStringLiteral("Everything JARVIS created or edited")
+              : QStringLiteral("Всё, что JARVIS создал или изменил"),
+        [this]() {
+            ArtifactsDialog dlg(this);
+            dlg.exec();
+        }, nullptr
+    });
+
+    // Счётчик непрочитанного живёт в заголовке команды: центр
+    // уведомлений, о котором надо помнить, что он есть, бесполезен.
+    // Перерегистрация по тому же id заменяет запись и обновляет модель.
+    connect(&EventFeed::instance(), &EventFeed::changed, this, [this]() {
+        const AppAction* existing = m_actions->find(QStringLiteral("view.notifications"));
+        if (!existing)
+            return;
+
+        AppAction updated = *existing;
+        const int unread = EventFeed::instance().unread();
+        updated.title = unread > 0
+            ? (IS_EN ? QStringLiteral("Notifications (%1)")
+                     : QStringLiteral("Уведомления (%1)")).arg(unread)
+            : (IS_EN ? QStringLiteral("Notifications") : QStringLiteral("Уведомления"));
+        addOwnedAction(updated);
+    });
+
+    m_actions->installShortcuts(this);
+
+    // Провайдер команд для Ctrl+K и запуск найденного живут в main(): они
+    // работают с реестром, а не с окном, и должны пережить его закрытие.
+}
+
+// ============================================================
+//  Палитра команд: Ctrl+Space из любого места системы
+// ============================================================
+
+// Палитра, её горячие клавиши и сам реестр команд собираются в main():
+// они переживают это окно. Здесь осталось только наполнение реестра
+// (registerAppActions) — команды окна умеют то, что умеет окно.
+
+void MainWindow::addOwnedAction(const AppAction& action)
+{
+    m_actions->add(action, this);
+}
+
+// ============================================================
+//  Слой действий: шаги агента и подтверждения
+// ============================================================
+
+void MainWindow::setupAgentUi()
+{
+    AgentLoop*      agent = m_jarvis->agent();
+    PermissionGate* gate  = m_jarvis->permissions();
+    if (!agent || !gate)
+        return;
+
+    // Десктопное окно — единственное место, где есть кому подтверждать.
+    // Без этого флага гейт отклоняет всё, что рискованнее чтения.
+    gate->setInteractive(true);
+
+    connect(agent, &AgentLoop::narration, this, [this](const QString& text) {
+        appendLog(Str::logJarvis(), text, Theme::LogColors::jarvis);
+    });
+
+    connect(agent, &AgentLoop::toolStarted, this,
+            [this](const QString&, const QString& summary) {
+        appendLog(Str::logJarvis(), QStringLiteral("⚙ ") + summary,
+                  Theme::LogColors::system);
+    });
+
+    connect(agent, &AgentLoop::toolFinished, this,
+            [this](const QString&, bool ok, const QString& summary) {
+        appendLog(Str::logJarvis(),
+                  (ok ? QStringLiteral("✓ ") : QStringLiteral("✕ ")) + summary,
+                  ok ? Theme::LogColors::system : Theme::LogColors::error);
+    });
+
+    connect(agent, &AgentLoop::toolDenied, this,
+            [this](const QString&, const QString& reason) {
+        appendLog(Str::logJarvis(), QStringLiteral("⛔ ") + reason,
+                  Theme::LogColors::error);
+    });
+
+    // Сценарии печатают свои шаги тем же способом — из меню их запускают
+    // без всякого агента, и без этого прогон был бы молчаливым.
+    if (WorkflowManager* wm = m_jarvis->workflows()) {
+        connect(wm, &WorkflowManager::workflowStarted, this,
+                [this](const QString& name, int stepCount) {
+            appendLog(Str::logJarvis(),
+                      QStringLiteral("▶ %1 — %2").arg(name).arg(
+                          IS_EN ? QStringLiteral("%1 steps").arg(stepCount)
+                                : QStringLiteral("шагов: %1").arg(stepCount)),
+                      Theme::LogColors::jarvis);
+        });
+
+        connect(wm, &WorkflowManager::stepFinished, this,
+                [this](const QString&, int index, bool ok, const QString& summary) {
+            appendLog(Str::logJarvis(),
+                      QStringLiteral("  %1 %2. %3")
+                          .arg(ok ? QStringLiteral("✓") : QStringLiteral("✕"))
+                          .arg(index + 1)
+                          .arg(summary),
+                      ok ? Theme::LogColors::system : Theme::LogColors::error);
+        });
+    }
+
+    connect(gate, &PermissionGate::confirmationRequired, this,
+            [this, gate](quint64 id, const QString& toolName,
+                         const QString& summary, int risk) {
+
+        const bool dangerous = (risk >= static_cast<int>(ToolRisk::Dangerous));
+
+        QMessageBox box(this);
+        box.setWindowTitle(IS_EN ? QStringLiteral("Confirm action")
+                                 : QStringLiteral("Подтверждение действия"));
+        box.setIcon(dangerous ? QMessageBox::Warning : QMessageBox::Question);
+        box.setText(dangerous
+                        ? (IS_EN ? QStringLiteral("This action may be irreversible.")
+                                 : QStringLiteral("Это действие может быть необратимым."))
+                        : (IS_EN ? QStringLiteral("JARVIS wants to do this:")
+                                 : QStringLiteral("JARVIS хочет выполнить:")));
+        box.setInformativeText(summary + QStringLiteral("\n\n[") + toolName + QStringLiteral("]"));
+
+        QAbstractButton* allow = box.addButton(
+            IS_EN ? QStringLiteral("Allow") : QStringLiteral("Разрешить"),
+            QMessageBox::AcceptRole);
+
+        // «Разрешать всегда» намеренно недоступно для Dangerous:
+        // удаление и выключение спрашиваются каждый раз.
+        QAbstractButton* always = nullptr;
+        if (!dangerous) {
+            always = box.addButton(
+                IS_EN ? QStringLiteral("Allow for this session")
+                      : QStringLiteral("Разрешать до перезапуска"),
+                QMessageBox::YesRole);
+        }
+        QAbstractButton* deny = box.addButton(
+            IS_EN ? QStringLiteral("Deny") : QStringLiteral("Отклонить"),
+            QMessageBox::RejectRole);
+        box.setDefaultButton(qobject_cast<QPushButton*>(deny));
+        box.exec();
+
+        const bool allowed  = (box.clickedButton() == allow)
+                              || (always && box.clickedButton() == always);
+        const bool remember = always && (box.clickedButton() == always);
+
+        // Ответ отдаём следующим тиком: resolve() синхронно запускает
+        // инструмент, а тот может сразу попросить следующее подтверждение —
+        // разворачиваем стек, чтобы диалоги не вкладывались друг в друга.
+        QTimer::singleShot(0, this, [gate, id, allowed, remember]() {
+            gate->resolve(id, allowed, remember);
+        });
+    });
 }
 
 void MainWindow::appendLog(const QString& who, const QString& text, const QString& color)
 {
-    const QString time = QTime::currentTime().toString(QStringLiteral("HH:mm:ss"));
-    const auto& tc = ThemeManager::colors(m_themeIndex);
-    const QString escaped = text.toHtmlEscaped()
-                                .replace(QStringLiteral("\n"), QStringLiteral("<br>"));
-    const QString html = ThemeManager::buildMessageHtml(tc, time, who, escaped, color);
-
-    m_log->append(html);
-    m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
+    // Единственная точка входа ленты — как и была до порта, поэтому
+    // все 142 вызова остались нетронутыми. Изменилось только то, что
+    // сообщение уходит в модель, а не склеивается в HTML-строку.
+    //
+    // Цвет здесь читается обратно в роль (kindFromLogColor) и дальше
+    // не используется: цвет роли выдаёт тема.
+    if (m_chat)
+        m_chat->append(kindFromLogColor(color), who, text);
 }
 
 // ============================================================
@@ -5295,220 +5558,30 @@ void MainWindow::appendLog(const QString& who, const QString& text, const QStrin
 
 void MainWindow::showWelcomeDashboard()
 {
-    // Render the initial welcome panel
-    m_log->setHtml(buildWelcomeHtml());
+    if (!m_welcomeCtl) return;
 
-    // Live signal connections — re-render on state changes
+    // Экран сам решает, когда себя показывать: он висит в ленте под
+    // условием «сообщений нет», и сам же включает опрос состояния,
+    // пока виден.
+    //
+    // Сигналы ниже — не замена опросу, а дополнение к нему: они
+    // приходят в момент события, а опрос ловит то, о чём никто не
+    // сообщает (вынули накопитель, отвалилась база).
+    m_welcomeCtl->refresh();
+
     connect(&MemoryConsolidation::instance(),
             &MemoryConsolidation::driveStatusChanged,
-            this, [this](bool) {
-        m_log->setHtml(buildWelcomeHtml());
-    });
+            this, [this](bool) { m_welcomeCtl->refresh(); });
 
     connect(&UserProfileExtended::instance(),
             &UserProfileExtended::profileChanged,
-            this, [this](const QString&) {
-        m_log->setHtml(buildWelcomeHtml());
-    });
+            this, [this](const QString&) { m_welcomeCtl->refresh(); });
+
+    if (auto* indexer = m_jarvis->projectIndexer()) {
+        connect(indexer, &ProjectIndexer::indexingFinished,
+                this, [this](int, int) { m_welcomeCtl->refresh(); });
+    }
 }
-
-QString MainWindow::buildWelcomeHtml() const
-{
-    const auto& tc = ThemeManager::colors(m_themeIndex);
-    const int hour = QTime::currentTime().hour();
-
-    // ── Identity greeting ─────────────────────────────────
-    const QString nickname = UserProfileExtended::instance().nickname();
-    QString greeting;
-    if (nickname.isEmpty()) {
-        greeting = IS_EN
-            ? QStringLiteral("System Initialized. Awaiting identity calibration...")
-            : QStringLiteral("Система инициализирована. Ожидание калибровки идентичности...");
-    } else {
-        QString timeGreet;
-        if      (hour < 6)  timeGreet = IS_EN ? QStringLiteral("Still up, %1?")   : QStringLiteral("Не спишь, %1?");
-        else if (hour < 12) timeGreet = IS_EN ? QStringLiteral("Morning, %1.")     : QStringLiteral("Доброе утро, %1.");
-        else if (hour < 18) timeGreet = IS_EN ? QStringLiteral("Afternoon, %1.")   : QStringLiteral("Добрый день, %1.");
-        else                timeGreet = IS_EN ? QStringLiteral("Evening, %1.")     : QStringLiteral("Добрый вечер, %1.");
-        greeting = timeGreet.arg(nickname);
-    }
-
-    // ── Version ───────────────────────────────────────────
-    const QString version = QCoreApplication::applicationVersion();
-
-    // ── Storage status ────────────────────────────────────
-    const auto driveStatus = MemoryConsolidation::instance().checkDriveStatus();
-    QString storageHtml;
-    if (driveStatus.connected) {
-        storageHtml = QStringLiteral(
-            "<span style='color:#66FCF1;'>&#9679;</span> "
-            "External Core [%1 GB] Connected — %2 GB free")
-            .arg(QString::number(driveStatus.totalGb(), 'f', 0),
-                 QString::number(driveStatus.freeGb(), 'f', 1));
-    } else {
-        storageHtml = QStringLiteral(
-            "<span style='color:#FFA726;'>&#9679;</span> "
-            "Running Autonomous (Local SSD Cache)");
-    }
-
-    // ── LLM status ────────────────────────────────────────
-    const bool claudeOk = m_jarvis->claudeApi() && m_jarvis->claudeApi()->hasApiKey();
-    QString llmLine;
-    if (claudeOk)
-        llmLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Claude API Online");
-    else
-        llmLine = QStringLiteral("<span style='color:#ff4444;'>&#9679;</span> Claude API — no key");
-
-    // ── Database status ───────────────────────────────────
-    const auto& db = DatabaseManager::instance();
-    QString dbLine;
-    if (db.isOpen())
-        dbLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Database Online");
-    else
-        dbLine = QStringLiteral("<span style='color:#ff4444;'>&#9679;</span> Database OFFLINE");
-
-    // ── Independence metric (Layer 4) ─────────────────────
-    const auto indep = LlmCacheManager::instance()
-        .independenceStats(LlmCacheManager::kDesktopOwnerId, 7);
-    QString indepLine;
-    if (indep.total > 0) {
-        const QString text = IS_EN
-            ? QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> "
-                             "Independence (7d): %1% (%2/%3 answered locally)")
-                  .arg(QString::number(indep.pct(), 'f', 0))
-                  .arg(indep.local).arg(indep.total)
-            : QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> "
-                             "Самостоятельность (7д): %1% (%2/%3 локально)")
-                  .arg(QString::number(indep.pct(), 'f', 0))
-                  .arg(indep.local).arg(indep.total);
-        indepLine = QStringLiteral("<div style='color:%1; font-size:12px; "
-                                   "padding:3px 0; font-family:Consolas,monospace;'>"
-                                   "%2</div>")
-                        .arg(QLatin1String(tc.user), text);
-    }
-
-    // ── Project status ────────────────────────────────────
-    QString projLine;
-    if (m_jarvis->projectIndexer()->fileCount() > 0) {
-        projLine = QStringLiteral("<span style='color:#66FCF1;'>&#9679;</span> Project: %1 (%2 files)")
-                       .arg(m_jarvis->projectIndexer()->projectRoot()
-                                .section(QChar('/'), -1),
-                            QString::number(m_jarvis->projectIndexer()->fileCount()));
-    }
-
-    // ── Current thought / reflection digest ───────────────
-    const auto doubts = SelfJournal::instance().topDoubtsForVerification(1);
-    const int doubtCount = SelfJournal::instance().unresolvedDoubtCount();
-    const int pdfChunks  = PdfDistiller::instance().totalChunks();
-    const int pdfDoubts  = PdfDistiller::instance().doubtCount();
-
-    QString thoughtLine;
-    if (!doubts.isEmpty()) {
-        const auto& d = doubts.first();
-        thoughtLine = QStringLiteral("Reflecting on: <em>\"%1\"</em> (confidence: %2)")
-                          .arg(d.content.left(80).toHtmlEscaped(),
-                               QString::number(d.confidence, 'f', 2));
-    } else if (pdfChunks > 0) {
-        thoughtLine = IS_EN
-            ? QStringLiteral("Knowledge base: %1 chunks distilled").arg(pdfChunks)
-            : QStringLiteral("База знаний: %1 фрагментов извлечено").arg(pdfChunks);
-    } else {
-        thoughtLine = IS_EN
-            ? QStringLiteral("Idle — awaiting new data to learn from")
-            : QStringLiteral("Ожидание — готов к обучению");
-    }
-
-    QString doubtBadge;
-    if (doubtCount > 0 || pdfDoubts > 0) {
-        const int total = doubtCount + pdfDoubts;
-        doubtBadge = QStringLiteral(
-            " &nbsp;<span style='background:#ff572233; color:#FF5722; "
-            "padding:2px 8px; border-radius:8px; font-size:11px;'>"
-            "&#10067; %1 unverified</span>").arg(total);
-    }
-
-    // ── Build the complete dashboard HTML ─────────────────
-    return QStringLiteral(
-        // Outer container
-        "<div style='margin:12px 8px; font-family:Segoe UI,sans-serif;'>"
-
-        // Header — JARVIS title + version
-        "<div style='text-align:center; padding:16px 0 8px 0;'>"
-        "<span style='color:%1; font-size:28px; font-weight:bold; "
-        "letter-spacing:6px; font-family:Segoe UI Semibold,sans-serif;'>"
-        "J.A.R.V.I.S.</span><br>"
-        "<span style='color:%2; font-size:11px; letter-spacing:2px;'>"
-        "v%3 &nbsp;|&nbsp; %4</span>"
-        "</div>"
-
-        // Greeting
-        "<div style='text-align:center; padding:8px 0 16px 0;'>"
-        "<span style='color:%5; font-size:15px;'>%6</span>"
-        "</div>"
-
-        // Status grid
-        "<div style='background:%7; border:1px solid %8; border-radius:10px; "
-        "padding:14px 18px; margin:4px 0;'>"
-
-        // Row: Storage
-        "<div style='color:%9; font-size:12px; padding:3px 0; "
-        "font-family:Consolas,monospace;'>%10</div>"
-
-        // Row: LLM
-        "<div style='color:%9; font-size:12px; padding:3px 0; "
-        "font-family:Consolas,monospace;'>%11</div>"
-
-        // Row: Database
-        "<div style='color:%9; font-size:12px; padding:3px 0; "
-        "font-family:Consolas,monospace;'>%12</div>"
-
-        // Row: Independence (if any router activity yet)
-        "%17"
-
-        // Row: Project (if any)
-        "%13"
-
-        "</div>"
-
-        // Current thought
-        "<div style='background:%7; border:1px solid %8; border-radius:10px; "
-        "padding:12px 18px; margin:6px 0;'>"
-        "<span style='color:%14; font-size:11px; letter-spacing:1px;'>"
-        "CURRENT THOUGHT</span>%15<br>"
-        "<span style='color:%9; font-size:12px; font-family:Consolas,monospace;'>"
-        "%16</span>"
-        "</div>"
-
-        "</div>"
-    )
-    .arg(
-        /* %1  title color */   QStringLiteral("#66FCF1"),
-        /* %2  subtitle color*/ QStringLiteral("rgba(102,252,241,0.6)"),
-        /* %3  version */       version,
-        /* %4  date */          QDate::currentDate().toString(QStringLiteral("dd MMM yyyy")),
-        /* %5  greeting color*/ QLatin1String(tc.jarvis),
-        /* %6  greeting text */ greeting,
-        /* %7  card bg */       QLatin1String(tc.cardBg),
-        /* %8  card border */   QLatin1String(tc.cardBorder),
-        /* %9  text color */    QLatin1String(tc.user)
-    )
-    .arg(
-        /* %10 storage */       storageHtml,
-        /* %11 llm */           llmLine,
-        /* %12 db */            dbLine,
-        /* %13 project */       projLine.isEmpty() ? QString()
-                                    : QStringLiteral("<div style='color:%1; font-size:12px; "
-                                                     "padding:3px 0; font-family:Consolas,monospace;'>"
-                                                     "%2</div>")
-                                          .arg(QLatin1String(tc.user),
-                                               projLine),
-        /* %14 label color */   QStringLiteral("#66FCF1"),
-        /* %15 doubt badge */   doubtBadge,
-        /* %16 thought */       thoughtLine,
-        /* %17 independence */  indepLine
-    );
-}
-
 // ============================================================
 // onCommandLearned — уведомление о выученной команде
 // ============================================================
@@ -5635,14 +5708,13 @@ void MainWindow::onMicButtonClicked()
         m_audioManager->playListening();
         m_voiceInput->startListening();
         m_voiceActive = true;
-        m_micBtn->setText(QStringLiteral("🔴"));
-        m_micBtn->setProperty("active", true);
-        m_micBtn->setToolTip(IS_EN ? QStringLiteral("Listening... (click to stop)")
-                                   : QStringLiteral("Слушаю... (нажми чтобы остановить)"));
-        m_micBtn->style()->unpolish(m_micBtn);
-        m_micBtn->style()->polish(m_micBtn);
-        m_status->setText(IS_EN ? QStringLiteral("🎤 Listening...")
-                                : QStringLiteral("🎤 Слушаю..."));
+        m_chatCtl->setMicGlyph(QStringLiteral("🔴"));
+        m_chatCtl->setListening(true);
+        m_chatCtl->setMicTooltip(IS_EN ? QStringLiteral("Listening... (click to stop)")
+                                   : QStringLiteral("Слушаю… (нажми чтобы остановить)"));
+        m_chatCtl->setStatus(IS_EN ? QStringLiteral("🎤 Listening…")
+                                   : QStringLiteral("🎤 Слушаю…"),
+                             QStringLiteral("speaking"));
         appendLog(Str::logJarvis(),
                   IS_EN ? QStringLiteral("🎤 Voice input started. Say 'Jarvis' to activate.")
                         : QStringLiteral("🎤 Голосовой ввод запущен. Скажите «Джарвис» для активации."),
@@ -5651,20 +5723,19 @@ void MainWindow::onMicButtonClicked()
         // Останавливаем
         m_voiceInput->stopListening();
         m_voiceActive = false;
-        m_micBtn->setText(QStringLiteral("🎤"));
-        m_micBtn->setProperty("active", false);
-        m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)")
+        m_chatCtl->setMicGlyph(QStringLiteral("🎤"));
+        m_chatCtl->setListening(false);
+        m_chatCtl->setMicTooltip(IS_EN ? QStringLiteral("Voice input (Vosk)")
                                    : QStringLiteral("Голосовой ввод (Vosk)"));
-        m_micBtn->style()->unpolish(m_micBtn);
-        m_micBtn->style()->polish(m_micBtn);
-        m_status->setText(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"));
+        m_chatCtl->setStatus(IS_EN ? QStringLiteral("Ready") : QStringLiteral("Готов"),
+                             QStringLiteral("online"));
     }
 }
 
 void MainWindow::onVoiceReady()
 {
-    m_micBtn->setEnabled(true);
-    m_micBtn->setToolTip(IS_EN ? QStringLiteral("Voice input (Vosk)")
+    m_chatCtl->setMicEnabled(true);
+    m_chatCtl->setMicTooltip(IS_EN ? QStringLiteral("Voice input (Vosk)")
                                : QStringLiteral("Голосовой ввод (Vosk)"));
     appendLog(Str::logSystem(),
               IS_EN ? QStringLiteral("🎤 Vosk models loaded. Voice input ready.")
@@ -5675,10 +5746,7 @@ void MainWindow::onVoiceReady()
 void MainWindow::onVoiceText(const QString& text, const QString& lang)
 {
     // Сбрасываем цвет кнопки — запись закончена, идёт распознавание
-    m_micBtn->setStyleSheet(QString());
-    m_micBtn->style()->unpolish(m_micBtn);
-    m_micBtn->style()->polish(m_micBtn);
-
+    m_chatCtl->setMicSpeaking(false);
     if (text.isEmpty()) return;
 
     // Показываем распознанный текст в поле ввода и отправляем
@@ -5690,19 +5758,14 @@ void MainWindow::onVoiceText(const QString& text, const QString& lang)
               QStringLiteral("[%1] %2").arg(lang.toUpper(), text),
               QStringLiteral("#4a9a6a"));
 
-    m_input->setPlainText(text);
+    m_chatCtl->setDraft(text);
 
     // Помечаем что ввод голосовой — onAsyncResponse сохранит пару в voice_journal
     m_lastInputWasVoice = true;
     m_lastVoiceLanguage = lang;
 
-    // Speech that doesn't look like Russian or English text at all (not
-    // just short/ambiguous) — try to look it up and remember it, so an
-    // unfamiliar language becomes recognizable over time.
-    if (LanguageDetector::detect(text) == LanguageDetector::Language::Unknown
-        && text.length() >= 6 && m_jarvis->translationEngine()) {
-        m_jarvis->translationEngine()->learnUnknownLanguageSnippet(text);
-    }
+    // Незнакомый язык распознаёт и запоминает ядро — до того, как речь
+    // дойдёт сюда (см. Jarvis::submitVoiceCommand).
 
     // Автоматически отправляем голосовую команду
     onSend();
@@ -5713,14 +5776,14 @@ void MainWindow::onWakeWord(const QString& word)
     appendLog(Str::logJarvis(),
               QStringLiteral("👂 ") + (IS_EN ? QStringLiteral("Wake word: ") : QStringLiteral("Активация: ")) + word,
               Theme::LogColors::system);
-    m_status->setText(IS_EN ? QStringLiteral("🎤 Speak now...")
+    m_chatCtl->setStatusText(IS_EN ? QStringLiteral("🎤 Speak now...")
                             : QStringLiteral("🎤 Говорите..."));
 }
 
 void MainWindow::onWhisperMode(bool isWhisper)
 {
     if (isWhisper) {
-        m_micBtn->setToolTip(IS_EN ? QStringLiteral("🤫 Quiet voice detected")
+        m_chatCtl->setMicTooltip(IS_EN ? QStringLiteral("🤫 Quiet voice detected")
                                    : QStringLiteral("🤫 Обнаружен шёпот"));
         appendLog(Str::logSystem(),
                   IS_EN ? QStringLiteral("🤫 Whisper detected — low volume mode active")
@@ -5728,6 +5791,38 @@ void MainWindow::onWhisperMode(bool isWhisper)
                   Theme::LogColors::system);
     }
 }
+
+// Пользователь заговорил, пока JARVIS говорит сам. Реплика обрывается
+// сразу — «Я обнаружил проблему в вашем—», а не дочитывается до конца:
+// договорённая до точки фраза после «стоп» мгновенно выдаёт программу.
+void MainWindow::maybeBargeIn(float micDb)
+{
+    VoiceSynthesisManager& tts = VoiceSynthesisManager::instance();
+
+    // Критическую реплику (перегрев, падение процесса) не перебивает
+    // никто: она помечена interruptible = false.
+    if (!tts.isSpeaking() || !tts.currentIsInterruptible()) {
+        m_bargeInFrames = 0;
+        return;
+    }
+
+    if (tts.currentSpeechElapsedMs() < kBargeInGraceMs || micDb < kBargeInDb) {
+        m_bargeInFrames = 0;
+        return;
+    }
+
+    if (++m_bargeInFrames < kBargeInMinFrames)
+        return;
+
+    m_bargeInFrames = 0;
+    tts.cancelCurrentSpeech(CancelReason::UserBargeIn);
+
+    appendLog(Str::logSystem(),
+              IS_EN ? QStringLiteral("🎤 Interrupted — listening")
+                    : QStringLiteral("🎤 Перебил — слушаю"),
+              Theme::LogColors::system);
+}
+
 // ============================================================
 // Fine-tuning — лайк и экспорт
 // ============================================================
@@ -5873,4 +5968,106 @@ void MainWindow::runFirstRunProfileSetup()
 
     QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
         .setValue(QStringLiteral("user/profileSetupDone"), true);
+}
+
+// ============================================================
+// onSaveInsight — сохранение того, что показано в боковой панели
+//
+// Диалог сохранения живёт здесь, а не в контроллере: QFileDialog
+// нужен родитель-виджет, а панель после переезда в QML его не имеет.
+// ============================================================
+
+void MainWindow::onSaveInsight(const QString&)
+{
+    if (!m_visualCtl) return;
+
+    // Уже настоящий файл на диске — сохранять его заново незачем,
+    // просто показываем, где он лежит.
+    const QString existing = m_visualCtl->currentFilePath();
+    const QString mermaid  = m_visualCtl->currentMermaid();
+    const QImage  image    = m_visualCtl->currentImage();
+    const QByteArray svgData = m_visualCtl->currentSvgData();
+
+    if (!existing.isEmpty() && mermaid.isEmpty() && image.isNull()) {
+        QDesktopServices::openUrl(
+            QUrl::fromLocalFile(QFileInfo(existing).absolutePath()));
+        return;
+    }
+
+    const QString ts = QDateTime::currentDateTime().toString(
+        QStringLiteral("yyyyMMdd_HHmmss"));
+    const QString base = JarvisPaths::subPath(QStringLiteral("visuals"))
+        + QStringLiteral("/diagram_") + ts;
+
+    if (!mermaid.isEmpty()) {
+        // Сохраняем НАРИСОВАННУЮ диаграмму, а не её исходник. Пункт
+        // .mmd в списке типов остаётся — текст в одном клике.
+        m_visualCtl->exportRendered(
+            [this, base, mermaid](const QByteArray& svg, const QImage& raster) {
+                QStringList filters;
+                QString defaultSuffix;
+                if (!svg.isEmpty()) {
+                    filters << QStringLiteral("SVG image (*.svg)");
+                    defaultSuffix = QStringLiteral(".svg");
+                }
+                if (!raster.isNull()) {
+                    filters << QStringLiteral("PNG image (*.png)");
+                    if (defaultSuffix.isEmpty()) defaultSuffix = QStringLiteral(".png");
+                }
+                filters << QStringLiteral("Mermaid source (*.mmd)")
+                        << QStringLiteral("All (*)");
+                if (defaultSuffix.isEmpty()) defaultSuffix = QStringLiteral(".mmd");
+
+                const QString path = QFileDialog::getSaveFileName(
+                    this, QStringLiteral("Save Diagram"),
+                    base + defaultSuffix, filters.join(QStringLiteral(";;")));
+                if (path.isEmpty()) return;
+
+                // Что писать, решает выбранное расширение: выбрав в
+                // списке «PNG», нельзя получить SVG с именем .png.
+                if (path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive)
+                    && !raster.isNull()) {
+                    if (!raster.save(path, "PNG"))
+                        qWarning() << "[VisualInsights] cannot write" << path;
+                    return;
+                }
+
+                QFile f(path);
+                if (!f.open(QIODevice::WriteOnly)) {
+                    qWarning() << "[VisualInsights] cannot write" << path
+                               << f.errorString();
+                    return;
+                }
+                if (!svg.isEmpty()
+                    && !path.endsWith(QStringLiteral(".mmd"), Qt::CaseInsensitive))
+                    f.write(svg);
+                else
+                    f.write(mermaid.toUtf8());
+                f.close();
+            });
+        return;
+    }
+
+    if (!image.isNull()) {
+        const QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("Save Diagram"),
+            base + QStringLiteral(".png"),
+            QStringLiteral("PNG (*.png);;All (*)"));
+        if (!path.isEmpty())
+            image.save(path);
+        return;
+    }
+
+    if (!svgData.isEmpty()) {
+        const QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("Save Diagram"),
+            base + QStringLiteral(".svg"),
+            QStringLiteral("SVG (*.svg);;All (*)"));
+        if (path.isEmpty()) return;
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(svgData);
+            f.close();
+        }
+    }
 }

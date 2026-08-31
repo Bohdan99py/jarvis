@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QStandardPaths>
 #include <QDir>
+#include <QDebug>
 
 // ============================================================
 // Конструктор
@@ -246,6 +247,142 @@ void ClaudeApi::sendMessage(const QString& userMessage, ResponseCallback callbac
 }
 
 // ============================================================
+// Разбор HTTP-ошибки — общий для текстового и агентного путей
+// ============================================================
+
+QString ClaudeApi::describeHttpError(QNetworkReply* reply, const QByteArray& body) const
+{
+    const int statusCode = reply->attribute(
+        QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+    // Пытаемся извлечь детали ошибки из тела ответа
+    QString apiDetail;
+    QJsonDocument errDoc = QJsonDocument::fromJson(body);
+    if (errDoc.isObject()) {
+        QJsonObject errObj = errDoc.object();
+        QJsonObject errInner = errObj[QStringLiteral("error")].toObject();
+        apiDetail = errInner[QStringLiteral("message")].toString();
+    }
+
+    QString errorMsg;
+    switch (statusCode) {
+    case 400:
+        errorMsg = QStringLiteral("Bad request (400)");
+        if (!apiDetail.isEmpty())
+            errorMsg += QStringLiteral(": ") + apiDetail;
+        break;
+    case 401:
+        errorMsg = QStringLiteral("Invalid API key. Fix it: apikey <your-key>");
+        break;
+    case 403:
+        errorMsg = QStringLiteral("Access denied (403). Check your account at console.anthropic.com");
+        break;
+    case 429:
+        errorMsg = QStringLiteral("Rate limit hit. Give it a moment.");
+        break;
+    case 529:
+        errorMsg = QStringLiteral("API overloaded. Try again shortly.");
+        break;
+    default:
+        errorMsg = QStringLiteral("API error (HTTP %1)").arg(statusCode);
+        if (!apiDetail.isEmpty())
+            errorMsg += QStringLiteral(": ") + apiDetail;
+        else
+            errorMsg += QStringLiteral(": ") + reply->errorString();
+        break;
+    }
+    return errorMsg;
+}
+
+// ============================================================
+// Агентный путь: сырой диалог + инструменты
+// ============================================================
+
+void ClaudeApi::sendConversation(const QJsonArray& messages,
+                                 const QJsonArray& tools,
+                                 const QString& systemPrompt,
+                                 RawCallback callback)
+{
+    if (!callback)
+        return;
+
+    if (m_apiKey.isEmpty()) {
+        callback(false, QJsonObject(),
+                 QStringLiteral("API key is not set. Use: apikey <your-anthropic-key>"));
+        return;
+    }
+
+    if (m_requesting) {
+        callback(false, QJsonObject(),
+                 QStringLiteral("Hold on — a request is already in progress."));
+        return;
+    }
+
+    if (messages.isEmpty()) {
+        callback(false, QJsonObject(), QStringLiteral("Empty conversation."));
+        return;
+    }
+
+    m_requesting = true;
+    emit requestStarted();
+
+    QJsonObject body;
+    body[QStringLiteral("model")]      = m_model;
+    body[QStringLiteral("max_tokens")] = MAX_TOKENS;
+    body[QStringLiteral("system")]     = systemPrompt.isEmpty() && m_memory
+                                             ? m_memory->buildSystemPrompt()
+                                             : systemPrompt;
+    body[QStringLiteral("messages")]   = messages;
+    if (!tools.isEmpty())
+        body[QStringLiteral("tools")] = tools;
+
+    QNetworkRequest request;
+    request.setUrl(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
+    request.setRawHeader("x-api-key", m_apiKey.toUtf8());
+    request.setRawHeader("anthropic-version", "2023-06-01");
+
+    QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    QNetworkReply* reply = m_network->post(request, payload);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, callback]() {
+        handleRawReply(reply, callback);
+    });
+}
+
+void ClaudeApi::handleRawReply(QNetworkReply* reply, RawCallback callback)
+{
+    m_requesting = false;
+    emit requestFinished();
+
+    reply->deleteLater();
+
+    const QByteArray data = reply->readAll();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        const QString errorMsg = describeHttpError(reply, data);
+        emit apiError(errorMsg);
+        callback(false, QJsonObject(), errorMsg);
+        return;
+    }
+
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isObject()) {
+        callback(false, QJsonObject(), QStringLiteral("Invalid response from API."));
+        return;
+    }
+
+    const QJsonObject root = doc.object();
+    m_lastStopReason = root[QStringLiteral("stop_reason")].toString();
+
+    qDebug() << "[ClaudeAPI/agent] stop_reason:" << m_lastStopReason
+             << "blocks:" << root[QStringLiteral("content")].toArray().size();
+
+    callback(true, root, QString());
+}
+
+// ============================================================
 // Обработка ответа
 // ============================================================
 
@@ -257,50 +394,9 @@ void ClaudeApi::handleReply(QNetworkReply* reply, ResponseCallback callback)
     reply->deleteLater();
 
     QByteArray data = reply->readAll();
-    int statusCode = reply->attribute(
-        QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
     if (reply->error() != QNetworkReply::NoError) {
-        QString errorMsg;
-
-        // Пытаемся извлечь детали ошибки из тела ответа
-        QJsonDocument errDoc = QJsonDocument::fromJson(data);
-        QString apiDetail;
-        if (errDoc.isObject()) {
-            QJsonObject errObj = errDoc.object();
-            QJsonObject errInner = errObj[QStringLiteral("error")].toObject();
-            apiDetail = errInner[QStringLiteral("message")].toString();
-        }
-
-        switch (statusCode) {
-        case 400:
-            errorMsg = QStringLiteral("Bad request (400)");
-            if (!apiDetail.isEmpty()) {
-                errorMsg += QStringLiteral(": ") + apiDetail;
-            }
-            break;
-        case 401:
-            errorMsg = QStringLiteral("Invalid API key. Fix it: apikey <your-key>");
-            break;
-        case 403:
-            errorMsg = QStringLiteral("Access denied (403). Check your account at console.anthropic.com");
-            break;
-        case 429:
-            errorMsg = QStringLiteral("Rate limit hit. Give it a moment.");
-            break;
-        case 529:
-            errorMsg = QStringLiteral("API overloaded. Try again shortly.");
-            break;
-        default:
-            errorMsg = QStringLiteral("API error (HTTP %1)").arg(statusCode);
-            if (!apiDetail.isEmpty()) {
-                errorMsg += QStringLiteral(": ") + apiDetail;
-            } else {
-                errorMsg += QStringLiteral(": ") + reply->errorString();
-            }
-            break;
-        }
-
+        const QString errorMsg = describeHttpError(reply, data);
         emit apiError(errorMsg);
         callback(false, errorMsg);
         return;
@@ -333,6 +429,18 @@ void ClaudeApi::handleReply(QNetworkReply* reply, ResponseCallback callback)
         callback(false, QStringLiteral("Empty response from API."));
         return;
     }
+
+    // Длина и причина остановки — то, чем «модель не дописала» отличается
+    // от «мы потеряли при обработке». Без этих двух чисел обрыв диаграммы
+    // на середине выглядит одинаково в обоих случаях, и починить его можно
+    // только гаданием.
+    //
+    // stop_reason == "max_tokens" означает, что ответ упёрся в лимит и
+    // оборван самой моделью; "end_turn" — что пришёл целиком, и тогда
+    // потеря произошла уже у нас.
+    qDebug() << "[ClaudeAPI] response:" << responseText.length() << "chars,"
+             << "stop_reason:" << m_lastStopReason
+             << "| tail:" << responseText.right(60).replace(QChar('\n'), QChar(' '));
 
     callback(true, responseText);
 }

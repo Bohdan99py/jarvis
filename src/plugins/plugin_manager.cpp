@@ -111,16 +111,25 @@ bool PluginManager::loadSinglePlugin(const QString& filePath)
         return false;
     }
 
-    // Проверяем совместимость API
-    if (plugin->apiVersion() != JARVIS_PLUGIN_API_VERSION) {
+    // Диапазон, а не точное совпадение: плагин, собранный под API v1,
+    // просто не пользуется тем, что добавили в хост, и от этого не
+    // ломается. Отвергать его — значит ломать чужие сборки на ровном месте.
+    if (plugin->apiVersion() < JARVIS_PLUGIN_API_MIN_VERSION
+        || plugin->apiVersion() > JARVIS_PLUGIN_API_VERSION) {
         emit pluginError(plugin->name(),
-                         QStringLiteral("Несовместимая версия API: %1 (нужна %2)")
+                         QStringLiteral("Несовместимая версия API: %1 (поддерживаются %2–%3)")
                              .arg(plugin->apiVersion())
+                             .arg(JARVIS_PLUGIN_API_MIN_VERSION)
                              .arg(JARVIS_PLUGIN_API_VERSION));
         loader->unload();
         delete loader;
         return false;
     }
+
+    // Хосту нужно знать, КТО сейчас регистрируется: инструменты
+    // добавляются именно из initialize(), и без этого сигнала они
+    // окажутся ничьими.
+    emit pluginInitializing(plugin->name());
 
     // Инициализируем
     if (!plugin->initialize(m_host)) {

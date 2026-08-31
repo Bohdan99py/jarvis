@@ -19,6 +19,7 @@
 #include "llm_cache_manager.h"
 #include "jarvis_response.h"
 #include "voice_synthesis_manager.h"
+#include "speech_phrases.h"
 #include "media_routing_manager.h"
 #include "jarvis.h"
 #include "translation_engine.h"
@@ -273,7 +274,7 @@ J2JTelegramGateway::J2JTelegramGateway(QObject* parent)
     // Ensure the qa_artifacts table exists
     {
         QMutexLocker lock(&m_mutex);
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS qa_artifacts ("
             "  id               INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -408,7 +409,7 @@ bool J2JTelegramGateway::resolveSessionLocale(TgChatSession& session)
     QMutexLocker lock(&m_mutex);
 
     // Look up this chat_id in paired_devices by mobile_handle
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT device_id, bound_role FROM paired_devices "
         "WHERE mobile_handle = :handle AND active = 1 "
@@ -420,7 +421,7 @@ bool J2JTelegramGateway::resolveSessionLocale(TgChatSession& session)
         session.boundRole = q.value(1).toString();
     } else {
         // Fallback: check if any paired device matches by chat_id stored as device context
-        QSqlQuery q2(QSqlDatabase::database());
+        QSqlQuery q2(DatabaseManager::instance().connection());
         q2.prepare(QStringLiteral(
             "SELECT device_id, bound_role FROM paired_devices "
             "WHERE active = 1 ORDER BY paired_at DESC LIMIT 1"));
@@ -822,9 +823,29 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
     // ── 3. Bug wizard (active session) ──────────────────────
     TgChatSession& session = getOrCreateSession(chatId);
     if (session.wizardStep != QaWizardStep::Idle) {
-        m_accessMgr->logActivity(chatId, QStringLiteral("wizard"), text.left(50));
-        advanceBugWizard(session, text);
-        return;
+        // Брошенный визард — самая незаметная ловушка в этом обработчике:
+        // пока он «активен», КАЖДОЕ обычное сообщение уходит в поля баг-репорта
+        // (команды при этом работают — они разбираются выше). Человек,
+        // который начал репорт и переключился на разговор, выглядел для себя
+        // так, будто бот перестал отвечать на текст. Через WIZARD_IDLE_MINUTES
+        // молчания считаем визард брошенным и возвращаемся к обычному диалогу.
+        const bool stale = session.wizardTouchedAt.isValid()
+            && session.wizardTouchedAt.secsTo(QDateTime::currentDateTime())
+                   > WIZARD_IDLE_MINUTES * 60;
+        if (stale) {
+            session.wizardStep = QaWizardStep::Idle;
+            session.pendingBug = QaBugReport();
+            sendMessage(chatId, session.isEnglish
+                ? QStringLiteral("⌛ The bug report was left unfinished, so I closed it. "
+                                 "Start a new one from /menu — meanwhile, back to normal chat.")
+                : QStringLiteral("⌛ Баг-репорт остался незаконченным — закрыл его. "
+                                 "Начать заново можно из /menu, а пока продолжаем обычный разговор."));
+            qDebug() << "[TelegramGW] Stale bug wizard dropped for chat" << chatId;
+        } else {
+            m_accessMgr->logActivity(chatId, QStringLiteral("wizard"), text.left(50));
+            advanceBugWizard(session, text);
+            return;
+        }
     }
 
     // ── 3.3. Natural-language security companion answers ───
@@ -927,12 +948,19 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
                 return;
             }
             if (intent.confidence >= 0.50) {
-                // Medium confidence — ask for confirmation
+                // Средняя уверенность — спрашиваем, но КНОПКАМИ и запомнив
+                // исходный текст: вопрос без них был тупиком (ответить
+                // «да» было некуда, а сообщение уже съедено). По «Нет»
+                // текст уходит в LLM как обычная реплика — см.
+                // handleCallbackQuery, ветка intent_yes/intent_no.
+                session.pendingIntentText = text;
                 const QString question = (session.isEnglish
                     ? QStringLiteral("I think you mean *%1*. Should I go ahead?")
                     : QStringLiteral("Похоже, ты хочешь *%1*. Запустить?"))
                     .arg(intent.goalLabel);
-                sendMessage(chatId, question);
+                sendMessage(chatId, question, buildConfirmButtons(
+                    QStringLiteral("intent_yes"), QStringLiteral("intent_no"),
+                    session.isEnglish));
                 m_accessMgr->logActivity(chatId, QStringLiteral("intent_confirm"),
                     intent.goalId + QStringLiteral(":") + QString::number(intent.confidence, 'f', 2));
                 return;
@@ -941,6 +969,9 @@ void J2JTelegramGateway::handleMessage(qint64 chatId, const QString& text,
     }
 
     // ── 4. Free-dialogue LLM routing (lowest priority) ──────
+    // Разговор пошёл дальше — старое «Запустить X?» больше не в силе,
+    // иначе кнопка из давнего сообщения запустила бы забытое действие.
+    session.pendingIntentText.clear();
     m_accessMgr->logActivity(chatId, QStringLiteral("message"), text.left(50));
     routeToLlm(chatId, text, session.isEnglish, replyToMessageId);
 }
@@ -1114,6 +1145,37 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
         return;
     }
 
+    // ── SemanticIntent confirmation ("Похоже, ты хочешь X. Запустить?") ──
+    if (data == QStringLiteral("intent_yes") || data == QStringLiteral("intent_no")) {
+        const QString original = session.pendingIntentText;
+        session.pendingIntentText.clear();
+
+        if (original.isEmpty()) {
+            sendMessage(chatId, en ? QStringLiteral("Nothing pending.")
+                                   : QStringLiteral("Нечего запускать."));
+            return;
+        }
+
+        if (data == QStringLiteral("intent_no")) {
+            // Не команда, а обычная реплика — отвечаем по существу.
+            routeToLlm(chatId, original, en);
+            return;
+        }
+
+        // Разбираем заново вместо хранения действий в сессии — классификатор
+        // детерминирован, тот же текст даёт тот же результат.
+        const IntentMatch again = m_intentMgr ? m_intentMgr->classifyIntent(original)
+                                              : IntentMatch{};
+        const QString ack = (m_intentMgr && again.matched)
+            ? m_intentMgr->executeActions(again) : QString();
+        sendMessage(chatId, ack.isEmpty()
+            ? (en ? QStringLiteral("Couldn't run that one.")
+                  : QStringLiteral("Не получилось это запустить."))
+            : ack);
+        m_accessMgr->logActivity(chatId, QStringLiteral("intent"), again.goalId);
+        return;
+    }
+
     // ── /organize confirmation callbacks ─────────────────────────────
     if (data == QStringLiteral("organize_apply") || data == QStringLiteral("organize_cancel")) {
         if (!session.hasPendingOrganizePlan) {
@@ -1241,7 +1303,7 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
         int chatCount = 0, taskCount = 0, patternCount = 0;
         {
             QMutexLocker lock(&m_mutex);
-            QSqlQuery q(QSqlDatabase::database());
+            QSqlQuery q(DatabaseManager::instance().connection());
             q.exec(QStringLiteral("SELECT COUNT(*) FROM chat_history WHERE user_id = 1"));
             if (q.next()) chatCount = q.value(0).toInt();
             q.exec(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE user_id = 1"));
@@ -1511,6 +1573,7 @@ void J2JTelegramGateway::handleCallbackQuery(const QString& callbackId,
 void J2JTelegramGateway::startBugWizard(TgChatSession& session)
 {
     session.wizardStep = QaWizardStep::AwaitingTitle;
+    session.wizardTouchedAt = QDateTime::currentDateTime();
     session.pendingBug = QaBugReport();
     session.pendingBug.chatId = session.chatId;
     session.pendingBug.reporterRole = session.boundRole;
@@ -1524,6 +1587,7 @@ void J2JTelegramGateway::advanceBugWizard(TgChatSession& session,
                                            const QString& input)
 {
     bool en = session.isEnglish;
+    session.wizardTouchedAt = QDateTime::currentDateTime();
 
     switch (session.wizardStep) {
 
@@ -1603,7 +1667,7 @@ void J2JTelegramGateway::persistBugReport(const QaBugReport& report)
 
     QString markdown = bugReportToMarkdown(report);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT INTO qa_artifacts "
         "(chat_id, reporter_name, reporter_role, title, "
@@ -1836,9 +1900,10 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                 : QStringLiteral("📡 *Система офлайн:* Таймаут сети, "
                                  "и для этого запроса нет локального кэша."));
 
-            VoiceSynthesisManager::instance().say(english
-                ? QStringLiteral("I'm offline right now, can't reach the server.")
-                : QStringLiteral("Я сейчас не в сети, не могу подключиться к серверу."));
+            // Дежурная реплика из общего списка: она звучит ровно тогда,
+            // когда сети нет, и синтезирована заранее (см. speech_phrases.h).
+            VoiceSynthesisManager::instance().say(
+                SpeechPhrases::request(SystemPhrase::Offline, english));
 
             qDebug() << "[TelegramGW] Error fallback: no cache, static offline msg."
                      << "Error:" << error;
@@ -1847,10 +1912,17 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
 
     // Safety timeout: if neither signal fires within 90 seconds,
     // force-release the lock so the chat isn't stuck forever.
-    QTimer::singleShot(90000, this, [this, chatId, cleanup, originalQuery, english]() {
+    //
+    // Про guard: спрашиваем общий флаг resolved, а не awaitingLlm. Раньше
+    // здесь сначала звался cleanup() (который как раз и сбрасывает
+    // awaitingLlm), а потом проверялось «awaitingLlm уже сброшен → значит
+    // ответили без нас» — условие было истинным ВСЕГДА, и запасной ответ по
+    // таймауту не уходил никогда. Если LLM молча не отвечал, обычное
+    // сообщение в Telegram оставалось совсем без ответа (команды при этом
+    // работали — они до routeToLlm не доходят).
+    QTimer::singleShot(90000, this, [this, chatId, cleanup, resolved, originalQuery, english]() {
+        if (*resolved) return;  // already answered by a signal
         cleanup();
-        if (m_sessions.contains(chatId) && !m_sessions[chatId].awaitingLlm)
-            return;  // already cleaned up by a signal
 
         // ── Timeout fallback: same router-then-static logic ──
         const auto fallbackMatch = LlmCacheManager::instance().route(chatId, originalQuery);
@@ -1869,9 +1941,8 @@ void J2JTelegramGateway::routeToLlm(qint64 chatId, const QString& text,
                 : QStringLiteral("📡 *Система офлайн:* Запрос превысил время ожидания, "
                                  "и для этого запроса нет локального кэша."));
 
-            VoiceSynthesisManager::instance().say(english
-                ? QStringLiteral("Request timed out. I can't reach the server right now.")
-                : QStringLiteral("Запрос не прошёл, сервер не отвечает. Попробуй позже."));
+            VoiceSynthesisManager::instance().say(
+                SpeechPhrases::request(SystemPhrase::RequestTimedOut, english));
 
             qDebug() << "[TelegramGW] Timeout fallback: no cache for chat" << chatId;
         }
@@ -2914,11 +2985,22 @@ bool J2JTelegramGateway::handlePersistentButton(qint64 chatId,
                                                   const QString& text,
                                                   bool en)
 {
-    const QString lower = text.toLower().trimmed();
+    // Только НАЖАТИЕ кнопки, а не любое сообщение с этим словом внутри.
+    // Раньше здесь был contains(), и обычный текст до LLM не доходил:
+    // «какой статус у задачи?» → отчёт о системе, «поищи в файлах
+    // проекта» → список файлов, «не забудь настройки» → меню настроек.
+    // Кнопка приходит ровно своей подписью (см. buildPersistentKeyboard),
+    // поэтому сравниваем целиком, отбросив эмодзи.
+    const QString lower = [&text]() {
+        QString s;
+        for (const QChar& ch : text)
+            if (ch.isLetter() || ch.isSpace()) s += ch;
+        return s.simplified().toLower();
+    }();
 
     // ── Wake PC ──────────────────────────────────────────────
-    if (lower.contains(QStringLiteral("wake pc"))
-        || lower.contains(QStringLiteral("разбудить"))) {
+    if (lower == QStringLiteral("wake pc")
+        || lower == QStringLiteral("разбудить пк")) {
         if (m_wakeAgent) {
             PcRegistration localReg = m_wakeAgent->discoverLocalNetwork();
             if (!localReg.macAddress.isEmpty()) {
@@ -2961,14 +3043,14 @@ bool J2JTelegramGateway::handlePersistentButton(qint64 chatId,
     }
 
     // ── Status ───────────────────────────────────────────────
-    if (lower.contains(QStringLiteral("status"))
-        || lower.contains(QStringLiteral("статус"))) {
+    if (lower == QStringLiteral("status")
+        || lower == QStringLiteral("статус")) {
 
         auto& db = DatabaseManager::instance();
         int chatCount = 0, taskCount = 0, patternCount = 0;
         {
             QMutexLocker lock(&m_mutex);
-            QSqlQuery q(QSqlDatabase::database());
+            QSqlQuery q(DatabaseManager::instance().connection());
             q.exec(QStringLiteral("SELECT COUNT(*) FROM chat_history WHERE user_id = 1"));
             if (q.next()) chatCount = q.value(0).toInt();
             q.exec(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE user_id = 1"));
@@ -3022,8 +3104,8 @@ bool J2JTelegramGateway::handlePersistentButton(qint64 chatId,
     }
 
     // ── Files ────────────────────────────────────────────────
-    if (lower.contains(QStringLiteral("files"))
-        || lower.contains(QStringLiteral("файлы"))) {
+    if (lower == QStringLiteral("files")
+        || lower == QStringLiteral("файлы")) {
 
         QString outputDir = workspaceOutputDir();
         QDir dir(outputDir);
@@ -3065,8 +3147,8 @@ bool J2JTelegramGateway::handlePersistentButton(qint64 chatId,
     }
 
     // ── Settings ─────────────────────────────────────────────
-    if (lower.contains(QStringLiteral("settings"))
-        || lower.contains(QStringLiteral("настройки"))) {
+    if (lower == QStringLiteral("settings")
+        || lower == QStringLiteral("настройки")) {
         sendSettingsSubMenu(chatId, en);
         m_accessMgr->logActivity(chatId, QStringLiteral("button"),
                                   QStringLiteral("settings"));

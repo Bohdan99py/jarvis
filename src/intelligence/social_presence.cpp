@@ -9,8 +9,34 @@
 #include "personality_engine.h"
 
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QDebug>
 #include <ctime>
+
+namespace {
+
+// Совпадение по ЦЕЛОМУ слову, а не по подстроке. С contains() ключ «потом»
+// срабатывал внутри «потому что», «еду» — внутри «в среду»/«к обеду»,
+// «всё» — почти в каждом сообщении. Каждое такое ложное срабатывание
+// переключало статус, а гейтвей на смене статуса отвечает «Понял, подожду»
+// и НЕ передаёт сообщение дальше — обычный текст просто пропадал.
+bool containsWholePhrase(const QString& haystack, const QString& needle)
+{
+    const auto isWordChar = [](QChar c) {
+        return c.isLetterOrNumber() || c == QLatin1Char('_');
+    };
+    for (int from = 0; ; ) {
+        const int idx = haystack.indexOf(needle, from);
+        if (idx < 0) return false;
+        const int end = idx + needle.length();
+        const bool leftOk  = idx == 0 || !isWordChar(haystack.at(idx - 1));
+        const bool rightOk = end >= haystack.length() || !isWordChar(haystack.at(end));
+        if (leftOk && rightOk) return true;
+        from = idx + 1;
+    }
+}
+
+} // namespace
 
 // ============================================================
 //  Keyword Banks — availability detection
@@ -393,21 +419,30 @@ QString SocialPresenceEngine::processIncomingMessage(const QString& text)
 
 int SocialPresenceEngine::detectAvailability(const QString& lower) const
 {
+    // Объявление о занятости — короткая реплика: «занят», «brb», «я вернулся».
+    // Длинное сообщение, где такое слово просто встретилось («я работаю над
+    // парсером, помоги с регуляркой»), — это обычный запрос, и статус по нему
+    // менять нельзя: смену статуса гейтвей считает поводом ответить
+    // подтверждением вместо ответа по существу.
+    static const QRegularExpression wsRe(QStringLiteral("\\s+"));
+    if (lower.split(wsRe, Qt::SkipEmptyParts).size() > MAX_STATUS_PHRASE_WORDS)
+        return -1;
+
     // Check BUSY keywords (highest priority — respect user's focus)
     for (const QString& kw : busyKeywords()) {
-        if (lower.contains(kw))
+        if (containsWholePhrase(lower, kw))
             return UserState::BUSY;
     }
 
     // Check PAUSED keywords
     for (const QString& kw : pausedKeywords()) {
-        if (lower.contains(kw))
+        if (containsWholePhrase(lower, kw))
             return UserState::PAUSED;
     }
 
     // Check FREE keywords
     for (const QString& kw : freeKeywords()) {
-        if (lower.contains(kw))
+        if (containsWholePhrase(lower, kw))
             return UserState::FREE;
     }
 

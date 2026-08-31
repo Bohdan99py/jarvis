@@ -37,6 +37,45 @@
 
 class SkillManager;
 
+// Системная часть профиля: то, что режим меняет не в модели,
+// а на самой машине. Всё опционально — пустое поле значит
+// "не трогать", а не "выключить".
+//
+// mode.json:
+//   "system": {
+//     "permission_mode": "trusted",
+//     "notifications":   "minimal",
+//     "voice":           "minimal",
+//     "volume": 30,
+//     "on_activate_workflow":   "Development",
+//     "on_deactivate_workflow": "",
+//     "auto_activate_apps": ["Rider", "CLion"]
+//   }
+struct ModeSystemProfile
+{
+    QString     permissionMode;        // paranoid | balanced | trusted
+    QString     notifications;         // all | minimal | none
+    // Насколько режим разрешает JARVIS говорить вслух. Это потолок:
+    // обстановка (игра, глубокая работа, ночь) может опустить его ниже,
+    // поднять — нет. См. voice_policy.h.
+    QString     voice;                 // silent | minimal | normal | verbose
+    int         volume = -1;           // 0..100, -1 = не менять
+    QString     onActivateWorkflow;
+    QString     onDeactivateWorkflow;
+    QStringList autoActivateApps;      // имена приложений из ContextTracker
+
+    bool isEmpty() const
+    {
+        return permissionMode.isEmpty() && notifications.isEmpty()
+            && voice.isEmpty()
+            && volume < 0 && onActivateWorkflow.isEmpty()
+            && onDeactivateWorkflow.isEmpty() && autoActivateApps.isEmpty();
+    }
+
+    // Человеческая сводка для UI и для ответа модели
+    QString summary(bool english) const;
+};
+
 struct ModeInfo
 {
     QString     id;
@@ -53,6 +92,7 @@ struct ModeInfo
     bool        exclusive     = false; // выключить всё, кроме enableSkills
     bool        defaultActive = false; // выбирать по умолчанию при первом запуске
     QString     dirPath;          // откуда загружен
+    ModeSystemProfile system;     // что режим меняет на машине
 
     QString displayName(bool english) const
     {
@@ -111,8 +151,21 @@ public:
 signals:
     void modeChanged();   // выбран другой режим или сменился набор режимов
 
+    // Режим ИМЕННО ЧТО активировали (в отличие от modeChanged, который
+    // летит и при пересканировании списка). Системную часть профиля
+    // применяет Jarvis: ModeManager не знает ни про разрешения, ни про
+    // громкость, и знать не должен.
+    void modeActivated(const QString& id, const QString& previousId);
+
 private:
     static bool readManifest(const QString& modeDir, ModeInfo& out);
+
+    // Дописывает в уже установленную пользовательскую копию блок
+    // "system" из поставляемого манифеста, если своего у неё нет.
+    // Нужно потому, что копирование bundled -> user одноразовое:
+    // без этого новые системные поля не доехали бы до тех, у кого
+    // режимы установились в предыдущей версии.
+    static bool mergeSystemBlock(const QString& srcDir, const QString& dstDir);
     static bool copyModeDir(const QString& src, const QString& dst);
 
     void loadState();

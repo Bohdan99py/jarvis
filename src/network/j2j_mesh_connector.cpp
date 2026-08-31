@@ -379,7 +379,7 @@ void J2JMeshConnector::handleSyncKnowledge(QTcpSocket* socket, const QJsonObject
         const QString fullKey = QStringLiteral("mesh_") + key;
 
         // Insert with origin profile role and dedup
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.prepare(R"(INSERT INTO knowledge_base
                      (user_id, category, key, value, confidence, origin_profile_role)
                      VALUES (1, :cat, :key, :val, 0.5, :origin)
@@ -414,7 +414,7 @@ void J2JMeshConnector::handleSyncKnowledge(QTcpSocket* socket, const QJsonObject
                 if (!match) continue;
 
                 // Establish structural link
-                QSqlQuery linkQ(QSqlDatabase::database());
+                QSqlQuery linkQ(DatabaseManager::instance().connection());
                 linkQ.prepare(R"(UPDATE knowledge_base SET linked_artifact_id = :tid
                                  WHERE user_id = 1 AND key = :key AND linked_artifact_id IS NULL)");
                 linkQ.bindValue(":tid", task.id);
@@ -559,7 +559,7 @@ void J2JMeshConnector::handleKnowledgeQuery(QTcpSocket* socket, const QJsonObjec
 
     QJsonArray facts;
     if (!topic.isEmpty()) {
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.prepare(R"(SELECT category, key, value FROM knowledge_base
                      WHERE (key LIKE :t OR value LIKE :t) AND confidence >= 0.4
                      ORDER BY confidence DESC LIMIT 5)");

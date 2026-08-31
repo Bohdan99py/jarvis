@@ -13,5 +13,14 @@
     "enable_skills": [],
     "disable_skills": [],
     "exclusive": false,
-    "default_active": true
+    "default_active": true,
+    "system": {
+        "permission_mode": "balanced",
+        "notifications": "all",
+        "voice": "normal",
+        "volume": -1,
+        "on_activate_workflow": "",
+        "on_deactivate_workflow": "",
+        "auto_activate_apps": []
+    }
 }

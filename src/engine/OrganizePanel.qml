@@ -1,5 +1,7 @@
 import QtQuick
+import QtQuick.Layouts
 import Jarvis.Theme
+import Jarvis.Controls
 
 // ============================================================
 // OrganizePanel.qml — File Organizer plan review + rules editor.
@@ -25,7 +27,7 @@ Rectangle {
         return bytes + " B"
     }
 
-    property int currentTab: initialTab
+    readonly property int currentTab: tabs.currentIndex
     property int expandedItemIndex: -1
 
     Column {
@@ -51,35 +53,13 @@ Rectangle {
         }
 
         // ---- Tab bar ----
-        Row {
-            width: parent.width
-            height: 34
-            spacing: 6
-
-            Repeater {
-                model: [en ? "Plan" : "План", en ? "Rules" : "Правила"]
-                delegate: Rectangle {
-                    width: tabTxt.implicitWidth + 24
-                    height: 34
-                    radius: 8
-                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
-                    border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
-                    Text {
-                        id: tabTxt
-                        anchors.centerIn: parent
-                        text: modelData
-                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
-                        font.pixelSize: 12
-                        font.bold: root.currentTab === index
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.currentTab = index
-                    }
-                }
-            }
+        JarvisTabBar {
+            id: tabs
+            titles: [en ? "Plan" : "План", en ? "Rules" : "Правила"]
+            // initialTab — контекстное свойство из C++: значение на старте.
+            // Клик по вкладке снимает эту привязку, дальше выбор за
+            // пользователем — ровно то поведение, что нужно.
+            currentIndex: initialTab
         }
 
         Rectangle {
@@ -244,44 +224,41 @@ Rectangle {
                         }
                     }
 
-                    Row {
+                    // Кнопки действий. Ширины больше не считаем руками:
+                    // раньше распорку задавала арифметика вида
+                    // parent.width - 130 - 110 - 90 - 110 - 30, и любая
+                    // правка подписи ломала выравнивание.
+                    RowLayout {
                         id: listActions
                         width: parent.width
-                        height: 34
-                        spacing: 10
+                        spacing: Theme.spaceSm
 
-                        Rectangle {
-                            width: 130; height: 32; radius: 8
+                        JarvisButton {
                             visible: opTargetFolder.length > 0
-                            color: rescanArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                            border.width: 1; border.color: root.cyan
-                            Text { anchors.centerIn: parent; text: en ? "🔄 Rescan" : "🔄 Пересканировать"; color: root.cyan; font.pixelSize: 11 }
-                            MouseArea { id: rescanArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.rescan() }
+                            glyph: "🔄"
+                            text: en ? "Rescan" : "Пересканировать"
+                            onClicked: organizePanel.rescan()
                         }
-                        Item { width: Math.max(0, parent.width - 130 - 110 - 90 - 110 - 30); height: 1 }
-                        Rectangle {
-                            width: 110; height: 32; radius: 8
-                            color: undoArea.pressed ? Theme.outlineStrong : Theme.outline
-                            border.width: 1; border.color: Theme.outlineStrong
-                            Text { anchors.centerIn: parent; text: en ? "↩ Undo Last" : "↩ Отменить"; color: Theme.onSurfaceVariant; font.pixelSize: 11 }
-                            MouseArea { id: undoArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.undoLast() }
+
+                        Item { Layout.fillWidth: true }
+
+                        JarvisButton {
+                            glyph: "↩"
+                            text: en ? "Undo Last" : "Отменить"
+                            variant: JarvisButton.Ghost
+                            onClicked: organizePanel.undoLast()
                         }
-                        Rectangle {
-                            width: 90; height: 32; radius: 8
-                            color: cancelArea.pressed ? Qt.alpha(Theme.error, 0.3) : Qt.alpha(Theme.error, 0.12)
-                            border.width: 1; border.color: Qt.alpha(Theme.error, 0.4)
-                            Text { anchors.centerIn: parent; text: en ? "✕ Cancel" : "✕ Отмена"; color: Theme.error; font.pixelSize: 11 }
-                            MouseArea { id: cancelArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.cancelDialog() }
+                        JarvisButton {
+                            glyph: "✕"
+                            text: en ? "Cancel" : "Отмена"
+                            variant: JarvisButton.Danger
+                            onClicked: organizePanel.cancelDialog()
                         }
-                        Rectangle {
-                            width: 110; height: 32; radius: 8
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop { position: 0.0; color: root.teal }
-                                GradientStop { position: 1.0; color: root.cyan }
-                            }
-                            Text { anchors.centerIn: parent; text: en ? "✅ Apply" : "✅ Применить"; color: Theme.bg; font.pixelSize: 12; font.bold: true }
-                            MouseArea { id: applyArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.apply() }
+                        JarvisButton {
+                            glyph: "✓"
+                            text: en ? "Apply" : "Применить"
+                            variant: JarvisButton.Primary
+                            onClicked: organizePanel.apply()
                         }
                     }
                 }
@@ -300,22 +277,23 @@ Rectangle {
                     anchors.fill: parent
                     spacing: 10
 
-                    Row {
+                    RowLayout {
                         width: parent.width
+                        spacing: Theme.spaceMd
+
                         Text {
+                            Layout.fillWidth: true
                             text: en ? "Category rules — extensions and content-aware subcategories"
                                      : "Правила категорий — расширения и подкатегории по содержимому"
                             color: Theme.onSurfaceVariant
-                            font.pixelSize: 11
-                            width: parent.width - 130
+                            font.family: Type.family
+                            font.pixelSize: Type.caption
                             wrapMode: Text.WordWrap
                         }
-                        Rectangle {
-                            width: 120; height: 26; radius: 7
-                            color: resetArea.pressed ? Theme.outlineStrong : Theme.outline
-                            border.width: 1; border.color: Theme.outlineStrong
-                            Text { anchors.centerIn: parent; text: en ? "Reset defaults" : "Сбросить"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            MouseArea { id: resetArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.resetRules() }
+                        JarvisButton {
+                            text: en ? "Reset defaults" : "Сбросить"
+                            variant: JarvisButton.Ghost
+                            onClicked: organizePanel.resetRules()
                         }
                     }
 
@@ -347,21 +325,23 @@ Rectangle {
                                         width: parent.width - 28
                                         spacing: 6
 
-                                        Row {
+                                        RowLayout {
                                             width: parent.width
+                                            spacing: Theme.spaceSm
+
                                             Text {
+                                                Layout.fillWidth: true
                                                 text: modelData.category
                                                 color: root.cyan
-                                                font.pixelSize: 13
-                                                font.bold: true
-                                                width: parent.width - 90
+                                                font.family: Type.family
+                                                font.pixelSize: Type.caption
+                                                font.weight: Font.DemiBold
+                                                elide: Text.ElideRight
                                             }
-                                            Rectangle {
-                                                width: 80; height: 22; radius: 6
-                                                color: removeArea.pressed ? Qt.alpha(Theme.error, 0.3) : Qt.alpha(Theme.error, 0.12)
-                                                border.width: 1; border.color: Qt.alpha(Theme.error, 0.4)
-                                                Text { anchors.centerIn: parent; text: en ? "Remove" : "Удалить"; color: Theme.error; font.pixelSize: 9 }
-                                                MouseArea { id: removeArea; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: organizePanel.removeRule(modelData.category) }
+                                            JarvisButton {
+                                                text: en ? "Remove" : "Удалить"
+                                                variant: JarvisButton.Danger
+                                                onClicked: organizePanel.removeRule(modelData.category)
                                             }
                                         }
 
@@ -380,46 +360,31 @@ Rectangle {
                                                 font.pixelSize: 11
                                                 text: modelData.extensions
                                                 selectByMouse: true
-                                                onEditingFinished: organizePanel.updateRule(modelData.category, text, ctxToggle.checked, subInput.text)
+                                                onEditingFinished: organizePanel.updateRule(modelData.category, text, ctxToggle.contextAware, subInput.text)
                                             }
                                         }
 
-                                        Row {
-                                            spacing: 8
-                                            Rectangle {
-                                                id: ctxToggle
-                                                property bool checked: modelData.contextAware
-                                                width: 36; height: 20; radius: 10
-                                                color: checked ? root.teal : Theme.outlineStrong
-                                                Behavior on color { ColorAnimation { duration: 150 } }
-                                                Rectangle {
-                                                    width: 16; height: 16; radius: 8
-                                                    color: Theme.bg
-                                                    x: ctxToggle.checked ? parent.width - width - 2 : 2
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    Behavior on x { NumberAnimation { duration: 150 } }
-                                                }
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        ctxToggle.checked = !ctxToggle.checked
-                                                        organizePanel.updateRule(modelData.category, extInput.text, ctxToggle.checked, subInput.text)
-                                                    }
-                                                }
-                                            }
-                                            Text {
-                                                text: en ? "Content-aware subcategories" : "Подкатегории по содержимому"
-                                                color: Theme.onSurfaceVariant
-                                                font.pixelSize: 10
-                                                anchors.verticalCenter: parent.verticalCenter
+                                        // Состояние держим здесь: C++ узнаёт о
+                                        // переключении из updateRule() и вернёт
+                                        // его в модель, но не в тот же кадр.
+                                        JarvisToggle {
+                                            id: ctxToggle
+                                            property bool contextAware: modelData.contextAware
+                                            on: contextAware
+                                            label: en ? "Content-aware subcategories"
+                                                      : "Подкатегории по содержимому"
+                                            onToggleRequested: want => {
+                                                ctxToggle.contextAware = want
+                                                organizePanel.updateRule(modelData.category,
+                                                                         extInput.text, want,
+                                                                         subInput.text)
                                             }
                                         }
 
                                         Column {
                                             width: parent.width
                                             spacing: 4
-                                            visible: ctxToggle.checked
+                                            visible: ctxToggle.contextAware
                                             Text { text: en ? "Subcategories (comma-separated):" : "Подкатегории (через запятую):"; color: Theme.onSurfaceVariant; font.pixelSize: 9 }
                                             Rectangle {
                                                 width: parent.width; height: 28; radius: 6
@@ -435,7 +400,7 @@ Rectangle {
                                                     font.pixelSize: 11
                                                     text: modelData.subcategories
                                                     selectByMouse: true
-                                                    onEditingFinished: organizePanel.updateRule(modelData.category, extInput.text, ctxToggle.checked, text)
+                                                    onEditingFinished: organizePanel.updateRule(modelData.category, extInput.text, ctxToggle.contextAware, text)
                                                 }
                                             }
                                         }
@@ -445,51 +410,26 @@ Rectangle {
                         }
                     }
 
-                    Row {
+                    RowLayout {
                         width: parent.width
-                        height: 34
-                        spacing: 8
-                        Rectangle {
-                            width: parent.width - 128
-                            height: 32
-                            radius: 8
-                            color: Theme.outline
-                            border.width: 1
-                            border.color: newCatInput.activeFocus ? root.cyan : Theme.outlineStrong
-                            TextInput {
-                                id: newCatInput
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                verticalAlignment: TextInput.AlignVCenter
-                                color: Theme.onSurface
-                                font.pixelSize: 12
-                                selectByMouse: true
-                            }
-                            Text {
-                                text: en ? "New category name..." : "Название новой категории..."
-                                visible: newCatInput.text.length === 0 && !newCatInput.activeFocus
-                                color: Theme.onSurfaceDim
-                                anchors.left: parent.left
-                                anchors.leftMargin: 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                font.pixelSize: 12
-                            }
+                        spacing: Theme.spaceSm
+
+                        JarvisTextField {
+                            id: newCatInput
+                            Layout.fillWidth: true
+                            placeholder: en ? "New category name…" : "Название новой категории…"
+                            onAccepted: addBtn.clicked()
                         }
-                        Rectangle {
-                            width: 110; height: 32; radius: 8
-                            color: addArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                            border.width: 1; border.color: root.cyan
-                            Text { anchors.centerIn: parent; text: en ? "+ Add" : "+ Добавить"; color: root.cyan; font.pixelSize: 11 }
-                            MouseArea {
-                                id: addArea
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (newCatInput.text.trim().length > 0) {
-                                        organizePanel.addRule(newCatInput.text)
-                                        newCatInput.text = ""
-                                    }
-                                }
+                        JarvisButton {
+                            id: addBtn
+                            glyph: "+"
+                            text: en ? "Add" : "Добавить"
+                            enabled: newCatInput.text.trim().length > 0
+                            onClicked: {
+                                if (newCatInput.text.trim().length === 0)
+                                    return
+                                organizePanel.addRule(newCatInput.text)
+                                newCatInput.clear()
                             }
                         }
                     }

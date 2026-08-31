@@ -17,11 +17,33 @@
 #include <QSet>
 #include <QDebug>
 
-// Расширения для индексации
+// Расширения для индексации.
+//
+// Индексатор перестал быть «C++-only»: настоящий проект — это ещё QML,
+// сборочные скрипты, ресурсы, конфиги и документация. Пока их не было в
+// индексе, ассистент видел половину картины: предлагал добавить .cpp и
+// забывал про CMakeLists.txt, правил QML вслепую и не знал про .qrc.
 const QStringList ProjectIndexer::s_sourceExtensions = {
+    // C/C++
     QStringLiteral("*.h"), QStringLiteral("*.hpp"), QStringLiteral("*.hxx"),
     QStringLiteral("*.cpp"), QStringLiteral("*.cc"), QStringLiteral("*.cxx"),
-    QStringLiteral("*.c"), QStringLiteral("*.inl")
+    QStringLiteral("*.c"), QStringLiteral("*.inl"),
+    // Qt: интерфейсы, ресурсы, формы
+    QStringLiteral("*.qml"), QStringLiteral("*.qrc"), QStringLiteral("*.ui"),
+    QStringLiteral("*.pro"), QStringLiteral("*.pri"),
+    // Сборка
+    QStringLiteral("CMakeLists.txt"), QStringLiteral("*.cmake"),
+    // Другие языки и скрипты
+    QStringLiteral("*.py"), QStringLiteral("*.js"), QStringLiteral("*.mjs"),
+    QStringLiteral("*.ts"), QStringLiteral("*.cs"), QStringLiteral("*.java"),
+    QStringLiteral("*.bat"), QStringLiteral("*.ps1"), QStringLiteral("*.sh"),
+    // Шейдеры
+    QStringLiteral("*.glsl"), QStringLiteral("*.vert"), QStringLiteral("*.frag"),
+    QStringLiteral("*.hlsl"), QStringLiteral("*.usf"),
+    // Конфиги и документация
+    QStringLiteral("*.json"), QStringLiteral("*.yml"), QStringLiteral("*.yaml"),
+    QStringLiteral("*.ini"), QStringLiteral("*.toml"), QStringLiteral("*.iss"),
+    QStringLiteral("*.md")
 };
 
 // ============================================================
@@ -42,6 +64,12 @@ QString CodeSymbol::kindToString() const
     case UClass:    return QStringLiteral("UCLASS");
     case UFunction: return QStringLiteral("UFUNCTION");
     case UProperty: return QStringLiteral("UPROPERTY");
+    case QmlComponent: return QStringLiteral("qml-component");
+    case QmlProperty:  return QStringLiteral("qml-property");
+    case QmlSignal:    return QStringLiteral("qml-signal");
+    case BuildTarget:  return QStringLiteral("build-target");
+    case Resource:     return QStringLiteral("resource");
+    case Todo:         return QStringLiteral("todo");
     default:        return QStringLiteral("unknown");
     }
 }
@@ -83,6 +111,7 @@ QJsonObject IndexedFile::toJson() const
     QJsonObject obj;
     obj[QStringLiteral("path")]     = filePath;
     obj[QStringLiteral("rel")]      = relativePath;
+    obj[QStringLiteral("lang")]     = language;
     obj[QStringLiteral("size")]     = fileSize;
     obj[QStringLiteral("lines")]    = lineCount;
     obj[QStringLiteral("modified")] = lastModified.toString(Qt::ISODate);
@@ -91,6 +120,10 @@ QJsonObject IndexedFile::toJson() const
     QJsonArray incArr;
     for (const auto& inc : includes) incArr.append(inc);
     obj[QStringLiteral("includes")] = incArr;
+
+    QJsonArray localArr;
+    for (const auto& inc : localIncludes) localArr.append(inc);
+    obj[QStringLiteral("linc")] = localArr;
 
     QJsonArray symArr;
     for (const auto& sym : symbols) symArr.append(sym.toJson());
@@ -104,6 +137,7 @@ IndexedFile IndexedFile::fromJson(const QJsonObject& obj)
     IndexedFile f;
     f.filePath     = obj[QStringLiteral("path")].toString();
     f.relativePath = obj[QStringLiteral("rel")].toString();
+    f.language     = obj[QStringLiteral("lang")].toString();
     f.fileSize     = obj[QStringLiteral("size")].toInteger();
     f.lineCount    = obj[QStringLiteral("lines")].toInt();
     f.lastModified = QDateTime::fromString(obj[QStringLiteral("modified")].toString(), Qt::ISODate);
@@ -111,6 +145,9 @@ IndexedFile IndexedFile::fromJson(const QJsonObject& obj)
 
     for (const auto& v : obj[QStringLiteral("includes")].toArray())
         f.includes.append(v.toString());
+
+    for (const auto& v : obj[QStringLiteral("linc")].toArray())
+        f.localIncludes.append(v.toString());
 
     for (const auto& v : obj[QStringLiteral("symbols")].toArray())
         f.symbols.append(CodeSymbol::fromJson(v.toObject()));
@@ -235,11 +272,17 @@ IndexedFile ProjectIndexer::parseFile(const QString& filePath) const
     IndexedFile result;
     result.filePath = filePath;
     result.relativePath = relativePath(filePath);
+    result.language = languageForFile(filePath);
 
     QFileInfo fi(filePath);
     result.fileSize = fi.size();
     result.lastModified = fi.lastModified();
     result.lastIndexed = QDateTime::currentDateTime();
+
+    // Гигантский файл — почти наверняка генерат или дамп данных: символов
+    // из него ноль, а память и время индексации он съест целиком.
+    if (result.fileSize > MAX_FILE_BYTES)
+        return result;
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -262,11 +305,42 @@ IndexedFile ProjectIndexer::parseFile(const QString& filePath) const
     return result;
 }
 
+// Диспетчер: у каждого языка свой лёгкий построчный парсер. Цель — не
+// компилятор, а карта «что где лежит»: имена, строки, краткие описания.
 void ProjectIndexer::parseSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    const QString lang = file.language.isEmpty()
+                             ? languageForFile(file.filePath) : file.language;
+
+    if (lang == QStringLiteral("cpp") || lang == QStringLiteral("cs")
+        || lang == QStringLiteral("java") || lang == QStringLiteral("shader")) {
+        parseCppSymbols(file, lines);
+    } else if (lang == QStringLiteral("qml")) {
+        parseQmlSymbols(file, lines);
+    } else if (lang == QStringLiteral("python")) {
+        parsePythonSymbols(file, lines);
+    } else if (lang == QStringLiteral("js")) {
+        parseJsSymbols(file, lines);
+    } else if (lang == QStringLiteral("cmake") || lang == QStringLiteral("qmake")) {
+        parseCMakeSymbols(file, lines);
+    } else if (lang == QStringLiteral("qrc")) {
+        parseQrcSymbols(file, lines);
+    } else if (lang == QStringLiteral("ui")) {
+        parseUiSymbols(file, lines);
+    } else if (lang == QStringLiteral("md")) {
+        parseMarkdownSymbols(file, lines);
+    }
+
+    // TODO/FIXME собираем во всех текстовых языках — это сырьё для
+    // фоновых рекомендаций (DevAdvisor), а не только для поиска.
+    collectTodos(file, lines);
+}
+
+void ProjectIndexer::parseCppSymbols(IndexedFile& file, const QStringList& lines) const
 {
     // Регулярки для парсинга C++
     static const QRegularExpression reInclude(
-        QStringLiteral(R"(^\s*#include\s*[<"](.+?)[>"])"));
+        QStringLiteral(R"(^\s*#include\s*(["<])(.+?)[">])"));
 
     static const QRegularExpression reClass(
         QStringLiteral(R"(^\s*(?:class|struct)\s+(?:\w+\s+)*(\w+)\s*(?::|\{|$))"));
@@ -328,7 +402,10 @@ void ProjectIndexer::parseSymbols(IndexedFile& file, const QStringList& lines) c
         // #include
         auto matchInc = reInclude.match(line);
         if (matchInc.hasMatch()) {
-            file.includes.append(matchInc.captured(1));
+            const QString header = matchInc.captured(2);
+            file.includes.append(header);
+            if (matchInc.captured(1) == QLatin1Char('"'))
+                file.localIncludes.append(header);
             continue;
         }
 
@@ -650,7 +727,7 @@ QStringList ProjectIndexer::allFiles() const
     return files;
 }
 
-QString ProjectIndexer::projectMap() const
+QString ProjectIndexer::detailedMap() const
 {
     if (m_files.isEmpty())
         return QStringLiteral("No project indexed.");
@@ -689,9 +766,87 @@ QString ProjectIndexer::projectMap() const
     return map;
 }
 
-QString ProjectIndexer::detailedMap() const
+// Компактная карта проекта: не перечисление всех символов (оно в
+// detailedMap()), а структура — папки, языки, ключевые типы. Именно эта
+// карта уходит в system prompt, поэтому она должна оставаться читаемой
+// целиком, а не обрываться на середине первой папки.
+QString ProjectIndexer::projectMap() const
 {
-    return projectMap(); // Для простоты пока одинаковы
+    if (m_files.isEmpty())
+        return QStringLiteral("No project indexed.");
+
+    struct DirInfo {
+        int files = 0;
+        int lines = 0;
+        QMap<QString, int> langs;      // язык -> файлов
+        QStringList        keyTypes;   // классы/компоненты/таргеты
+    };
+
+    QMap<QString, DirInfo> dirs;
+
+    for (const auto& file : m_files) {
+        const QString rel = file.relativePath.isEmpty()
+                                ? QFileInfo(file.filePath).fileName()
+                                : file.relativePath;
+        QString dir = rel.section(QChar('/'), 0, -2);
+        if (dir.isEmpty()) dir = QStringLiteral(".");
+
+        DirInfo& info = dirs[dir];
+        info.files++;
+        info.lines += file.lineCount;
+        info.langs[file.language.isEmpty() ? QStringLiteral("other") : file.language]++;
+
+        for (const auto& sym : file.symbols) {
+            if (info.keyTypes.size() >= 12) break;
+            if (sym.kind == CodeSymbol::Class || sym.kind == CodeSymbol::UClass
+                || sym.kind == CodeSymbol::Struct
+                || sym.kind == CodeSymbol::QmlComponent
+                || sym.kind == CodeSymbol::BuildTarget) {
+                if (!info.keyTypes.contains(sym.name))
+                    info.keyTypes.append(sym.name);
+            }
+        }
+    }
+
+    QString map;
+    map += QStringLiteral("Project: ") + QFileInfo(m_projectRoot).fileName()
+         + QStringLiteral("\n");
+    map += QStringLiteral("Files: ") + QString::number(m_files.size())
+         + QStringLiteral(", symbols: ") + QString::number(symbolCount())
+         + QStringLiteral("\n");
+
+    const auto stats = languageStats();
+    if (!stats.isEmpty()) {
+        QStringList parts;
+        for (auto it = stats.cbegin(); it != stats.cend(); ++it) {
+            parts.append(it.key() + QStringLiteral(" ")
+                         + QString::number(it.value().first) + QStringLiteral("f/")
+                         + QString::number(it.value().second) + QStringLiteral("l"));
+        }
+        map += QStringLiteral("Languages: ") + parts.join(QStringLiteral(", "))
+             + QStringLiteral("\n");
+    }
+    map += QStringLiteral("\nLayout (dir — files, lines, key types):\n");
+
+    for (auto it = dirs.cbegin(); it != dirs.cend(); ++it) {
+        map += QStringLiteral("  ") + it.key()
+             + QStringLiteral(" — ") + QString::number(it.value().files)
+             + QStringLiteral(" files, ") + QString::number(it.value().lines)
+             + QStringLiteral(" lines");
+
+        QStringList langParts;
+        for (auto l = it.value().langs.cbegin(); l != it.value().langs.cend(); ++l)
+            langParts.append(l.key());
+        if (!langParts.isEmpty())
+            map += QStringLiteral(" [") + langParts.join(QStringLiteral(",")) + QChar(']');
+
+        if (!it.value().keyTypes.isEmpty())
+            map += QStringLiteral(": ") + it.value().keyTypes.join(QStringLiteral(", "));
+
+        map += QChar('\n');
+    }
+
+    return map;
 }
 
 // ============================================================
@@ -711,6 +866,7 @@ void ProjectIndexer::saveIndex() const
     if (m_files.isEmpty()) return;
 
     QJsonObject root;
+    root[QStringLiteral("version")]     = INDEX_FORMAT_VERSION;
     root[QStringLiteral("projectRoot")] = m_projectRoot;
     root[QStringLiteral("timestamp")]   = QDateTime::currentDateTime().toString(Qt::ISODate);
 
@@ -741,6 +897,12 @@ void ProjectIndexer::loadIndex()
 
     // Проверяем что это индекс для нашего проекта
     if (root[QStringLiteral("projectRoot")].toString() != m_projectRoot)
+        return;
+
+    // Формат индекса изменился (новые виды символов, поле языка) — старый
+    // кэш читать нельзя: числовые коды Kind в нём означают уже другое.
+    // Молча игнорируем — проект переиндексируется заново.
+    if (root[QStringLiteral("version")].toInt() != INDEX_FORMAT_VERSION)
         return;
 
     QJsonArray filesArr = root[QStringLiteral("files")].toArray();
@@ -876,6 +1038,16 @@ QStringList ProjectIndexer::collectSourceFiles(const QString& dir) const
         result.append(path);
     }
 
+    // Сортировка по глубине пути: если файлов больше потолка, обрезается
+    // хвост — и это должны быть глубоко закопанные файлы, а не src/app.
+    std::sort(result.begin(), result.end(),
+              [](const QString& a, const QString& b) {
+                  const int da = a.count(QChar('/'));
+                  const int db = b.count(QChar('/'));
+                  if (da != db) return da < db;
+                  return a < b;
+              });
+
     return result;
 }
 
@@ -890,28 +1062,81 @@ QString ProjectIndexer::relativePath(const QString& absPath) const
 void ProjectIndexer::rebuildCaches()
 {
     m_symbolCount = 0;
+    m_includedBy.clear();
+
     for (const auto& file : m_files) {
         m_symbolCount += file.symbols.size();
+
+        // Обратный граф: ключ — только имя файла, потому что в #include
+        // пишут и "jarvis.h", и "engine/jarvis.h" — связь одна и та же.
+        for (const auto& inc : file.includes) {
+            const QString key = inc.section(QChar('/'), -1).trimmed().toLower();
+            if (key.isEmpty()) continue;
+            const QString from = file.relativePath.isEmpty()
+                                     ? file.filePath : file.relativePath;
+            m_includedBy.insert(key, from);
+        }
     }
 }
 
 bool ProjectIndexer::shouldSkipPath(const QString& path) const
 {
-    const QString normalized = QDir::fromNativeSeparators(path);
-    const QFileInfo info(normalized);
-    const QString name = info.fileName();
+    return isIgnoredPath(path, m_projectRoot);
+}
 
-    if (name.startsWith(QChar('.'))) {
-        return true;
+// Что НЕ является кодом проекта. Список важнее, чем кажется: пока в нём
+// не было build_release/ и redist/, потолок в 2000 файлов целиком уходил
+// на исходники вендоренного OpenCV и артефакты сборки — до src/app с QML
+// индексатор просто не доходил, и «понимание проекта» начиналось с чужого
+// кода.
+bool ProjectIndexer::isIgnoredPath(const QString& path, const QString& projectRoot)
+{
+    QString normalized = QDir::fromNativeSeparators(path);
+
+    // Всё, что выше корня проекта, нас не касается.
+    const QString root = QDir::fromNativeSeparators(projectRoot);
+    if (!root.isEmpty() && normalized.startsWith(root, Qt::CaseInsensitive))
+        normalized = normalized.mid(root.size());
+
+    // Любой компонент пути, начинающийся с точки (.git, .venv, .vs, .idea).
+    const QStringList parts = normalized.split(QChar('/'), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        if (part.startsWith(QChar('.')) && part.size() > 1) return true;
     }
 
-    return normalized.contains(QStringLiteral("/build/"))
-           || normalized.contains(QStringLiteral("/cmake-build"))
-           || normalized.contains(QStringLiteral("/.git/"))
-           || normalized.contains(QStringLiteral("/Binaries/"))
-           || normalized.contains(QStringLiteral("/Intermediate/"))
-           || normalized.contains(QStringLiteral("/Saved/"))
-           || normalized.contains(QStringLiteral("/DerivedDataCache"));
+    static const QStringList ignoredDirs = {
+        // вывод сборки
+        QStringLiteral("build"), QStringLiteral("builds"),
+        QStringLiteral("out"), QStringLiteral("dist"),
+        QStringLiteral("bin-release"), QStringLiteral("debug"),
+        QStringLiteral("release"), QStringLiteral("obj"),
+        // вендоренные зависимости
+        QStringLiteral("redist"), QStringLiteral("vendor"),
+        QStringLiteral("vendored"), QStringLiteral("third_party"),
+        QStringLiteral("thirdparty"), QStringLiteral("3rdparty"),
+        QStringLiteral("external"), QStringLiteral("externals"),
+        QStringLiteral("node_modules"), QStringLiteral("packages"),
+        QStringLiteral("site-packages"), QStringLiteral("__pycache__"),
+        QStringLiteral("venv"),
+        // Unreal / Qt / прочие артефакты
+        QStringLiteral("binaries"), QStringLiteral("intermediate"),
+        QStringLiteral("saved"), QStringLiteral("derivedatacache"),
+        QStringLiteral("derivedcache"), QStringLiteral("deriveddatacache")
+    };
+
+    for (const QString& part : parts) {
+        const QString lower = part.toLower();
+        if (ignoredDirs.contains(lower)) return true;
+        // build_release, cmake-build-debug, build-Desktop_Qt... — один и
+        // тот же каталог сборки под разными именами.
+        if (lower.startsWith(QStringLiteral("build_"))
+            || lower.startsWith(QStringLiteral("build-"))
+            || lower.startsWith(QStringLiteral("cmake-build"))) {
+            return true;
+        }
+    }
+
+    return false;
 }
 QStringList ProjectIndexer::recentFiles(int n) const
 {
@@ -935,6 +1160,579 @@ QStringList ProjectIndexer::recentFiles(int n) const
     result.reserve(count);
     for (int i = 0; i < count; ++i) {
         result.append(dated[i].second);
+    }
+    return result;
+}
+// ============================================================
+// Определение языка файла
+// ============================================================
+
+QString ProjectIndexer::languageForFile(const QString& filePath)
+{
+    const QFileInfo fi(filePath);
+    const QString name = fi.fileName().toLower();
+    const QString ext  = fi.suffix().toLower();
+
+    if (name == QStringLiteral("cmakelists.txt") || ext == QStringLiteral("cmake"))
+        return QStringLiteral("cmake");
+    if (ext == QStringLiteral("pro") || ext == QStringLiteral("pri"))
+        return QStringLiteral("qmake");
+
+    static const QSet<QString> cppExt = {
+        QStringLiteral("h"), QStringLiteral("hpp"), QStringLiteral("hxx"),
+        QStringLiteral("cpp"), QStringLiteral("cc"), QStringLiteral("cxx"),
+        QStringLiteral("c"), QStringLiteral("inl")
+    };
+    static const QSet<QString> shaderExt = {
+        QStringLiteral("glsl"), QStringLiteral("vert"), QStringLiteral("frag"),
+        QStringLiteral("hlsl"), QStringLiteral("usf")
+    };
+    static const QSet<QString> configExt = {
+        QStringLiteral("json"), QStringLiteral("yml"), QStringLiteral("yaml"),
+        QStringLiteral("ini"), QStringLiteral("toml"), QStringLiteral("iss")
+    };
+    static const QSet<QString> scriptExt = {
+        QStringLiteral("bat"), QStringLiteral("ps1"), QStringLiteral("sh")
+    };
+
+    if (cppExt.contains(ext))    return QStringLiteral("cpp");
+    if (shaderExt.contains(ext)) return QStringLiteral("shader");
+    if (configExt.contains(ext)) return QStringLiteral("config");
+    if (scriptExt.contains(ext)) return QStringLiteral("script");
+
+    if (ext == QStringLiteral("qml"))  return QStringLiteral("qml");
+    if (ext == QStringLiteral("qrc"))  return QStringLiteral("qrc");
+    if (ext == QStringLiteral("ui"))   return QStringLiteral("ui");
+    if (ext == QStringLiteral("py"))   return QStringLiteral("python");
+    if (ext == QStringLiteral("cs"))   return QStringLiteral("cs");
+    if (ext == QStringLiteral("java")) return QStringLiteral("java");
+    if (ext == QStringLiteral("js") || ext == QStringLiteral("mjs")
+        || ext == QStringLiteral("ts"))
+        return QStringLiteral("js");
+    if (ext == QStringLiteral("md"))   return QStringLiteral("md");
+
+    return QStringLiteral("other");
+}
+
+// ============================================================
+// Парсеры не-C++ языков
+//
+// Все они — построчные и намеренно простые: задача не разобрать язык
+// как компилятор, а построить карту «что где лежит», по которой модель
+// найдёт нужный файл и строку.
+// ============================================================
+
+void ProjectIndexer::parseQmlSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression reImport(
+        QStringLiteral(R"(^\s*import\s+([\w\."/]+))"));
+    static const QRegularExpression reComponent(
+        QStringLiteral(R"(^(\s*)([A-Z]\w*)\s*\{\s*$)"));
+    static const QRegularExpression reId(
+        QStringLiteral(R"(^\s*id:\s*(\w+))"));
+    static const QRegularExpression reProperty(
+        QStringLiteral(R"(^\s*(?:readonly\s+|default\s+|required\s+)*property\s+([\w<>\.]+)\s+(\w+))"));
+    static const QRegularExpression reSignal(
+        QStringLiteral(R"(^\s*signal\s+(\w+))"));
+    static const QRegularExpression reFunction(
+        QStringLiteral(R"(^\s*function\s+(\w+)\s*\()"));
+
+    QString currentComponent;
+    QString prevComment;
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        const QString& line = lines[i];
+        const int lineNum = i + 1;
+        const QString trimmed = line.trimmed();
+
+        if (trimmed.startsWith(QStringLiteral("//"))) {
+            const QString c = trimmed.mid(2).trimmed();
+            if (!c.isEmpty() && c.length() < 120) prevComment = c;
+            continue;
+        }
+
+        auto mImport = reImport.match(line);
+        if (mImport.hasMatch()) {
+            file.includes.append(mImport.captured(1));
+            continue;
+        }
+
+        auto mComp = reComponent.match(line);
+        if (mComp.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::QmlComponent;
+            sym.name      = mComp.captured(2);
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            // Корневой компонент (нулевой отступ) задаёт тип всего файла —
+            // именно его ищут по имени файла («что такое Modes.qml»).
+            if (mComp.captured(1).isEmpty()) currentComponent = sym.name;
+            else                             sym.parentClass  = currentComponent;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mId = reId.match(line);
+        if (mId.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind        = CodeSymbol::QmlComponent;
+            sym.name        = mId.captured(1);
+            sym.parentClass = currentComponent;
+            sym.signature   = QStringLiteral("id");
+            sym.filePath    = file.filePath;
+            sym.lineStart   = lineNum;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mProp = reProperty.match(line);
+        if (mProp.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind        = CodeSymbol::QmlProperty;
+            sym.name        = mProp.captured(2);
+            sym.signature   = mProp.captured(1);
+            sym.parentClass = currentComponent;
+            sym.filePath    = file.filePath;
+            sym.lineStart   = lineNum;
+            sym.brief       = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mSig = reSignal.match(line);
+        if (mSig.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind        = CodeSymbol::QmlSignal;
+            sym.name        = mSig.captured(1);
+            sym.parentClass = currentComponent;
+            sym.signature   = trimmed;
+            sym.filePath    = file.filePath;
+            sym.lineStart   = lineNum;
+            sym.brief       = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mFunc = reFunction.match(line);
+        if (mFunc.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind        = CodeSymbol::Function;
+            sym.name        = mFunc.captured(1);
+            sym.parentClass = currentComponent;
+            sym.signature   = trimmed;
+            sym.filePath    = file.filePath;
+            sym.lineStart   = lineNum;
+            sym.brief       = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        if (!trimmed.isEmpty()) prevComment.clear();
+    }
+}
+
+void ProjectIndexer::parsePythonSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression reImport(
+        QStringLiteral(R"(^\s*(?:from\s+([\w\.]+)\s+import|import\s+([\w\.]+)))"));
+    static const QRegularExpression reClass(
+        QStringLiteral(R"(^\s*class\s+(\w+))"));
+    static const QRegularExpression reDef(
+        QStringLiteral(R"(^(\s*)(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\))"));
+
+    QString currentClass;
+    QString prevComment;
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        const QString& line = lines[i];
+        const int lineNum = i + 1;
+        const QString trimmed = line.trimmed();
+
+        if (trimmed.startsWith(QChar('#'))) {
+            const QString c = trimmed.mid(1).trimmed();
+            if (!c.isEmpty() && c.length() < 120) prevComment = c;
+            continue;
+        }
+
+        auto mImp = reImport.match(line);
+        if (mImp.hasMatch()) {
+            const QString mod = mImp.captured(1).isEmpty()
+                                    ? mImp.captured(2) : mImp.captured(1);
+            if (!mod.isEmpty()) file.includes.append(mod);
+            continue;
+        }
+
+        auto mClass = reClass.match(line);
+        if (mClass.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Class;
+            sym.name      = mClass.captured(1);
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            file.symbols.append(sym);
+            currentClass  = sym.name;
+            prevComment.clear();
+            continue;
+        }
+
+        auto mDef = reDef.match(line);
+        if (mDef.hasMatch()) {
+            CodeSymbol sym;
+            // Отступ внутри класса — метод, на верхнем уровне — функция.
+            const bool nested = !mDef.captured(1).isEmpty() && !currentClass.isEmpty();
+            sym.kind        = nested ? CodeSymbol::Method : CodeSymbol::Function;
+            sym.name        = mDef.captured(2);
+            sym.parentClass = nested ? currentClass : QString();
+            sym.signature   = trimmed;
+            sym.filePath    = file.filePath;
+            sym.lineStart   = lineNum;
+            sym.brief       = prevComment;
+            file.symbols.append(sym);
+            if (!nested) currentClass.clear();
+            prevComment.clear();
+            continue;
+        }
+
+        if (!trimmed.isEmpty()) prevComment.clear();
+    }
+}
+
+void ProjectIndexer::parseJsSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression reImport(
+        QStringLiteral(R"(^\s*(?:import\s.*?from\s*['"](.+?)['"]|(?:const|let|var)\s+\w+\s*=\s*require\(\s*['"](.+?)['"]))"));
+    static const QRegularExpression reClass(
+        QStringLiteral(R"(^\s*(?:export\s+)?(?:default\s+)?class\s+(\w+))"));
+    static const QRegularExpression reFunc(
+        QStringLiteral(R"(^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*\()"));
+    static const QRegularExpression reArrow(
+        QStringLiteral(R"(^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(?[^;]*?=>)"));
+
+    QString prevComment;
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        const QString& line = lines[i];
+        const int lineNum = i + 1;
+        const QString trimmed = line.trimmed();
+
+        if (trimmed.startsWith(QStringLiteral("//"))) {
+            const QString c = trimmed.mid(2).trimmed();
+            if (!c.isEmpty() && c.length() < 120) prevComment = c;
+            continue;
+        }
+
+        auto mImp = reImport.match(line);
+        if (mImp.hasMatch()) {
+            const QString mod = mImp.captured(1).isEmpty()
+                                    ? mImp.captured(2) : mImp.captured(1);
+            if (!mod.isEmpty()) file.includes.append(mod);
+            continue;
+        }
+
+        auto mClass = reClass.match(line);
+        if (mClass.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Class;
+            sym.name      = mClass.captured(1);
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mFunc = reFunc.match(line);
+        if (!mFunc.hasMatch()) mFunc = reArrow.match(line);
+        if (mFunc.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Function;
+            sym.name      = mFunc.captured(1);
+            sym.signature = trimmed.left(160);
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        if (!trimmed.isEmpty()) prevComment.clear();
+    }
+}
+
+void ProjectIndexer::parseCMakeSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression reTarget(
+        QStringLiteral(R"(^\s*(add_executable|add_library|qt_add_executable|qt_add_library|qt_add_qml_module)\s*\(\s*([\w\$\{\}]+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression reSubdir(
+        QStringLiteral(R"(^\s*add_subdirectory\s*\(\s*([^\s\)]+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression rePackage(
+        QStringLiteral(R"(^\s*find_package\s*\(\s*([\w\-]+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression reOption(
+        QStringLiteral(R"(^\s*(?:option|set)\s*\(\s*([A-Z][A-Z0-9_]{3,}))"));
+    static const QRegularExpression reQmakeTarget(
+        QStringLiteral(R"(^\s*TARGET\s*=\s*(\S+))"));
+
+    QString prevComment;
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        const QString& line = lines[i];
+        const int lineNum = i + 1;
+        const QString trimmed = line.trimmed();
+
+        if (trimmed.startsWith(QChar('#'))) {
+            const QString c = trimmed.mid(1).trimmed();
+            if (!c.isEmpty() && c.length() < 120) prevComment = c;
+            continue;
+        }
+
+        auto mTarget = reTarget.match(line);
+        if (mTarget.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::BuildTarget;
+            sym.name      = mTarget.captured(2);
+            sym.signature = mTarget.captured(1).toLower();
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mQmake = reQmakeTarget.match(line);
+        if (mQmake.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::BuildTarget;
+            sym.name      = mQmake.captured(1);
+            sym.signature = QStringLiteral("qmake target");
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        auto mSub = reSubdir.match(line);
+        if (mSub.hasMatch()) {
+            file.includes.append(mSub.captured(1));
+            continue;
+        }
+
+        auto mPkg = rePackage.match(line);
+        if (mPkg.hasMatch()) {
+            file.includes.append(mPkg.captured(1));
+            continue;
+        }
+
+        auto mOpt = reOption.match(line);
+        if (mOpt.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Variable;
+            sym.name      = mOpt.captured(1);
+            sym.filePath  = file.filePath;
+            sym.lineStart = lineNum;
+            sym.brief     = prevComment;
+            file.symbols.append(sym);
+            prevComment.clear();
+            continue;
+        }
+
+        if (!trimmed.isEmpty()) prevComment.clear();
+    }
+}
+
+void ProjectIndexer::parseQrcSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression rePrefix(
+        QStringLiteral(R"RX(<qresource[^>]*prefix\s*=\s*"([^"]*)")RX"));
+    static const QRegularExpression reFileEntry(
+        QStringLiteral(R"RX(<file(?:\s+alias\s*=\s*"([^"]*)")?\s*>([^<]+)</file>)RX"));
+
+    QString prefix;
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        auto mPrefix = rePrefix.match(lines[i]);
+        if (mPrefix.hasMatch()) prefix = mPrefix.captured(1);
+
+        auto it = reFileEntry.globalMatch(lines[i]);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Resource;
+            sym.name      = m.captured(2).trimmed();
+            sym.signature = prefix;
+            sym.brief     = m.captured(1);   // alias, если задан
+            sym.filePath  = file.filePath;
+            sym.lineStart = i + 1;
+            file.symbols.append(sym);
+            // Ресурс — это зависимость .qrc от файла на диске: так вопрос
+            // «кто использует этот ассет» отвечается тем же графом include.
+            file.includes.append(sym.name);
+        }
+    }
+}
+
+void ProjectIndexer::parseUiSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression reClass(
+        QStringLiteral(R"(<class>([^<]+)</class>)"));
+    static const QRegularExpression reWidget(
+        QStringLiteral(R"RX(<widget\s+class\s*=\s*"([^"]+)"\s+name\s*=\s*"([^"]+)")RX"));
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        auto mClass = reClass.match(lines[i]);
+        if (mClass.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Class;
+            sym.name      = mClass.captured(1);
+            sym.signature = QStringLiteral("Qt Designer form");
+            sym.filePath  = file.filePath;
+            sym.lineStart = i + 1;
+            file.symbols.append(sym);
+            continue;
+        }
+
+        auto mWidget = reWidget.match(lines[i]);
+        if (mWidget.hasMatch()) {
+            CodeSymbol sym;
+            sym.kind      = CodeSymbol::Variable;
+            sym.name      = mWidget.captured(2);
+            sym.signature = mWidget.captured(1);
+            sym.filePath  = file.filePath;
+            sym.lineStart = i + 1;
+            file.symbols.append(sym);
+        }
+    }
+}
+
+void ProjectIndexer::parseMarkdownSymbols(IndexedFile& file, const QStringList& lines) const
+{
+    static const QRegularExpression reHeading(
+        QStringLiteral(R"(^(#{1,3})\s+(.+?)\s*$)"));
+
+    for (int i = 0; i < lines.size(); ++i) {
+        if (file.symbols.size() >= MAX_SYMBOLS_PER_FILE) break;
+
+        auto m = reHeading.match(lines[i]);
+        if (!m.hasMatch()) continue;
+
+        CodeSymbol sym;
+        sym.kind      = CodeSymbol::Variable;
+        sym.name      = m.captured(2).left(120);
+        sym.signature = QStringLiteral("h") + QString::number(m.captured(1).size());
+        sym.filePath  = file.filePath;
+        sym.lineStart = i + 1;
+        file.symbols.append(sym);
+    }
+}
+
+void ProjectIndexer::collectTodos(IndexedFile& file, const QStringList& lines)
+{
+    static const QRegularExpression reTodo(
+        QStringLiteral(R"(\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*))"));
+
+    constexpr int MAX_TODOS_PER_FILE = 8;
+    int found = 0;
+
+    for (int i = 0; i < lines.size() && found < MAX_TODOS_PER_FILE; ++i) {
+        const QString& line = lines[i];
+        if (!line.contains(QStringLiteral("//")) && !line.contains(QChar('#'))
+            && !line.contains(QStringLiteral("/*")) && !line.contains(QStringLiteral("<!--"))) {
+            continue;
+        }
+
+        const auto m = reTodo.match(line);
+        if (!m.hasMatch()) continue;
+
+        CodeSymbol sym;
+        sym.kind      = CodeSymbol::Todo;
+        sym.name      = m.captured(1);
+        sym.brief     = m.captured(2).trimmed().left(160);
+        sym.filePath  = file.filePath;
+        sym.lineStart = i + 1;
+        file.symbols.append(sym);
+        found++;
+    }
+}
+
+// ============================================================
+// Запросы «про проект целиком»
+// ============================================================
+
+QStringList ProjectIndexer::whoIncludes(const QString& headerName) const
+{
+    const QString key = headerName.trimmed()
+                            .section(QChar('/'), -1)
+                            .section(QChar('\\'), -1)
+                            .toLower();
+    if (key.isEmpty()) return {};
+
+    QStringList result = m_includedBy.values(key);
+    result.removeDuplicates();
+    result.sort();
+    return result;
+}
+
+QStringList ProjectIndexer::filesByLanguage(const QString& lang) const
+{
+    QStringList result;
+    for (const auto& file : m_files) {
+        if (file.language.compare(lang, Qt::CaseInsensitive) == 0) {
+            result.append(file.relativePath.isEmpty()
+                              ? file.filePath : file.relativePath);
+        }
+    }
+    result.sort();
+    return result;
+}
+
+QMap<QString, QPair<int, int>> ProjectIndexer::languageStats() const
+{
+    QMap<QString, QPair<int, int>> stats;
+    for (const auto& file : m_files) {
+        const QString lang = file.language.isEmpty()
+                                 ? QStringLiteral("other") : file.language;
+        auto& entry = stats[lang];
+        entry.first  += 1;
+        entry.second += file.lineCount;
+    }
+    return stats;
+}
+
+QVector<CodeSymbol> ProjectIndexer::todos(int maxItems) const
+{
+    QVector<CodeSymbol> result;
+    for (const auto& file : m_files) {
+        for (const auto& sym : file.symbols) {
+            if (sym.kind != CodeSymbol::Todo) continue;
+            result.append(sym);
+            if (result.size() >= maxItems) return result;
+        }
     }
     return result;
 }

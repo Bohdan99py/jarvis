@@ -2,6 +2,7 @@
 // face_registry.cpp — Реестр известных лиц
 // ============================================================
 
+#include "database_manager.h"
 #include "face_registry.h"
 
 #include <QSqlQuery>
@@ -84,7 +85,7 @@ FaceRegistry::FaceRegistry(QObject* parent)
 
 void FaceRegistry::ensureTable()
 {
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS known_faces ("
         "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -101,7 +102,7 @@ void FaceRegistry::ensureTable()
 QList<KnownFace> FaceRegistry::allFaces() const
 {
     QList<KnownFace> result;
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     if (!q.exec(QStringLiteral(
             "SELECT id, name, age, status, origin_node, histograms "
             "FROM known_faces")))
@@ -132,11 +133,16 @@ qint64 FaceRegistry::upsertFace(const KnownFace& face)
     // Кап на общее число образцов защищает строку от неограниченного роста.
     QVector<QVector<float>> merged = face.histograms;
     {
-        QSqlQuery sel(QSqlDatabase::database());
+        QSqlQuery sel(DatabaseManager::instance().connection());
         sel.prepare(QStringLiteral(
             "SELECT histograms FROM known_faces WHERE name = :name AND origin_node = :origin"));
         sel.bindValue(QStringLiteral(":name"),   face.name);
-        sel.bindValue(QStringLiteral(":origin"), face.originNode);
+        // Та же нормализация, что и при вставке: иначе поиск по NULL
+        // никогда не совпал бы с сохранённой пустой строкой, и каждое
+        // повторное обучение заводило бы дубль вместо дополнения образцов.
+        sel.bindValue(QStringLiteral(":origin"),
+                      face.originNode.isNull() ? QString(QLatin1String(""))
+                                               : face.originNode);
         if (sel.exec() && sel.next()) {
             const QJsonDocument doc =
                 QJsonDocument::fromJson(sel.value(0).toString().toUtf8());
@@ -151,7 +157,7 @@ qint64 FaceRegistry::upsertFace(const KnownFace& face)
         QJsonDocument(histogramsToJson(merged))
             .toJson(QJsonDocument::Compact));
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT INTO known_faces (name, age, status, origin_node, histograms) "
         "VALUES (:name, :age, :status, :origin, :hists) "
@@ -163,7 +169,15 @@ qint64 FaceRegistry::upsertFace(const KnownFace& face)
     q.bindValue(QStringLiteral(":name"),   face.name);
     q.bindValue(QStringLiteral(":age"),    face.age);
     q.bindValue(QStringLiteral(":status"), face.status);
-    q.bindValue(QStringLiteral(":origin"), face.originNode);
+    // originNode по умолчанию — NULL-строка (QString()), а Qt отправляет
+    // такую в SQL как NULL, а не как пустую строку. Колонка объявлена
+    // NOT NULL, и DEFAULT '' здесь не спасает: он применяется, только
+    // если колонку вообще не перечислять в INSERT. Пустой originNode
+    // означает «обучено на этом узле» — то есть самый обычный случай,
+    // поэтому локальные лица не сохранялись вовсе.
+    q.bindValue(QStringLiteral(":origin"),
+                face.originNode.isNull() ? QString(QLatin1String(""))
+                                         : face.originNode);
     q.bindValue(QStringLiteral(":hists"),  histJson);
     if (!q.exec()) {
         qWarning() << "[FaceRegistry] upsert failed:" << q.lastError().text();
@@ -181,7 +195,7 @@ qint64 FaceRegistry::upsertFace(const KnownFace& face)
 
 bool FaceRegistry::removeFace(qint64 id)
 {
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral("DELETE FROM known_faces WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), id);
     const bool ok = q.exec() && q.numRowsAffected() > 0;

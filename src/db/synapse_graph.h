@@ -116,6 +116,37 @@ public:
     };
     GraphView graphView(qint64 ownerId, int maxNodes = 40) const;
 
+    // ── Досье на один узел: "почему я это помню" ────────────────────
+    // Картинка отвечает на вопрос "что связано с чем", но не на вопрос
+    // "откуда это взялось". Узел — нормализованный токен, сам по себе он
+    // ничего не объясняет; объясняют три вещи вокруг него: канал, по
+    // которому понятие впервые пришло, соседи по графу и РЕАЛЬНЫЕ реплики,
+    // в которых оно встречалось (synapse_case_links -> llm_cache).
+    // Последнее и есть ответ "от чего запомнил".
+    struct NodeOrigin {
+        QString caseHash;
+        QString query;       // фраза, в которой понятие сработало
+        QString response;    // что было отвечено тогда
+        float   weight = 0.0f;  // сила привязки понятия к этому случаю
+    };
+    struct NodeDetail {
+        bool        found        = false;
+        qint64      id           = 0;
+        QString     label;
+        QString     source;         // kSourceDialogue | kSourceWatched | kSourceFact
+        int         activations  = 0;
+        QString     firstSeen;      // как лежит в БД: "yyyy-MM-dd HH:mm:ss"
+        QString     lastActivated;
+        QList<TopEdge>    neighbours;   // сильнейшие связи, labelA = сам узел
+        QList<NodeOrigin> origins;      // случаи, где понятие участвовало
+    };
+    NodeDetail nodeDetail(qint64 ownerId, qint64 nodeId,
+                          int maxNeighbours = 8, int maxOrigins = 6) const;
+
+    // Человеческое описание канала происхождения: "услышал в разговоре",
+    // "увидел за работой", "усвоил как факт".
+    static QString sourceDescription(const QString& source, bool english);
+
     // Most-activated concepts for ownerId, activations desc. Empty graph
     // (nothing learned yet) returns an empty list, not an error.
     QList<TopNode> topNodes(qint64 ownerId, int limit = 12) const;

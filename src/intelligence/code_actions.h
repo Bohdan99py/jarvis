@@ -33,6 +33,20 @@ struct CodeAction
         DeleteFile,
         SystemCmd,
         KiCadSchematic,
+
+        // --- Слой B: работа с файлами и ассетами ---
+        //
+        // Имена намеренно НЕ MoveFile/CopyFile: windows.h превращает их
+        // в MoveFileW/CopyFileW, и enum перестаёт компилироваться в любом
+        // файле, куда попал <windows.h> (тот же капкан, что с CreateFile
+        // и DeleteFile выше — их приходится #undef'ать в .cpp).
+        MoveEntry,    // [MOVE:a -> b]   — перемещение/переименование
+        CopyEntry,    // [COPY:a -> b]
+        AppendFile,   // [APPEND:path]...[/APPEND]
+        AssetOp,      // [ASSET:resize|convert a -> b [WxH]]
+        QrcAdd,       // [QRC:add file -> res.qrc [as alias]]
+        QrcRemove,    // [QRC:remove file -> res.qrc]
+
         Unknown
     };
 
@@ -42,6 +56,13 @@ struct CodeAction
     QString findText;
     QString replaceText;
     QString description;
+
+    // Назначение для MOVE/COPY/ASSET/QRC (у остальных пусто).
+    QString targetPath;
+    // Модификатор: "resize"/"convert" для ASSET, alias для QRC,
+    // геометрия "128x128" — в assetGeometry.
+    QString option;
+    QString assetGeometry;
 
     bool    success = false;
     QString resultMessage;
@@ -80,6 +101,8 @@ signals:
     void fileModified(const QString& path);
     void directoryCreated(const QString& path);
     void fileDeleted(const QString& path);
+    void fileMoved(const QString& from, const QString& to);
+    void assetProcessed(const QString& path);
     void kicadSchematicCreated(const QString& path);
     void actionError(const QString& path, const QString& error);
 
@@ -89,7 +112,18 @@ private:
     CodeAction doMakeDir(CodeAction action) const;
     CodeAction doDeleteFile(CodeAction action) const;
     CodeAction doCreateKiCadSchematic(CodeAction action) const;
+    CodeAction doMoveFile(CodeAction action) const;
+    CodeAction doCopyFile(CodeAction action) const;
+    CodeAction doAppendFile(CodeAction action) const;
+    CodeAction doAssetOp(CodeAction action) const;
+    CodeAction doQrcEdit(CodeAction action) const;
+
     QString fullPath(const QString& relativePath) const;
+
+    // Защита от записи куда попало: модель может назвать абсолютный путь
+    // (в том числе системный), а исполняются её блоки без подтверждения.
+    // Разрешены только корень проекта и папка Jarvis Data.
+    bool pathAllowed(const QString& absPath) const;
 
     QString m_projectRoot;
 };

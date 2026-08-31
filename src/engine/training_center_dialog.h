@@ -11,6 +11,7 @@
 // ============================================================
 
 #include <QDialog>
+#include <QVariantMap>
 #include <QVBoxLayout>
 
 class QQuickWidget;
@@ -41,6 +42,11 @@ public:
     Q_INVOKABLE void setMaxExamples(int n);
     Q_INVOKABLE void startTraining();
     Q_INVOKABLE void searchHistory(const QString& query);
+
+    // Досье на узел графа: чем он был вызван, с чем связан и в каких
+    // репликах встречался. Возвращает готовую к отрисовке карту —
+    // QML не должен знать ни про SQL, ни про структуры SynapseGraph.
+    Q_INVOKABLE QVariantMap synapseNodeDetail(qint64 nodeId);
 
 private:
     void refreshOverview();

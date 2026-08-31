@@ -37,12 +37,18 @@ QString MermaidRenderer::outputDir()
 
 bool MermaidRenderer::isMmdcAvailable()
 {
-    QProcess probe;
-    probe.setProcessChannelMode(QProcess::MergedChannels);
-    probe.start(QStringLiteral("mmdc"), {QStringLiteral("--version")});
-    if (!probe.waitForStarted(3000)) return false;
-    probe.waitForFinished(5000);
-    return probe.exitCode() == 0;
+    // Probed once per run. Spawning a process to ask "are you there?" cost
+    // a stall on the GUI thread for every single diagram, and mmdc does
+    // not appear or vanish mid-session in practice.
+    static const bool available = []() {
+        QProcess probe;
+        probe.setProcessChannelMode(QProcess::MergedChannels);
+        probe.start(QStringLiteral("mmdc"), {QStringLiteral("--version")});
+        if (!probe.waitForStarted(3000)) return false;
+        probe.waitForFinished(5000);
+        return probe.exitCode() == 0;
+    }();
+    return available;
 }
 
 // ============================================================

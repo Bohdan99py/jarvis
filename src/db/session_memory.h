@@ -100,6 +100,16 @@ public:
 
     // Activity context: what the user is doing right now
     void setActivityContext(const QString& ctx) { m_activityContext = ctx; }
+
+    // Что человек видит на экране ПРЯМО СЕЙЧАС: активное окно, открытый
+    // файл, проект. Отдельно от activityContext — тот про статистику
+    // занятий за последние минуты, а этот нужен, чтобы слова «здесь» и
+    // «это» вообще на что-то указывали. Заполняется ContextTracker.
+    void setMachineContext(const QString& ctx) { m_machineContext = ctx; }
+
+    // Последние события ленты: чтобы на «что случилось, пока меня не
+    // было» модель отвечала сразу, а не шла за инструментом.
+    void setEventContext(const QString& ctx) { m_eventContext = ctx; }
     // Detected user role based on activity patterns
     void setDetectedRole(const QString& role) { m_detectedRole = role; }
     // Knowledge base summary
@@ -149,6 +159,11 @@ public:
                         const QString& projectMap,
                         int fileCount,
                         int symbolCount);
+    // Архитектурная выжимка от ProjectProfile: тип проекта, система
+    // сборки, таргеты, зависимости, точки входа, ассеты, git. Пустая
+    // строка = профиль ещё не собран, блок в промпт не попадёт.
+    void setProjectArchitecture(const QString& brief) { m_projectArchitecture = brief; }
+
     void clearProjectInfo();
     bool hasProjectInfo() const          { return !m_projectRoot.isEmpty(); }
 
@@ -174,6 +189,8 @@ private:
 
     QString m_userProfileSummary;
     QString m_activityContext;
+    QString m_machineContext;
+    QString m_eventContext;
     QString m_detectedRole;
     QString m_knowledgeSummary;
     QString m_activeUserName;
@@ -196,6 +213,7 @@ private:
 
     QString m_projectRoot;
     QString m_projectMap;
+    QString m_projectArchitecture;
     int     m_projectFileCount   = 0;
     int     m_projectSymbolCount = 0;
 

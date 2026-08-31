@@ -10,6 +10,8 @@
 #include "notification_manager.h"
 #include "lang.h"
 
+#include "jarvis_theme.h"
+
 #include <QQuickWidget>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -31,8 +33,7 @@ VisionCenterDialog::VisionCenterDialog(SecurityCamera* camera,
     m_view = new QQuickWidget(this);
     m_view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_view->setClearColor(QColor(0x08, 0x0A, 0x0F));
-    m_view->engine()->addImportPath(QCoreApplication::applicationDirPath()
-                                    + QStringLiteral("/qml"));
+    JarvisTheme::prepareEngine(m_view->engine());
 
     // Значения по умолчанию для каждого свойства, которое читает
     // VisionCenter.qml — до setSource(), иначе стартовые привязки
@@ -50,6 +51,8 @@ VisionCenterDialog::VisionCenterDialog(SecurityCamera* camera,
     ctx->setContextProperty(QStringLiteral("monitoringOn"), false);
     ctx->setContextProperty(QStringLiteral("alertUnknownOn"), false);
     ctx->setContextProperty(QStringLiteral("autoLockOn"), false);
+    ctx->setContextProperty(QStringLiteral("motionAlertOn"), false);
+    ctx->setContextProperty(QStringLiteral("screenLocked"), false);
     ctx->setContextProperty(QStringLiteral("ocrAvailable"), false);
     ctx->setContextProperty(QStringLiteral("pdfTextAvailable"), false);
     ctx->setContextProperty(QStringLiteral("visionCenter"), this);
@@ -105,8 +108,24 @@ void VisionCenterDialog::refreshCamera()
 
     CameraAgent probe;
     ctx->setContextProperty(QStringLiteral("webcamPresent"), probe.hasWebcam());
+
+    // Все флажки спрашиваются у камеры. Раньше здесь читалось только
+    // monitoringOn, а «предупреждать о незнакомце» и «блокировать при
+    // угрозе» лишь записывались при щелчке — то есть окно всегда
+    // открывалось с выключенными тумблерами независимо от того, что
+    // на самом деле включено, и первый щелчок по включённому флажку
+    // включал его повторно вместо того, чтобы выключить.
+    const bool has = (m_camera != nullptr);
     ctx->setContextProperty(QStringLiteral("monitoringOn"),
-                            m_camera && m_camera->isMonitoring());
+                            has && m_camera->isMonitoring());
+    ctx->setContextProperty(QStringLiteral("alertUnknownOn"),
+                            has && m_camera->alertOnUnknownFace());
+    ctx->setContextProperty(QStringLiteral("autoLockOn"),
+                            has && m_camera->autoLockOnThreat());
+    ctx->setContextProperty(QStringLiteral("motionAlertOn"),
+                            has && m_camera->alertOnMotion());
+    ctx->setContextProperty(QStringLiteral("screenLocked"),
+                            has && m_camera->isScreenLocked());
 }
 
 void VisionCenterDialog::refreshScreenVision()
@@ -192,6 +211,20 @@ void VisionCenterDialog::setAutoLock(bool on)
     if (!m_camera) return;
     m_camera->setAutoLockOnThreat(on);
     m_view->rootContext()->setContextProperty(QStringLiteral("autoLockOn"), on);
+}
+
+void VisionCenterDialog::setMotionAlert(bool on)
+{
+    if (!m_camera) return;
+    m_camera->setAlertOnMotion(on);
+    m_view->rootContext()->setContextProperty(QStringLiteral("motionAlertOn"), on);
+}
+
+void VisionCenterDialog::lockScreen()
+{
+    if (!m_camera) return;
+    m_camera->lockScreen();
+    m_view->rootContext()->setContextProperty(QStringLiteral("screenLocked"), true);
 }
 
 void VisionCenterDialog::captureNow()

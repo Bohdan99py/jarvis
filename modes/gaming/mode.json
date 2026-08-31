@@ -1,0 +1,33 @@
+{
+    "id": "gaming",
+    "name": {
+        "ru": "Игровой",
+        "en": "Gaming"
+    },
+    "description": {
+        "ru": "Игра идёт: всплывающие уведомления выключены, громкость выставлена, ответы короткие и без кода. Сюда удобно повесить свой сценарий запуска — Steam, Discord и всё остальное.",
+        "en": "Game on: toast notifications off, volume set, answers short and code-free. A good place to hook up your own launch workflow - Steam, Discord and the rest."
+    },
+    "prompt": {
+        "ru": "Пользователь играет. Отвечай коротко и не отвлекай: никаких длинных объяснений, разборов кода и предложений заняться работой. Если просят что-то сделать на машине — делай молча и отчитывайся одной строкой.",
+        "en": "The user is gaming. Keep it short and unobtrusive: no long explanations, no code reviews, no suggestions to get back to work. If asked to do something on the machine, just do it and report in one line."
+    },
+    "icon": "🎮",
+    "accent": "#ff6b6b",
+    "enable_skills": [],
+    "disable_skills": [
+        "coding",
+        "philosopher"
+    ],
+    "exclusive": false,
+    "default_active": false,
+    "system": {
+        "permission_mode": "balanced",
+        "notifications": "none",
+        "voice": "minimal",
+        "volume": 70,
+        "on_activate_workflow": "",
+        "on_deactivate_workflow": "",
+        "auto_activate_apps": []
+    }
+}

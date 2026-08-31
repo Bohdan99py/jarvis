@@ -110,7 +110,7 @@ TelegramAccessManager::TelegramAccessManager(const QString& localDeviceId,
 void TelegramAccessManager::resolvePrimaryOwner()
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "SELECT chat_id FROM telegram_users ORDER BY registered_at ASC LIMIT 1"));
     if (q.next())
@@ -120,7 +120,7 @@ void TelegramAccessManager::resolvePrimaryOwner()
 void TelegramAccessManager::ensureTables()
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
 
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS telegram_users ("
@@ -172,7 +172,7 @@ void TelegramAccessManager::ensureTables()
 bool TelegramAccessManager::isSessionBoundHere(qint64 chatId) const
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT device_id FROM user_sessions "
         "WHERE chat_id = :cid AND status = 'active'"));
@@ -195,7 +195,7 @@ bool TelegramAccessManager::isSessionBoundHere(qint64 chatId) const
 bool TelegramAccessManager::isSessionBoundElsewhere(qint64 chatId) const
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT device_id FROM user_sessions "
         "WHERE chat_id = :cid AND status = 'active'"));
@@ -211,7 +211,7 @@ bool TelegramAccessManager::isSessionBoundElsewhere(qint64 chatId) const
 std::optional<TgUserSession> TelegramAccessManager::resolveSession(qint64 chatId) const
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT chat_id, device_id, auth_token, pc_name, status, "
         "       created_at, last_used "
@@ -247,7 +247,7 @@ TgUserSession TelegramAccessManager::bindSession(qint64 chatId, const QString& p
 
     {
         QMutexLocker lock(&m_mutex);
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.prepare(QStringLiteral(
             "INSERT INTO user_sessions "
             "  (chat_id, device_id, auth_token, pc_name, status) "
@@ -280,7 +280,7 @@ void TelegramAccessManager::bindSessionToDevice(qint64 chatId,
     if (deviceId.isEmpty()) return;
 
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT INTO user_sessions "
         "  (chat_id, device_id, auth_token, pc_name, status) "
@@ -306,7 +306,7 @@ void TelegramAccessManager::bindSessionToDevice(qint64 chatId,
 bool TelegramAccessManager::validateToken(qint64 chatId, const QString& token) const
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT 1 FROM user_sessions "
         "WHERE chat_id = :cid AND auth_token = :tok AND status = 'active'"));
@@ -320,7 +320,7 @@ QList<TgUserSession> TelegramAccessManager::allSessions() const
     QMutexLocker lock(&m_mutex);
     QList<TgUserSession> result;
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "SELECT chat_id, device_id, auth_token, pc_name, status, "
         "       created_at, last_used "
@@ -343,7 +343,7 @@ QList<TgUserSession> TelegramAccessManager::allSessions() const
 bool TelegramAccessManager::revokeSession(qint64 chatId)
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "UPDATE user_sessions SET status = 'revoked' WHERE chat_id = :cid"));
     q.bindValue(QStringLiteral(":cid"), chatId);
@@ -385,7 +385,7 @@ bool TelegramAccessManager::isPrimaryOwner(qint64 chatId) const
         return chatId == m_primaryOwnerId;
 
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "SELECT chat_id FROM telegram_users ORDER BY registered_at ASC LIMIT 1"));
     if (q.next()) {
@@ -401,7 +401,7 @@ qint64 TelegramAccessManager::primaryOwnerChatId() const
         return m_primaryOwnerId;
 
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "SELECT chat_id FROM telegram_users ORDER BY registered_at ASC LIMIT 1"));
     if (q.next()) {
@@ -435,7 +435,7 @@ bool TelegramAccessManager::hasAccess(qint64 chatId, const QString& command) con
 TelegramRole TelegramAccessManager::getRole(qint64 chatId) const
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "SELECT role FROM telegram_users WHERE chat_id = :cid"));
     q.bindValue(QStringLiteral(":cid"), chatId);
@@ -449,7 +449,7 @@ TelegramRole TelegramAccessManager::getRole(qint64 chatId) const
 bool TelegramAccessManager::setRole(qint64 chatId, TelegramRole role)
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "UPDATE telegram_users SET role = :role WHERE chat_id = :cid"));
     q.bindValue(QStringLiteral(":role"), telegramRoleToString(role));
@@ -466,7 +466,7 @@ QList<TgUserRecord> TelegramAccessManager::allUsers() const
 {
     QList<TgUserRecord> result;
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "SELECT chat_id, display_name, role FROM telegram_users "
         "ORDER BY registered_at ASC"));
@@ -484,7 +484,7 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
                                               const QString& displayName)
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
 
     // Check if already registered
     q.prepare(QStringLiteral(
@@ -492,7 +492,7 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
     q.bindValue(QStringLiteral(":cid"), chatId);
     if (q.exec() && q.next()) {
         // Update last_active
-        QSqlQuery u(QSqlDatabase::database());
+        QSqlQuery u(DatabaseManager::instance().connection());
         u.prepare(QStringLiteral(
             "UPDATE telegram_users SET last_active = datetime('now'), "
             "display_name = :name WHERE chat_id = :cid"));
@@ -502,7 +502,7 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
 
         // Force-assign Admin to the primary owner on every registration
         if (m_primaryOwnerId != 0 && chatId == m_primaryOwnerId) {
-            QSqlQuery fix(QSqlDatabase::database());
+            QSqlQuery fix(DatabaseManager::instance().connection());
             fix.prepare(QStringLiteral(
                 "UPDATE telegram_users SET role = 'Admin' WHERE chat_id = :cid"));
             fix.bindValue(QStringLiteral(":cid"), chatId);
@@ -516,13 +516,13 @@ void TelegramAccessManager::ensureRegistered(qint64 chatId,
     }
 
     // First user ever → Admin; subsequent → User
-    QSqlQuery countQ(QSqlDatabase::database());
+    QSqlQuery countQ(DatabaseManager::instance().connection());
     countQ.exec(QStringLiteral("SELECT COUNT(*) FROM telegram_users"));
     bool isFirst = (!countQ.next() || countQ.value(0).toInt() == 0);
 
     TelegramRole role = isFirst ? TelegramRole::Admin : TelegramRole::User;
 
-    QSqlQuery ins(QSqlDatabase::database());
+    QSqlQuery ins(DatabaseManager::instance().connection());
     ins.prepare(QStringLiteral(
         "INSERT INTO telegram_users (chat_id, display_name, role) "
         "VALUES (:cid, :name, :role)"));
@@ -552,7 +552,7 @@ void TelegramAccessManager::logActivity(qint64 chatId,
                                          const QString& detail)
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT INTO activity_log_tg (chat_id, action_type, detail) "
         "VALUES (:cid, :type, :detail)"));
@@ -562,7 +562,7 @@ void TelegramAccessManager::logActivity(qint64 chatId,
     q.exec();
 
     // Update last_active
-    QSqlQuery u(QSqlDatabase::database());
+    QSqlQuery u(DatabaseManager::instance().connection());
     u.prepare(QStringLiteral(
         "UPDATE telegram_users SET last_active = datetime('now') "
         "WHERE chat_id = :cid"));
@@ -570,7 +570,7 @@ void TelegramAccessManager::logActivity(qint64 chatId,
     u.exec();
 
     // Update session last_used timestamp
-    QSqlQuery s(QSqlDatabase::database());
+    QSqlQuery s(DatabaseManager::instance().connection());
     s.prepare(QStringLiteral(
         "UPDATE user_sessions SET last_used = datetime('now') "
         "WHERE chat_id = :cid AND status = 'active'"));
@@ -590,7 +590,7 @@ QString TelegramAccessManager::buildStatsReport() const
     report += QStringLiteral("📊 *Admin Stats Report*\n");
     report += QStringLiteral("━━━━━━━━━━━━━━━━━━━━━━\n\n");
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral(
         "SELECT u.chat_id, u.display_name, u.role, u.last_active, "
         "       COALESCE(a.cmd_count, 0) AS cmd_count, "

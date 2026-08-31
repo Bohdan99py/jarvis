@@ -4,6 +4,7 @@
 
 #include "jarvis_theme.h"
 
+#include <QCoreApplication>
 #include <QQmlEngine>
 #include <QSettings>
 
@@ -74,6 +75,21 @@ void JarvisTheme::registerQmlTypes()
     JarvisTheme::instance().m_reducedMotion =
         QSettings(QStringLiteral("Bohdan99py"), QStringLiteral("JARVIS"))
             .value(QStringLiteral("ui/reducedMotion"), false).toBool();
+}
+
+void JarvisTheme::prepareEngine(QQmlEngine* engine)
+{
+    if (!engine) return;
+
+    // Библиотека компонентов вкомпилирована в ресурсы: qmldir лежит
+    // по qrc:/qml/Jarvis/Controls/, то есть корень модульного пути —
+    // qrc:/qml. addImportPath() принимает qrc-url наравне с папкой.
+    engine->addImportPath(QStringLiteral("qrc:/qml"));
+
+    // Папка рядом с exe — для QML, который можно подменить без
+    // пересборки. Была во всех хостах и раньше; сохраняем.
+    engine->addImportPath(QCoreApplication::applicationDirPath()
+                          + QStringLiteral("/qml"));
 }
 
 // ============================================================

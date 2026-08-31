@@ -164,7 +164,11 @@ void ProactiveReminderManager::fireReminder(int index)
     if (m_gateway && r.chatId != 0)
         m_gateway->sendOutboundMessage(r.chatId, msg);
 
-    VoiceSynthesisManager::instance().say(r.spokenText);
+    // Напоминание — фоновая реплика: пропускает вперёд всё остальное и
+    // выбрасывается, если своей очереди так и не дождалось. Сказанное
+    // через десять минут «пора сделать перерыв» — уже не напоминание.
+    VoiceSynthesisManager::instance().say(
+        SpeechRequest::background(r.spokenText, SpeechSource::Notification));
 
     emit reminderFired(r.chatId, r.text);
 

@@ -15,6 +15,7 @@
 //   - Данные не сохраняются на диск (только оперативная память).
 // ============================================================
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QThread>
 #include <QTimer>
@@ -43,6 +44,12 @@ struct VoskModelInfo {
     QString checkFile;    // файл для проверки установки (relative to subdir)
     qint64  sizeBytes;    // приблизительный размер ZIP
     bool    recommended;  // выделить как рекомендованную
+
+    // Как папка называлась в предыдущих версиях. Переименование каталога
+    // молча «теряет» уже скачанную модель: файлы на диске есть, но по
+    // новому пути их нет, модель считается неустановленной, и язык
+    // просто перестаёт распознаваться — без единого сообщения.
+    QString legacySubdir;
 
     bool isInstalled(const QString& installDir) const;
     QString fullPath(const QString& installDir) const;
@@ -146,6 +153,12 @@ public:
     ~VoiceRecorder() override;
     bool start(const WhisperConfig& config);
     void stop();
+
+    // Отдать на распознавание то, что уже набрано, не дожидаясь тишины.
+    // Нужно для push-to-talk: там конец фразы отмечает не пауза, а
+    // отпущенная клавиша, и stop() без этого просто выбрасывал буфер.
+    void flushPending();
+
     bool isRecording() const { return m_recording.load(); }
 
 signals:
@@ -263,7 +276,17 @@ public:
 
     void initialize(const WhisperConfig& config = WhisperConfig{});
     void startListening();
-    void stopListening();
+
+    // Принять следующую фразу без активационного слова. Ставит
+    // push-to-talk: зажатая клавиша — это и есть обращение, и требовать
+    // сверх неё сказать «джарвис» бессмысленно.
+    void captureWithoutWakeWord();
+
+    // flushPending — отдать недоговорённое на распознавание вместо того,
+    // чтобы выбросить. Кнопка микрофона выключается «по тишине» и в этом
+    // не нуждается, push-to-talk — наоборот (см. PushToTalk).
+    void stopListening(bool flushPending = false);
+
     bool isListening() const;
     void setConfig(const WhisperConfig& config);
     const WhisperConfig& config() const { return m_config; }
@@ -345,5 +368,14 @@ private:
     bool m_initialized  = false;
     bool m_listening    = false;
     bool m_wakeWordMode = true;
+
+    bool          m_bypassWakeWord = false;   // следующая фраза — без «джарвис»
+    QElapsedTimer m_bypassSince;
+
     QString m_pendingDownloadModelId; // ID модели в процессе скачивания
+
+    // Сколько разрешение на фразу без активационного слова остаётся в
+    // силе. Распознавание приходит через секунду-две после отпускания
+    // клавиши; всё, что позже, — уже обычное фоновое слушание.
+    static constexpr int kBypassWindowMs = 15000;
 };

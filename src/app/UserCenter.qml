@@ -1,5 +1,7 @@
 import QtQuick
+import QtQuick.Layouts
 import Jarvis.Theme
+import Jarvis.Controls
 
 // ============================================================
 // UserCenter.qml — User Center dashboard.
@@ -19,7 +21,10 @@ Rectangle {
     readonly property color teal: Theme.accentMuted
 
 
-    property int currentTab: 0
+    // Единственный источник истины по вкладке — сам таб-бар: раньше
+    // currentTab и подсветка кнопки жили порознь и рассинхронизировались
+    // при любом другом способе смены вкладки.
+    readonly property int currentTab: tabs.currentIndex
     property bool addFormOpen: false
     property string selectedAddRole: "general"
 
@@ -39,10 +44,10 @@ Rectangle {
     ]
     readonly property var accentOptions: [Theme.accent, Theme.accentMuted, Theme.info, Theme.error, Theme.warning, Theme.success]
     readonly property var hoursOptions: [
-        { label: "9–18",  start: 9,  end: 18 },
-        { label: "10–19", start: 10, end: 19 },
-        { label: "12–21", start: 12, end: 21 },
-        { label: en ? "Flexible" : "Гибко", start: 0, end: 24 }
+        { value: "9-18",  label: "9–18",  start: 9,  end: 18 },
+        { value: "10-19", label: "10–19", start: 10, end: 19 },
+        { value: "12-21", label: "12–21", start: 12, end: 21 },
+        { value: "0-24",  label: en ? "Flexible" : "Гибко", start: 0, end: 24 }
     ]
 
     Column {
@@ -60,35 +65,9 @@ Rectangle {
         }
 
         // ---- Tab bar ----
-        Row {
-            width: parent.width
-            height: 34
-            spacing: 6
-
-            Repeater {
-                model: [en ? "Users" : "Пользователи", en ? "My Profile" : "Мой профиль"]
-                delegate: Rectangle {
-                    width: tabText.implicitWidth + 24
-                    height: 34
-                    radius: 8
-                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
-                    border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
-                    Text {
-                        id: tabText
-                        anchors.centerIn: parent
-                        text: modelData
-                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
-                        font.pixelSize: 12
-                        font.bold: root.currentTab === index
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.currentTab = index
-                    }
-                }
-            }
+        JarvisTabBar {
+            id: tabs
+            titles: [en ? "Users" : "Пользователи", en ? "My Profile" : "Мой профиль"]
         }
 
         Rectangle {
@@ -132,95 +111,84 @@ Rectangle {
                             id: userFlow
                             width: parent.width
                             spacing: 12
-
                             Repeater {
                                 model: users
-                                delegate: Rectangle {
+                                delegate: JarvisCard {
                                     width: 230
                                     height: 108
-                                    radius: 10
-                                    color: modelData.isCurrent ? Theme.accentSubtle : Theme.surface1
-                                    border.width: modelData.isCurrent ? 2 : 1
-                                    border.color: modelData.isCurrent ? root.cyan : Theme.accentSubtle
+                                    spine: false
+                                    active: modelData.isCurrent
+                                    contentSpacing: Theme.spaceXs
+                                    onClicked: userCenter.switchUser(modelData.id)
 
-                                    Rectangle {
-                                        visible: modelData.id !== 1
-                                        width: 22; height: 22; radius: 6
-                                        anchors.top: parent.top
-                                        anchors.right: parent.right
-                                        anchors.margins: 8
-                                        color: delArea.pressed ? Qt.alpha(Theme.error, 0.35) : Qt.alpha(Theme.error, 0.12)
-                                        Text { anchors.centerIn: parent; text: "✕"; color: Theme.error; font.pixelSize: 11 }
-                                        MouseArea {
-                                            id: delArea
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Theme.spaceXs
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.name
+                                            color: modelData.isCurrent ? root.cyan : Theme.onSurface
+                                            font.family: Type.family
+                                            font.pixelSize: Type.caption
+                                            font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                        }
+                                        // Первый пользователь — владелец, его не удаляют.
+                                        JarvisButton {
+                                            visible: modelData.id !== 1
+                                            glyph: "✕"
+                                            accessibleName: en ? "Delete user" : "Удалить пользователя"
+                                            variant: JarvisButton.Danger
                                             onClicked: userCenter.deleteUser(modelData.id)
                                         }
                                     }
 
-                                    Column {
-                                        x: 14; y: 12
-                                        width: parent.width - 28
-                                        spacing: 4
-                                        Text {
-                                            text: modelData.name
-                                            color: modelData.isCurrent ? root.cyan : Theme.onSurface
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                            width: parent.width
-                                        }
-                                        Text {
-                                            text: modelData.role + " · " + modelData.language
-                                            color: Theme.onSurfaceVariant
-                                            font.pixelSize: 11
-                                        }
-                                        Text {
-                                            visible: modelData.lastSeen.length > 0
-                                            text: (en ? "Last seen: " : "Был(а): ") + modelData.lastSeen
-                                            color: Theme.onSurfaceVariant
-                                            font.pixelSize: 9
-                                        }
-                                        Text {
-                                            visible: modelData.isCurrent
-                                            text: en ? "● ACTIVE" : "● АКТИВЕН"
-                                            color: root.cyan
-                                            font.pixelSize: 9
-                                            font.bold: true
-                                        }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.role + " · " + modelData.language
+                                        color: Theme.onSurfaceVariant
+                                        font.family: Type.family
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: modelData.lastSeen.length > 0
+                                        text: (en ? "Last seen: " : "Был(а): ") + modelData.lastSeen
+                                        color: Theme.onSurfaceDim
+                                        font.family: Type.family
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
                                     }
 
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        z: -1
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: userCenter.switchUser(modelData.id)
+                                    Item { Layout.fillHeight: true }
+
+                                    JarvisBadge {
+                                        visible: modelData.isCurrent
+                                        text: en ? "ACTIVE" : "АКТИВЕН"
+                                        dot: true
                                     }
                                 }
                             }
 
-                            Rectangle {
+                            JarvisCard {
                                 width: 230
                                 height: 108
-                                radius: 10
-                                color: addCardArea.pressed ? Theme.accentSubtle : "transparent"
-                                border.width: 1
-                                border.color: Theme.outlineStrong
+                                spine: false
+                                onClicked: root.addFormOpen = !root.addFormOpen
 
+                                Item { Layout.fillHeight: true }
                                 Text {
-                                    anchors.centerIn: parent
+                                    Layout.fillWidth: true
                                     text: en ? "+ Add User" : "+ Добавить"
                                     color: root.cyan
-                                    font.pixelSize: 13
-                                    font.bold: true
+                                    font.family: Type.family
+                                    font.pixelSize: Type.caption
+                                    font.weight: Font.DemiBold
+                                    horizontalAlignment: Text.AlignHCenter
                                 }
-                                MouseArea {
-                                    id: addCardArea
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.addFormOpen = !root.addFormOpen
-                                }
+                                Item { Layout.fillHeight: true }
                             }
                         }
 
@@ -249,87 +217,31 @@ Rectangle {
                                     font.bold: true
                                 }
 
-                                Rectangle {
+                                JarvisTextField {
+                                    id: nameInput
                                     width: Math.min(parent.width, 300)
-                                    height: 32
-                                    radius: 8
-                                    color: Theme.outline
-                                    border.width: 1
-                                    border.color: nameInput.activeFocus ? root.cyan : Theme.outlineStrong
-                                    TextInput {
-                                        id: nameInput
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
-                                        verticalAlignment: TextInput.AlignVCenter
-                                        color: Theme.onSurface
-                                        font.pixelSize: 12
-                                        clip: true
-                                        selectByMouse: true
-                                    }
-                                    Text {
-                                        text: en ? "Name..." : "Имя..."
-                                        visible: nameInput.text.length === 0 && !nameInput.activeFocus
-                                        color: Theme.onSurfaceDim
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        font.pixelSize: 12
-                                    }
+                                    placeholder: en ? "Name…" : "Имя…"
+                                    onAccepted: createBtn.clicked()
                                 }
 
-                                Flow {
+                                JarvisChipGroup {
                                     width: parent.width
-                                    spacing: 6
-                                    Repeater {
-                                        model: roleOptions
-                                        delegate: Rectangle {
-                                            radius: 7
-                                            height: 26
-                                            width: roleTxt.implicitWidth + 18
-                                            color: modelData.value === root.selectedAddRole
-                                                   ? Theme.outlineStrong : Theme.outline
-                                            border.width: 1
-                                            border.color: modelData.value === root.selectedAddRole
-                                                          ? root.cyan : Theme.outlineStrong
-                                            Text {
-                                                id: roleTxt
-                                                anchors.centerIn: parent
-                                                text: modelData.label
-                                                color: Theme.onSurface
-                                                font.pixelSize: 10
-                                            }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: root.selectedAddRole = modelData.value
-                                            }
-                                        }
-                                    }
+                                    options: root.roleOptions
+                                    value: root.selectedAddRole
+                                    onPicked: v => root.selectedAddRole = v
                                 }
 
-                                Rectangle {
-                                    width: 110; height: 30; radius: 7
-                                    color: createArea.pressed ? Theme.accentMuted : Theme.accentMuted
-                                    border.width: 1
-                                    border.color: Theme.accentMuted
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: en ? "Create" : "Создать"
-                                        color: Theme.onSurface
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                    }
-                                    MouseArea {
-                                        id: createArea
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (nameInput.text.trim().length === 0) return
-                                            userCenter.addUser(nameInput.text, root.selectedAddRole)
-                                            nameInput.text = ""
-                                            root.addFormOpen = false
-                                        }
+                                JarvisButton {
+                                    id: createBtn
+                                    text: en ? "Create" : "Создать"
+                                    variant: JarvisButton.Primary
+                                    enabled: nameInput.text.trim().length > 0
+                                    onClicked: {
+                                        if (nameInput.text.trim().length === 0)
+                                            return
+                                        userCenter.addUser(nameInput.text, root.selectedAddRole)
+                                        nameInput.clear()
+                                        root.addFormOpen = false
                                     }
                                 }
                             }
@@ -358,36 +270,41 @@ Rectangle {
                         width: parent.width
                         spacing: 14
 
-                        Row {
+                        // Раньше распорку задавала арифметика
+                        // parent.width - 400: правка любой подписи ломала
+                        // выравнивание кнопки.
+                        RowLayout {
                             width: parent.width
-                            Column {
+                            spacing: Theme.spaceMd
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
                                 spacing: 2
-                                Text { text: currentUserName; color: root.cyan; font.pixelSize: 18; font.bold: true }
+
                                 Text {
+                                    Layout.fillWidth: true
+                                    text: currentUserName
+                                    color: root.cyan
+                                    font.family: Type.family
+                                    font.pixelSize: Type.title
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    Layout.fillWidth: true
                                     text: currentUserRole + " · " + currentUserLanguage
                                           + (detectedRole.length > 0 ? " · " + (en ? "detected: " : "определено: ") + detectedRole : "")
                                     color: Theme.onSurfaceVariant
-                                    font.pixelSize: 11
+                                    font.family: Type.family
+                                    font.pixelSize: Type.caption
+                                    elide: Text.ElideRight
                                 }
                             }
-                            Item { width: parent.width - 400; height: 1 }
-                            Rectangle {
-                                width: 150; height: 30; radius: 7
-                                color: editArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                                border.width: 1
-                                border.color: Theme.outlineStrong
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: en ? "✏ Edit Full Profile" : "✏ Полный профиль"
-                                    color: root.cyan
-                                    font.pixelSize: 11
-                                }
-                                MouseArea {
-                                    id: editArea
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: userCenter.openEditProfile()
-                                }
+
+                            JarvisButton {
+                                glyph: "✏"
+                                text: en ? "Edit Full Profile" : "Полный профиль"
+                                onClicked: userCenter.openEditProfile()
                             }
                         }
 
@@ -398,53 +315,51 @@ Rectangle {
                         }
 
                         // ---- Activity + knowledge ----
-                        Row {
+                        RowLayout {
                             width: parent.width
-                            spacing: 12
-                            Rectangle {
-                                width: (parent.width - 12) / 2
-                                height: 120
-                                radius: 10
-                                color: Theme.surface1
-                                border.width: 1
-                                border.color: Theme.accentSubtle
-                                Column {
-                                    x: 12; y: 10
-                                    width: parent.width - 24
-                                    spacing: 4
-                                    Text { text: en ? "Recent activity (1h)" : "Активность (1ч)"; color: root.cyan; font.pixelSize: 11; font.bold: true }
-                                    Text {
-                                        width: parent.width
-                                        text: activitySummary.length > 0 ? activitySummary : (en ? "No data yet" : "Пока нет данных")
-                                        color: Theme.onSurfaceVariant
-                                        font.pixelSize: 10
-                                        wrapMode: Text.WordWrap
-                                        maximumLineCount: 6
-                                        elide: Text.ElideRight
-                                    }
+                            spacing: Theme.spaceMd
+
+                            JarvisPanel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 120
+                                compact: true
+                                title: en ? "Recent activity (1h)" : "Активность (1ч)"
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    text: activitySummary.length > 0 ? activitySummary
+                                                                     : (en ? "No data yet" : "Пока нет данных")
+                                    color: Theme.onSurface
+                                    font.family: Type.family
+                                    font.pixelSize: Type.caption
+                                    lineHeight: Type.lineHeightBody
+                                    lineHeightMode: Text.ProportionalHeight
+                                    wrapMode: Text.WordWrap
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignTop
                                 }
                             }
-                            Rectangle {
-                                width: (parent.width - 12) / 2
-                                height: 120
-                                radius: 10
-                                color: Theme.surface1
-                                border.width: 1
-                                border.color: Theme.accentSubtle
-                                Column {
-                                    x: 12; y: 10
-                                    width: parent.width - 24
-                                    spacing: 4
-                                    Text { text: en ? "Knowledge base" : "База знаний"; color: root.cyan; font.pixelSize: 11; font.bold: true }
-                                    Text {
-                                        width: parent.width
-                                        text: knowledgeSummary.length > 0 ? knowledgeSummary : (en ? "No data yet" : "Пока нет данных")
-                                        color: Theme.onSurfaceVariant
-                                        font.pixelSize: 10
-                                        wrapMode: Text.WordWrap
-                                        maximumLineCount: 6
-                                        elide: Text.ElideRight
-                                    }
+
+                            JarvisPanel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 120
+                                compact: true
+                                title: en ? "Knowledge base" : "База знаний"
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    text: knowledgeSummary.length > 0 ? knowledgeSummary
+                                                                      : (en ? "No data yet" : "Пока нет данных")
+                                    color: Theme.onSurface
+                                    font.family: Type.family
+                                    font.pixelSize: Type.caption
+                                    lineHeight: Type.lineHeightBody
+                                    lineHeightMode: Text.ProportionalHeight
+                                    wrapMode: Text.WordWrap
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignTop
                                 }
                             }
                         }
@@ -462,27 +377,13 @@ Rectangle {
                             width: parent.width
                             spacing: 4
                             Text { text: en ? "Nickname" : "Никнейм"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            Rectangle {
+                            JarvisTextField {
+                                id: nickInput
                                 width: Math.min(parent.width, 300)
-                                height: 32
-                                radius: 8
-                                color: Theme.outline
-                                border.width: 1
-                                border.color: nickInput.activeFocus ? root.cyan : Theme.outlineStrong
-                                TextInput {
-                                    id: nickInput
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    color: Theme.onSurface
-                                    font.pixelSize: 12
-                                    clip: true
-                                    selectByMouse: true
-                                    text: nickname
-                                    onAccepted: userCenter.setNickname(text)
-                                    onActiveFocusChanged: if (!activeFocus) userCenter.setNickname(text)
-                                }
+                                text: nickname
+                                placeholder: en ? "Nickname…" : "Никнейм…"
+                                onAccepted: userCenter.setNickname(text)
+                                onActiveFocusChanged: if (!activeFocus) userCenter.setNickname(text)
                             }
                         }
 
@@ -491,26 +392,11 @@ Rectangle {
                             width: parent.width
                             spacing: 4
                             Text { text: en ? "Dev style" : "Стиль разработки"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            Flow {
+                            JarvisChipGroup {
                                 width: parent.width
-                                spacing: 6
-                                Repeater {
-                                    model: devStyleOptions
-                                    delegate: Rectangle {
-                                        radius: 7
-                                        height: 26
-                                        width: devTxt.implicitWidth + 18
-                                        color: modelData.value === devStyle ? Theme.outlineStrong : Theme.outline
-                                        border.width: 1
-                                        border.color: modelData.value === devStyle ? root.cyan : Theme.outlineStrong
-                                        Text { id: devTxt; anchors.centerIn: parent; text: modelData.label; color: Theme.onSurface; font.pixelSize: 10 }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: userCenter.setDevStyle(modelData.value)
-                                        }
-                                    }
-                                }
+                                options: root.devStyleOptions
+                                value: devStyle
+                                onPicked: v => userCenter.setDevStyle(v)
                             }
                         }
 
@@ -543,26 +429,15 @@ Rectangle {
                             width: parent.width
                             spacing: 4
                             Text { text: en ? "Active hours" : "Рабочие часы"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            Flow {
+                            JarvisChipGroup {
                                 width: parent.width
-                                spacing: 6
-                                Repeater {
-                                    model: hoursOptions
-                                    delegate: Rectangle {
-                                        radius: 7
-                                        height: 26
-                                        width: hrsTxt.implicitWidth + 18
-                                        property bool active: modelData.start === activeStart && modelData.end === activeEnd
-                                        color: active ? Theme.outlineStrong : Theme.outline
-                                        border.width: 1
-                                        border.color: active ? root.cyan : Theme.outlineStrong
-                                        Text { id: hrsTxt; anchors.centerIn: parent; text: modelData.label; color: Theme.onSurface; font.pixelSize: 10 }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: userCenter.setActiveHours(modelData.start, modelData.end)
-                                        }
-                                    }
+                                options: root.hoursOptions
+                                // Ключ — строка "start-end": сравнивать
+                                // объекты по === бесполезно.
+                                value: activeStart + "-" + activeEnd
+                                onPicked: v => {
+                                    const o = root.hoursOptions.find(x => x.value === v)
+                                    if (o) userCenter.setActiveHours(o.start, o.end)
                                 }
                             }
                         }
@@ -572,28 +447,14 @@ Rectangle {
                             width: parent.width
                             spacing: 4
                             Text { text: en ? "Mesh role" : "Роль в меше"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            Row {
-                                spacing: 6
-                                Repeater {
-                                    model: [
-                                        { value: "primary",   label: en ? "Primary"   : "Основной" },
-                                        { value: "secondary", label: en ? "Secondary" : "Дополнительный" }
-                                    ]
-                                    delegate: Rectangle {
-                                        radius: 7
-                                        height: 26
-                                        width: meshTxt.implicitWidth + 18
-                                        color: modelData.value === meshRole ? Theme.outlineStrong : Theme.outline
-                                        border.width: 1
-                                        border.color: modelData.value === meshRole ? root.cyan : Theme.outlineStrong
-                                        Text { id: meshTxt; anchors.centerIn: parent; text: modelData.label; color: Theme.onSurface; font.pixelSize: 10 }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: userCenter.setMeshRole(modelData.value)
-                                        }
-                                    }
-                                }
+                            JarvisChipGroup {
+                                width: parent.width
+                                options: [
+                                    { value: "primary",   label: en ? "Primary"   : "Основной" },
+                                    { value: "secondary", label: en ? "Secondary" : "Дополнительный" }
+                                ]
+                                value: meshRole
+                                onPicked: v => userCenter.setMeshRole(v)
                             }
                         }
 

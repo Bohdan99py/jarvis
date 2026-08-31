@@ -1,0 +1,7 @@
+{
+    "name": "example_plugin",
+    "displayName": "Пример: хеши",
+    "version": "1.0.0",
+    "apiVersion": 2,
+    "description": "Рабочий пример плагина: регистрирует инструмент hash_text (MD5/SHA-1/SHA-256 строки или файла)"
+}

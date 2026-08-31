@@ -26,10 +26,13 @@ struct JarvisResponse
     {
         JarvisResponse r;
 
-        // Try to extract [SPEECH: ...] tag from the first line
+        // Try to extract [SPEECH: ...] tag from the first line.
+        // Без DotMatchesEverything: маркер занимает ровно одну строку, а с
+        // ним «.» перескакивала перевод строки, и при отсутствующей
+        // закрывающей скобке в реплику уходил кусок ответа до первой ']'
+        // где-нибудь в ссылке или коде.
         static const QRegularExpression re(
-            QStringLiteral(R"(^\[SPEECH:\s*(.+?)\]\s*\n?)"),
-            QRegularExpression::DotMatchesEverythingOption);
+            QStringLiteral(R"(^\[SPEECH:\s*([^\]\n]+)\]\s*\n?)"));
 
         const QRegularExpressionMatch m = re.match(rawResponse);
         if (m.hasMatch()) {

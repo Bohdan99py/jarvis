@@ -86,7 +86,7 @@ private:
     struct GoalEntry {
         QString     goalId;
         QString     goalLabel;
-        QStringList triggerPhrases;  // lowercase, checked via contains()
+        QStringList triggerPhrases;  // lowercase, matched as whole words
         QVector<IntentAction> actions;
     };
 

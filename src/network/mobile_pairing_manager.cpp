@@ -42,7 +42,7 @@ MobilePairingManager::MobilePairingManager(const QString& instanceId,
     // Ensure the paired_devices table exists
     {
         QMutexLocker lock(&m_mutex);
-        QSqlQuery q(QSqlDatabase::database());
+        QSqlQuery q(DatabaseManager::instance().connection());
         q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS paired_devices ("
             "  device_id      TEXT PRIMARY KEY,"
@@ -332,7 +332,7 @@ bool MobilePairingManager::tryPairViaTelegram(const QString& pin,
 void MobilePairingManager::persistPairedDevice(const MobilePairedDevice& device)
 {
     QMutexLocker lock(&m_mutex);
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO paired_devices "
         "(device_id, display_name, mobile_handle, bound_role, platform, paired_at, last_seen, active) "
@@ -355,7 +355,7 @@ void MobilePairingManager::loadPairedDevices()
     QMutexLocker lock(&m_mutex);
     m_pairedDevices.clear();
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.exec(QStringLiteral("SELECT * FROM paired_devices WHERE active = 1 ORDER BY paired_at DESC"));
 
     while (q.next()) {
@@ -382,7 +382,7 @@ bool MobilePairingManager::removePairedDevice(const QString& deviceId)
 {
     QMutexLocker lock(&m_mutex);
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral("UPDATE paired_devices SET active = 0 WHERE device_id = :id"));
     q.bindValue(QStringLiteral(":id"), deviceId);
     if (!q.exec()) return false;

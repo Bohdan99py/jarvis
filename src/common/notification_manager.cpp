@@ -5,6 +5,8 @@
 #include "notification_manager.h"
 #include "lang.h"
 
+#include "jarvis_theme.h"
+
 #include <QApplication>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -68,8 +70,7 @@ NotificationToast::NotificationToast(const QString& title, const QString& messag
     // windeployqt drops QML plugin dependencies (QtQuick, QtQuick.Effects)
     // into bin/qml/ next to the exe — that path isn't part of the engine's
     // default import search, so it has to be added explicitly.
-    engine()->addImportPath(QCoreApplication::applicationDirPath()
-                            + QStringLiteral("/qml"));
+    JarvisTheme::prepareEngine(engine());
 
     QQmlContext* ctx = rootContext();
     ctx->setContextProperty(QStringLiteral("toastTitle"), title);
@@ -186,9 +187,39 @@ NotificationManager& NotificationManager::instance()
     return mgr;
 }
 
+QString NotificationManager::policyName(Policy p)
+{
+    switch (p) {
+    case Policy::All:     return QStringLiteral("all");
+    case Policy::Minimal: return QStringLiteral("minimal");
+    case Policy::None:    return QStringLiteral("none");
+    }
+    return QStringLiteral("all");
+}
+
+NotificationManager::Policy NotificationManager::policyFromString(const QString& name,
+                                                                 Policy fallback)
+{
+    const QString n = name.trimmed().toLower();
+    if (n == QLatin1String("all"))     return Policy::All;
+    if (n == QLatin1String("minimal")) return Policy::Minimal;
+    if (n == QLatin1String("none") || n == QLatin1String("off")
+        || n == QLatin1String("mute"))  return Policy::None;
+    return fallback;
+}
+
 void NotificationManager::showNotification(const QString& title, const QString& message,
                                            Level level)
 {
+    // Фильтр стоит здесь, а не у вызывающих: точек показа уведомлений
+    // по коду десятки, и договориться, что каждая сама проверит режим,
+    // не выйдет — забудут в первой же новой.
+    if (m_policy == Policy::None)
+        return;
+    if (m_policy == Policy::Minimal
+        && level != Level::Warning && level != Level::Error)
+        return;
+
     spawnToast(title, message, level, {}, false, nullptr);
 }
 
@@ -196,6 +227,11 @@ void NotificationManager::askQuestion(const QString& title, const QString& quest
                                       std::function<void(const QString&)> onAnswer,
                                       const QStringList& quickOptions)
 {
+    // Вопрос глушится только полной тишиной: в Minimal он всё ещё
+    // уместен — от него ждут ответа, это не фоновая новость.
+    if (m_policy == Policy::None)
+        return;
+
     spawnToast(title, question, Level::Question, quickOptions, true, std::move(onAnswer));
 }
 

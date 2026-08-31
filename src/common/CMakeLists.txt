@@ -4,7 +4,16 @@
 add_library(jarvis_common OBJECT
     jarvis_core_export.h
     jarvis_paths.h
+    # Журнал правок лежит здесь, а не в intelligence: в него пишут все
+    # три слоя — чат (code_actions), советник и реестр инструментов.
+    edit_journal.h
+    edit_journal.cpp
     jarvis_response.h
+    # Фаза («что JARVIS делает прямо сейчас») лежит в common по той же
+    # причине, что и журнал правок: её выставляет агент, а читают QML,
+    # лента и уведомления — то есть слои по обе стороны от неё.
+    jarvis_state.h
+    jarvis_state.cpp
     lang.h
     theme.h
     theme_manager.h
@@ -18,6 +27,8 @@ add_library(jarvis_common OBJECT
     systemcontroller.h
     layout_fixer.h
     layout_fixer.cpp
+    dialog_cues.h
+    dialog_cues.cpp
     mermaid_renderer.h
     mermaid_renderer.cpp
     kicad_symbol_cache.h
@@ -45,4 +56,6 @@ target_link_libraries(jarvis_common PUBLIC
     Qt6::Quick
     Qt6::QuickWidgets
     Qt6::QuickEffects
+    Qt6::QuickControls2
+    Qt6::QuickShapes
 )

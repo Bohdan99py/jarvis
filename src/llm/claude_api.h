@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QString>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <functional>
 
 #include "jarvis_core_export.h"
@@ -30,6 +31,23 @@ public:
     using ResponseCallback = std::function<void(bool success, const QString& response)>;
     void sendMessage(const QString& userMessage, ResponseCallback callback);
 
+    // ---- Tool use (агентный цикл) ---------------------------
+    // sendMessage() ведёт историю через SessionMemory и отдаёт только
+    // текст. Для цикла "модель просит инструмент -> мы возвращаем
+    // результат -> модель продолжает" этого мало: assistant-блоки с
+    // tool_use должны сохраняться ДОСЛОВНО, включая id вызовов.
+    // Поэтому массив messages здесь принадлежит вызывающему (AgentLoop),
+    // а ответ отдаётся сырым JSON-объектом.
+    //
+    // systemPrompt пустой => берётся SessionMemory::buildSystemPrompt().
+    using RawCallback = std::function<void(bool success,
+                                           const QJsonObject& response,
+                                           const QString& error)>;
+    void sendConversation(const QJsonArray& messages,
+                          const QJsonArray& tools,
+                          const QString& systemPrompt,
+                          RawCallback callback);
+
     bool shouldUseApi(const QString& input) const;
     bool isRequesting() const { return m_requesting; }
 
@@ -49,6 +67,10 @@ signals:
 
 private:
     void handleReply(QNetworkReply* reply, ResponseCallback callback);
+    void handleRawReply(QNetworkReply* reply, RawCallback callback);
+
+    // Общий разбор HTTP-ошибки для обоих путей (текстового и агентного)
+    QString describeHttpError(QNetworkReply* reply, const QByteArray& body) const;
 
     QNetworkAccessManager* m_network = nullptr;
     SessionMemory* m_memory = nullptr;

@@ -3,8 +3,10 @@
 // -------------------------------------------------------
 
 #include "code_actions.h"
+#include "edit_journal.h"
 #include "jarvis_paths.h"
 #include "kicad_schematic_builder.h"
+#include "artifact_registry.h"
 #include "applauncher.h"
 // applauncher.h drags in <windows.h>/<shellapi.h> without WIN32_LEAN_AND_MEAN,
 // which #defines CreateFile/DeleteFile to CreateFileW/DeleteFileW — colliding
@@ -22,6 +24,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QProcess>
+#include <QImage>
 #include <QDebug>
 
 CodeActions::CodeActions(QObject* parent)
@@ -147,6 +150,92 @@ QVector<CodeAction> CodeActions::parseResponse(const QString& response) const
         }
     }
 
+    // 7. [MOVE:src -> dst] и [COPY:src -> dst]
+    {
+        static const QRegularExpression reMoveCopy(
+            QStringLiteral(R"(\[(MOVE|COPY):([^\]]+?)\s*->\s*([^\]]+?)\])"));
+
+        auto it = reMoveCopy.globalMatch(response);
+        while (it.hasNext()) {
+            auto match = it.next();
+            CodeAction a;
+            const bool move = match.captured(1) == QStringLiteral("MOVE");
+            a.type       = move ? CodeAction::MoveEntry : CodeAction::CopyEntry;
+            a.filePath   = match.captured(2).trimmed();
+            a.targetPath = match.captured(3).trimmed();
+            a.description = (move ? QStringLiteral("Переместить: ")
+                                  : QStringLiteral("Скопировать: "))
+                          + a.filePath + QStringLiteral(" -> ") + a.targetPath;
+            actions.append(a);
+        }
+    }
+
+    // 8. [APPEND:path]...[/APPEND]
+    {
+        static const QRegularExpression reAppend(
+            QStringLiteral(R"(\[APPEND:(.+?)\]\s*\n([\s\S]*?)\[/APPEND\])"),
+            QRegularExpression::MultilineOption);
+
+        auto it = reAppend.globalMatch(response);
+        while (it.hasNext()) {
+            auto match = it.next();
+            CodeAction a;
+            a.type     = CodeAction::AppendFile;
+            a.filePath = match.captured(1).trimmed();
+            a.content  = match.captured(2);
+            while (a.content.startsWith(QChar('\n'))) a.content = a.content.mid(1);
+            while (a.content.endsWith(QChar('\n')))   a.content.chop(1);
+            a.content += QChar('\n');
+            a.description = QStringLiteral("Дописать в файл: ") + a.filePath;
+            actions.append(a);
+        }
+    }
+
+    // 9. [ASSET:resize|convert src -> dst [WxH]]
+    {
+        static const QRegularExpression reAsset(
+            QStringLiteral(R"(\[ASSET:\s*(resize|convert)\s+([^\]]+?)\s*->\s*([^\]\s]+)(?:\s+(\d{1,5}x\d{1,5}))?\s*\])"),
+            QRegularExpression::CaseInsensitiveOption);
+
+        auto it = reAsset.globalMatch(response);
+        while (it.hasNext()) {
+            auto match = it.next();
+            CodeAction a;
+            a.type          = CodeAction::AssetOp;
+            a.option        = match.captured(1).toLower();
+            a.filePath      = match.captured(2).trimmed();
+            a.targetPath    = match.captured(3).trimmed();
+            a.assetGeometry = match.captured(4).toLower();
+            a.description   = QStringLiteral("Ассет (") + a.option
+                            + QStringLiteral("): ") + a.filePath
+                            + QStringLiteral(" -> ") + a.targetPath;
+            actions.append(a);
+        }
+    }
+
+    // 10. [QRC:add|remove file -> res.qrc [as alias]]
+    {
+        static const QRegularExpression reQrc(
+            QStringLiteral(R"(\[QRC:\s*(add|remove)\s+([^\]]+?)\s*->\s*([^\]\s]+?)(?:\s+as\s+([^\]\s]+))?\s*\])"),
+            QRegularExpression::CaseInsensitiveOption);
+
+        auto it = reQrc.globalMatch(response);
+        while (it.hasNext()) {
+            auto match = it.next();
+            CodeAction a;
+            a.type = match.captured(1).toLower() == QStringLiteral("add")
+                         ? CodeAction::QrcAdd : CodeAction::QrcRemove;
+            a.filePath   = match.captured(2).trimmed();
+            a.targetPath = match.captured(3).trimmed();
+            a.option     = match.captured(4).trimmed();   // alias
+            a.description = (a.type == CodeAction::QrcAdd
+                                 ? QStringLiteral("Ресурс в .qrc: ")
+                                 : QStringLiteral("Убрать ресурс из .qrc: "))
+                          + a.filePath;
+            actions.append(a);
+        }
+    }
+
     return actions;
 }
 
@@ -162,6 +251,12 @@ CodeAction CodeActions::executeAction(CodeAction action) const
     case CodeAction::MakeDir:        return doMakeDir(action);
     case CodeAction::DeleteFile:     return doDeleteFile(action);
     case CodeAction::KiCadSchematic: return doCreateKiCadSchematic(action);
+    case CodeAction::MoveEntry:       return doMoveFile(action);
+    case CodeAction::CopyEntry:       return doCopyFile(action);
+    case CodeAction::AppendFile:     return doAppendFile(action);
+    case CodeAction::AssetOp:        return doAssetOp(action);
+    case CodeAction::QrcAdd:
+    case CodeAction::QrcRemove:      return doQrcEdit(action);
     case CodeAction::SystemCmd:
         // Системные команды выполняются через Jarvis::processCommand
         action.success = true;
@@ -178,6 +273,11 @@ QString CodeActions::processResponse(const QString& response)
 {
     auto actions = parseResponse(response);
     if (actions.isEmpty()) return QString();
+
+    // Один ответ модели — один батч журнала: «отмени правки» возвращает
+    // всё изменение целиком, а не половину рефакторинга.
+    EditJournal::instance().beginBatch(
+        QStringLiteral("ответ ассистента"));
 
     QString report;
     int success = 0;
@@ -209,6 +309,22 @@ QString CodeActions::processResponse(const QString& response)
             case CodeAction::KiCadSchematic:
                 emit kicadSchematicCreated(action.filePath);
                 break;
+            case CodeAction::MoveEntry:
+                emit fileMoved(action.filePath, action.targetPath);
+                break;
+            case CodeAction::CopyEntry:
+                emit fileCreated(action.targetPath);
+                break;
+            case CodeAction::AppendFile:
+                emit fileModified(action.filePath);
+                break;
+            case CodeAction::AssetOp:
+                emit assetProcessed(action.targetPath);
+                break;
+            case CodeAction::QrcAdd:
+            case CodeAction::QrcRemove:
+                emit fileModified(action.targetPath);
+                break;
             default:
                 break;
             }
@@ -219,6 +335,8 @@ QString CodeActions::processResponse(const QString& response)
             emit actionError(action.filePath, action.resultMessage);
         }
     }
+
+    EditJournal::instance().endBatch();
 
     if (success == 0 && failed == 0) return QString();
 
@@ -294,9 +412,15 @@ QString CodeActions::cleanResponseForDisplay(const QString& response) const
         QRegularExpression::MultilineOption);
     clean.replace(reDiff, QString());
 
-    // Убираем [MKDIR:...], [DELETE:...], [CMD:...]
+    // Убираем [APPEND:...]...[/APPEND] блоки
+    static const QRegularExpression reAppendBlock(
+        QStringLiteral(R"(\[APPEND:.+?\][\s\S]*?\[/APPEND\])"),
+        QRegularExpression::MultilineOption);
+    clean.replace(reAppendBlock, QString());
+
+    // Убираем однострочные действия
     static const QRegularExpression reSingle(
-        QStringLiteral(R"(\[(MKDIR|DELETE|CMD):.+?\])"));
+        QStringLiteral(R"(\[(MKDIR|DELETE|CMD|NEED|MOVE|COPY|ASSET|QRC):.+?\])"));
     clean.replace(reSingle, QString());
 
     // Убираем [KICAD_SCH:...]...[/KICAD_SCH] блоки
@@ -321,9 +445,20 @@ CodeAction CodeActions::doCreateFile(CodeAction action) const
 {
     QString path = fullPath(action.filePath);
 
+    if (!pathAllowed(path)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — запись отклонена");
+        return action;
+    }
+
     // Создаём директории
     QFileInfo fi(path);
     QDir().mkpath(fi.absolutePath());
+
+    // Журнал снимает копию прежнего содержимого ДО записи: [FILE:] по
+    // существующему пути — это перезапись, и откатывать её нечем, если
+    // старое содержимое не сохранено.
+    EditJournal::instance().recordCreate(path);
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -347,6 +482,12 @@ CodeAction CodeActions::doCreateFile(CodeAction action) const
 CodeAction CodeActions::doDiffReplace(CodeAction action) const
 {
     QString path = fullPath(action.filePath);
+
+    if (!pathAllowed(path)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — правка отклонена");
+        return action;
+    }
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -382,6 +523,8 @@ CodeAction CodeActions::doDiffReplace(CodeAction action) const
     // Заменяем
     content.replace(pos, action.findText.length(), action.replaceText);
 
+    EditJournal::instance().recordModify(path);
+
     // Сохраняем
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         action.success = false;
@@ -403,6 +546,12 @@ CodeAction CodeActions::doMakeDir(CodeAction action) const
 {
     QString path = fullPath(action.filePath);
 
+    if (!pathAllowed(path)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — папка не создана");
+        return action;
+    }
+
     if (QDir().mkpath(path)) {
         action.success = true;
         action.resultMessage = QStringLiteral("Папка создана");
@@ -417,6 +566,12 @@ CodeAction CodeActions::doDeleteFile(CodeAction action) const
 {
     QString path = fullPath(action.filePath);
 
+    if (!pathAllowed(path)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — удаление отклонено");
+        return action;
+    }
+
     QFileInfo fi(path);
     if (!fi.exists()) {
         action.success = false;
@@ -425,10 +580,17 @@ CodeAction CodeActions::doDeleteFile(CodeAction action) const
     }
 
     if (fi.isDir()) {
+        // Копию целой папки журнал снять не может — предупреждаем честно,
+        // чтобы «отмени правки» не выглядел обещанием, которого нет.
         action.success = QDir(path).removeRecursively();
-    } else {
-        action.success = QFile::remove(path);
+        action.resultMessage = action.success
+            ? QStringLiteral("Папка удалена (откату не подлежит)")
+            : QStringLiteral("Не удалось удалить папку");
+        return action;
     }
+
+    EditJournal::instance().recordDelete(path);
+    action.success = QFile::remove(path);
 
     action.resultMessage = action.success
         ? QStringLiteral("Удалено")
@@ -511,6 +673,13 @@ CodeAction CodeActions::doCreateKiCadSchematic(CodeAction action) const
 
     action.success = true;
     action.resultMessage = QStringLiteral("Схема KiCad создана: ") + action.filePath;
+
+    // Регистрируем как артефакт. Без этого путь к схеме жил одним
+    // сообщением в чате: через десяток реплик вернуться к ней можно было
+    // только вспомнив имя файла.
+    ArtifactRegistry::instance().record(
+        path, QString::fromLatin1(ArtifactRegistry::kSchematic),
+        fi.fileName());
     // From here on, filePath carries the resolved absolute path — the
     // relative form above was only needed for the user-facing message.
     // kicadSchematicCreated() (emitted by the caller) needs the absolute
@@ -573,4 +742,268 @@ QString CodeActions::fullPath(const QString& relativePath) const
     // где запись запрещена ("Отказано в доступе"). Пишем в видимую
     // пользователю папку Documents/Jarvis Data/workspace.
     return JarvisPaths::subPath(QStringLiteral("workspace/") + relativePath);
+}
+
+// ============================================================
+// Слой B: перемещение, копирование, дописывание, ассеты, .qrc
+// ============================================================
+
+bool CodeActions::pathAllowed(const QString& absPath) const
+{
+    const QString clean = QDir::cleanPath(QFileInfo(absPath).absoluteFilePath());
+
+    QStringList roots;
+    if (!m_projectRoot.isEmpty())
+        roots << QDir::cleanPath(QDir(m_projectRoot).absolutePath());
+    roots << QDir::cleanPath(JarvisPaths::dataRoot());
+
+    for (const QString& root : roots) {
+        if (root.isEmpty()) continue;
+        if (clean.compare(root, Qt::CaseInsensitive) == 0) return true;
+        if (clean.startsWith(root + QChar('/'), Qt::CaseInsensitive)) return true;
+    }
+    return false;
+}
+
+CodeAction CodeActions::doMoveFile(CodeAction action) const
+{
+    const QString from = fullPath(action.filePath);
+    const QString to   = fullPath(action.targetPath);
+
+    if (!pathAllowed(from) || !pathAllowed(to)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — перемещение отклонено");
+        return action;
+    }
+
+    const QFileInfo srcInfo(from);
+    if (!srcInfo.exists()) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Исходный файл не найден: ") + action.filePath;
+        return action;
+    }
+
+    QDir().mkpath(QFileInfo(to).absolutePath());
+
+    EditJournal::instance().recordMove(from, to);
+
+    // Целевой файл журнал уже скопировал в бэкап — перезапись безопасна.
+    if (QFile::exists(to) && !srcInfo.isDir()) QFile::remove(to);
+
+    action.success = srcInfo.isDir() ? QDir().rename(from, to)
+                                     : QFile::rename(from, to);
+    action.resultMessage = action.success
+        ? QStringLiteral("Перемещено: ") + action.filePath
+              + QStringLiteral(" -> ") + action.targetPath
+        : QStringLiteral("Не удалось переместить ") + action.filePath;
+    return action;
+}
+
+CodeAction CodeActions::doCopyFile(CodeAction action) const
+{
+    const QString from = fullPath(action.filePath);
+    const QString to   = fullPath(action.targetPath);
+
+    if (!pathAllowed(from) || !pathAllowed(to)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — копирование отклонено");
+        return action;
+    }
+
+    if (!QFileInfo::exists(from)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Исходный файл не найден: ") + action.filePath;
+        return action;
+    }
+
+    QDir().mkpath(QFileInfo(to).absolutePath());
+    EditJournal::instance().recordCreate(to);
+
+    if (QFile::exists(to)) QFile::remove(to);
+
+    action.success = QFile::copy(from, to);
+    action.resultMessage = action.success
+        ? QStringLiteral("Скопировано: ") + action.targetPath
+        : QStringLiteral("Не удалось скопировать ") + action.filePath;
+    return action;
+}
+
+CodeAction CodeActions::doAppendFile(CodeAction action) const
+{
+    const QString path = fullPath(action.filePath);
+
+    if (!pathAllowed(path)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — дозапись отклонена");
+        return action;
+    }
+
+    QDir().mkpath(QFileInfo(path).absolutePath());
+
+    const bool existed = QFile::exists(path);
+    if (existed) EditJournal::instance().recordModify(path);
+    else         EditJournal::instance().recordCreate(path);
+
+    // Дописываем с новой строки: без этого добавленный блок склеивается
+    // с последней строкой файла и ломает и код, и разметку.
+    QString prefix;
+    if (existed) {
+        QFile probe(path);
+        if (probe.open(QIODevice::ReadOnly)) {
+            const QByteArray tail = probe.readAll();
+            probe.close();
+            if (!tail.isEmpty() && !tail.endsWith('\n')) prefix = QStringLiteral("\n");
+        }
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::Append | QIODevice::Text)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Не удалось открыть файл: ") + file.errorString();
+        return action;
+    }
+
+    QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);
+    out << prefix << action.content;
+    file.close();
+
+    action.success = true;
+    action.resultMessage = QStringLiteral("Дописано в ") + action.filePath
+                         + QStringLiteral(" (") + QString::number(action.content.size())
+                         + QStringLiteral(" байт)");
+    return action;
+}
+
+CodeAction CodeActions::doAssetOp(CodeAction action) const
+{
+    const QString src = fullPath(action.filePath);
+    const QString dst = fullPath(action.targetPath);
+
+    if (!pathAllowed(src) || !pathAllowed(dst)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — операция отклонена");
+        return action;
+    }
+
+    QImage image(src);
+    if (image.isNull()) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Не удалось прочитать изображение: ")
+                             + action.filePath;
+        return action;
+    }
+
+    if (action.option == QStringLiteral("resize")) {
+        static const QRegularExpression reSize(
+            QStringLiteral(R"(^(\d{1,5})x(\d{1,5})$)"));
+        const auto m = reSize.match(action.assetGeometry);
+        if (!m.hasMatch()) {
+            action.success = false;
+            action.resultMessage = QStringLiteral("Нужен размер вида 128x128");
+            return action;
+        }
+        // KeepAspectRatio: растянутая иконка — почти всегда ошибка, а не
+        // намерение; если нужен точный размер, модель даст те же пропорции.
+        image = image.scaled(m.captured(1).toInt(), m.captured(2).toInt(),
+                             Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    QDir().mkpath(QFileInfo(dst).absolutePath());
+    EditJournal::instance().recordCreate(dst);
+
+    if (!image.save(dst)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Qt не умеет сохранять в формат ")
+                             + QFileInfo(dst).suffix().toUpper();
+        return action;
+    }
+
+    action.success = true;
+    action.resultMessage = QStringLiteral("Ассет готов: ") + action.targetPath
+                         + QStringLiteral(" (") + QString::number(image.width())
+                         + QChar('x') + QString::number(image.height())
+                         + QStringLiteral(")");
+    return action;
+}
+
+CodeAction CodeActions::doQrcEdit(CodeAction action) const
+{
+    const QString qrcPath = fullPath(action.targetPath);
+    const QString resPath = fullPath(action.filePath);
+
+    if (!pathAllowed(qrcPath) || !pathAllowed(resPath)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Путь вне проекта — правка .qrc отклонена");
+        return action;
+    }
+
+    QFile qrc(qrcPath);
+    if (!qrc.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Файл ресурсов не найден: ") + action.targetPath;
+        return action;
+    }
+    QString text = QString::fromUtf8(qrc.readAll());
+    qrc.close();
+
+    // В .qrc путь всегда относительный ОТ САМОГО .qrc, а не от корня
+    // проекта — это самая частая ошибка при ручной правке.
+    const QString relative =
+        QDir(QFileInfo(qrcPath).absolutePath()).relativeFilePath(resPath);
+
+    if (action.type == CodeAction::QrcRemove) {
+        const QString pattern =
+            QStringLiteral(R"(^[ \t]*<file[^>]*>\s*)")
+            + QRegularExpression::escape(relative)
+            + QStringLiteral(R"(\s*</file>[ \t]*\r?\n?)");
+        const QRegularExpression re(pattern, QRegularExpression::MultilineOption);
+
+        const QString before = text;
+        text.remove(re);
+        if (text == before) {
+            action.success = false;
+            action.resultMessage = QStringLiteral("В ") + action.targetPath
+                                 + QStringLiteral(" нет записи ") + relative;
+            return action;
+        }
+    } else {
+        if (text.contains(QStringLiteral(">") + relative + QStringLiteral("<"))) {
+            action.success = true;
+            action.resultMessage = QStringLiteral("Уже есть в ") + action.targetPath;
+            return action;
+        }
+
+        const int closeIdx = text.indexOf(QStringLiteral("</qresource>"));
+        if (closeIdx < 0) {
+            action.success = false;
+            action.resultMessage = QStringLiteral("В файле нет блока <qresource> — ")
+                                 + QStringLiteral("похоже, это не .qrc");
+            return action;
+        }
+
+        QString entry = QStringLiteral("    <file");
+        if (!action.option.isEmpty())
+            entry += QStringLiteral(" alias=\"") + action.option + QChar('"');
+        entry += QChar('>') + relative + QStringLiteral("</file>\n");
+
+        text.insert(closeIdx, entry);
+    }
+
+    EditJournal::instance().recordModify(qrcPath);
+
+    if (!qrc.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        action.success = false;
+        action.resultMessage = QStringLiteral("Не удалось записать ") + action.targetPath;
+        return action;
+    }
+    qrc.write(text.toUtf8());
+    qrc.close();
+
+    action.success = true;
+    action.resultMessage = (action.type == CodeAction::QrcAdd
+                                ? QStringLiteral("Добавлено в ")
+                                : QStringLiteral("Убрано из "))
+                         + action.targetPath + QStringLiteral(": ") + relative;
+    return action;
 }

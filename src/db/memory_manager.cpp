@@ -166,6 +166,57 @@ QStringList MemoryManager::tokenize(const QString& text)
         QStringLiteral("ещё"), QStringLiteral("бы"), QStringLiteral("ты"),
         QStringLiteral("мы"), QStringLiteral("вы"), QStringLiteral("да"),
         QStringLiteral("нет"),
+
+        // Обёртка запроса, а не его тема. Раньше их здесь не было, и
+        // «привет, пришли мне схему p2p протокола» совпадало с «пришли мне
+        // схему как работает ПК» на 50% — по словам «пришли», «мне»,
+        // «схему», — после чего роутер отдавал старый ответ про ПК вместо
+        // того, чтобы спросить модель. Тема запроса живёт в «p2p» и
+        // «протокол», вежливость и глагол просьбы не различают ничего.
+        //
+        // Вопросительные слова (что, как, почему, зачем) СЮДА НЕ ДОБАВЛЯТЬ:
+        // они задают вид вопроса, и без них «что такое TCP» и «как работает
+        // TCP» схлопываются в один и тот же запрос.
+        // ── Приветствия и вежливость ──
+        QStringLiteral("привет"), QStringLiteral("здравствуй"),
+        QStringLiteral("здравствуйте"), QStringLiteral("пожалуйста"),
+        QStringLiteral("спасибо"), QStringLiteral("слушай"),
+        QStringLiteral("давай"), QStringLiteral("ладно"),
+        // ── Глаголы просьбы ──
+        QStringLiteral("пришли"), QStringLiteral("присылай"),
+        QStringLiteral("покажи"), QStringLiteral("показывай"),
+        QStringLiteral("дай"), QStringLiteral("выдай"),
+        QStringLiteral("скажи"), QStringLiteral("расскажи"),
+        QStringLiteral("объясни"), QStringLiteral("сделай"),
+        QStringLiteral("помоги"), QStringLiteral("хочу"),
+        QStringLiteral("нужно"), QStringLiteral("надо"),
+        QStringLiteral("можешь"), QStringLiteral("мочь"),
+        // ── Местоимения и предлоги ──
+        QStringLiteral("мне"), QStringLiteral("меня"), QStringLiteral("мой"),
+        QStringLiteral("моя"), QStringLiteral("моё"), QStringLiteral("мои"),
+        QStringLiteral("тебе"), QStringLiteral("тебя"), QStringLiteral("твой"),
+        QStringLiteral("его"), QStringLiteral("её"), QStringLiteral("их"),
+        QStringLiteral("них"), QStringLiteral("для"), QStringLiteral("про"),
+        QStringLiteral("при"), QStringLiteral("под"), QStringLiteral("над"),
+        QStringLiteral("без"), QStringLiteral("или"), QStringLiteral("если"),
+        QStringLiteral("чтобы"), QStringLiteral("только"), QStringLiteral("очень"),
+        QStringLiteral("уже"), QStringLiteral("тоже"), QStringLiteral("вот"),
+        QStringLiteral("там"), QStringLiteral("тут"),
+
+        // Те же самые роли по-английски.
+        QStringLiteral("hello"), QStringLiteral("hi"), QStringLiteral("hey"),
+        QStringLiteral("please"), QStringLiteral("thanks"), QStringLiteral("thank"),
+        QStringLiteral("send"), QStringLiteral("show"), QStringLiteral("give"),
+        QStringLiteral("make"), QStringLiteral("tell"), QStringLiteral("explain"),
+        QStringLiteral("want"), QStringLiteral("need"), QStringLiteral("could"),
+        QStringLiteral("would"), QStringLiteral("should"), QStringLiteral("let"),
+        QStringLiteral("get"), QStringLiteral("got"), QStringLiteral("about"),
+        QStringLiteral("our"), QStringLiteral("his"), QStringLiteral("her"),
+        QStringLiteral("their"), QStringLiteral("into"), QStringLiteral("out"),
+        QStringLiteral("over"), QStringLiteral("under"), QStringLiteral("very"),
+        QStringLiteral("only"), QStringLiteral("also"), QStringLiteral("too"),
+        QStringLiteral("some"), QStringLiteral("any"), QStringLiteral("all"),
+        QStringLiteral("here"), QStringLiteral("there"),
     };
 
     QStringList filtered;

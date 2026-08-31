@@ -66,6 +66,65 @@ static QStringList arrayToStringList(const QJsonValue& v)
     return out;
 }
 
+QString ModeSystemProfile::summary(bool english) const
+{
+    if (isEmpty())
+        return QString();
+
+    QStringList parts;
+    if (!permissionMode.isEmpty()) {
+        parts << (english ? QStringLiteral("permissions: %1").arg(permissionMode)
+                          : QStringLiteral("разрешения: %1").arg(permissionMode));
+    }
+    if (!notifications.isEmpty()) {
+        parts << (english ? QStringLiteral("notifications: %1").arg(notifications)
+                          : QStringLiteral("уведомления: %1").arg(notifications));
+    }
+    if (!voice.isEmpty()) {
+        parts << (english ? QStringLiteral("voice: %1").arg(voice)
+                          : QStringLiteral("голос: %1").arg(voice));
+    }
+    if (volume >= 0) {
+        parts << (english ? QStringLiteral("volume %1%").arg(volume)
+                          : QStringLiteral("громкость %1%").arg(volume));
+    }
+    if (!onActivateWorkflow.isEmpty()) {
+        parts << (english ? QStringLiteral("runs \"%1\"").arg(onActivateWorkflow)
+                          : QStringLiteral("запускает \"%1\"").arg(onActivateWorkflow));
+    }
+    if (!autoActivateApps.isEmpty()) {
+        parts << (english ? QStringLiteral("auto on: %1").arg(autoActivateApps.join(QStringLiteral(", ")))
+                          : QStringLiteral("сам включается в: %1").arg(autoActivateApps.join(QStringLiteral(", "))));
+    }
+    return parts.join(QStringLiteral(" · "));
+}
+
+bool ModeManager::mergeSystemBlock(const QString& srcDir, const QString& dstDir)
+{
+    QFile srcFile(srcDir + QStringLiteral("/mode.json"));
+    QFile dstFile(dstDir + QStringLiteral("/mode.json"));
+    if (!srcFile.open(QIODevice::ReadOnly) || !dstFile.open(QIODevice::ReadOnly))
+        return false;
+
+    const QJsonObject src = QJsonDocument::fromJson(srcFile.readAll()).object();
+    QJsonObject       dst = QJsonDocument::fromJson(dstFile.readAll()).object();
+    srcFile.close();
+    dstFile.close();
+
+    // Только добавляем недостающее — если пользователь уже правил свой
+    // "system", его настройки трогать нельзя.
+    if (!src.contains(QStringLiteral("system")) || dst.contains(QStringLiteral("system")))
+        return false;
+
+    dst[QStringLiteral("system")] = src.value(QStringLiteral("system"));
+
+    if (!dstFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    dstFile.write(QJsonDocument(dst).toJson(QJsonDocument::Indented));
+    dstFile.close();
+    return true;
+}
+
 bool ModeManager::readManifest(const QString& modeDir, ModeInfo& out)
 {
     QFile f(modeDir + QStringLiteral("/mode.json"));
@@ -94,6 +153,24 @@ bool ModeManager::readManifest(const QString& modeDir, ModeInfo& out)
     out.exclusive     = obj.value(QStringLiteral("exclusive")).toBool(false);
     out.defaultActive = obj.value(QStringLiteral("default_active")).toBool(false);
     out.dirPath       = modeDir;
+
+    // Системная часть профиля — необязательная. Режим без неё
+    // остаётся тем, чем был: набором скиллов и промпт-блоком.
+    const QJsonObject sys = obj.value(QStringLiteral("system")).toObject();
+    if (!sys.isEmpty()) {
+        out.system.permissionMode = sys.value(QStringLiteral("permission_mode")).toString().trimmed();
+        out.system.notifications  = sys.value(QStringLiteral("notifications")).toString().trimmed();
+        out.system.voice          = sys.value(QStringLiteral("voice")).toString().trimmed();
+        out.system.volume         = sys.contains(QStringLiteral("volume"))
+                                        ? sys.value(QStringLiteral("volume")).toInt(-1)
+                                        : -1;
+        out.system.onActivateWorkflow =
+            sys.value(QStringLiteral("on_activate_workflow")).toString().trimmed();
+        out.system.onDeactivateWorkflow =
+            sys.value(QStringLiteral("on_deactivate_workflow")).toString().trimmed();
+        out.system.autoActivateApps =
+            arrayToStringList(sys.value(QStringLiteral("auto_activate_apps")));
+    }
 
     // prompt: либо inline объект {ru,en}/строка, либо ссылка на файл
     // "prompt_file": "prompt.md" -> общий на оба языка.
@@ -207,10 +284,19 @@ void ModeManager::scan()
     for (const QString& srcDir : listModeDirs(bundledModesDir())) {
         ModeInfo info;
         if (!readManifest(srcDir, info)) continue;
-        if (m_installedOnce.contains(info.id)) continue;
 
         const QString dst = userDir + QStringLiteral("/") + info.id;
-        if (!QFileInfo::exists(dst + QStringLiteral("/mode.json"))) {
+        const bool installed = QFileInfo::exists(dst + QStringLiteral("/mode.json"));
+
+        // Дописать недостающий "system" нужно и тем режимам, что стоят
+        // с прошлой версии, — поэтому ДО проверки installedOnce. Иначе
+        // системная часть профиля доехала бы только до новых установок.
+        if (installed && mergeSystemBlock(srcDir, dst))
+            qDebug() << "[Modes] Added system profile block to installed mode:" << info.id;
+
+        if (m_installedOnce.contains(info.id)) continue;
+
+        if (!installed) {
             if (copyModeDir(srcDir, dst))
                 qDebug() << "[Modes] Installed bundled mode:" << info.id;
         }
@@ -265,6 +351,8 @@ void ModeManager::activate(const QString& id)
 {
     if (id == m_activeId) return;
 
+    const QString previousId = m_activeId;
+
     ModeInfo picked;
     bool found = false;
     if (!id.isEmpty()) {
@@ -282,6 +370,7 @@ void ModeManager::activate(const QString& id)
 
     if (found) applyToSkills(picked);
     emit modeChanged();
+    emit modeActivated(id, previousId);
 }
 
 void ModeManager::reapplyActive()

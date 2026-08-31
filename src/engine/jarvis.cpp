@@ -10,11 +10,38 @@
 #include "action_predictor.h"
 #include "auto_updater.h"
 #include "project_indexer.h"
+#include "project_profile.h"
+#include "dev_advisor.h"
+#include "edit_journal.h"
 #include "code_actions.h"
 #include "attachments_manager.h"
 #include "brain.h"
 #include "pc_command_registry.h"
 #include "pc_controller.h"
+#include "tool_registry.h"
+#include "context_tracker.h"
+#include "context_advisor.h"
+#include "workflow_manager.h"
+#include "action_log.h"
+#include "trigger_engine.h"
+#include "git_tools.h"
+#include "journal_tools.h"
+#include "clipboard_tools.h"
+#include "clipboard_watcher.h"
+#include "project_registry.h"
+#include "plugin_bridge.h"
+#include "health_center.h"
+#include "global_search.h"
+#include "event_feed.h"
+#include "system_watcher.h"
+#include "system_monitor.h"
+#include "device_hub.h"
+#include "bluetooth_devices.h"
+#include "permission_gate.h"
+#include "profile_tools.h"
+#include "notification_manager.h"
+#include "agent_loop.h"
+#include "system_tools.h"
 #include "file_organizer.h"
 #include "local_trainer.h"
 #include "background_learner.h"
@@ -36,10 +63,17 @@
 #include "task_manager_dialog.h"
 #include "j2j_mesh_connector.h"
 #include "translation_engine.h"
+#include "languagedetector.h"
 #include "jarvis_paths.h"
 #include "jarvis_response.h"
 #include "voice_synthesis_manager.h"
+#include "voice_policy.h"
+#include "elevenlabs_provider.h"
+#include "voice_input.h"
+#include "passive_listener.h"
+#include "audio_manager.h"
 #include "llm_cache_manager.h"
+#include "sentence_composer.h"
 #include "curiosity_engine.h"
 #include "memory_consolidation.h"
 #include "pdf_distiller.h"
@@ -56,7 +90,6 @@
 // хранится в отдельном экземпляре (MSVC ODR). Язык передаётся явно через
 // m_uiEnglish, который MainWindow устанавливает через setUiLanguage().
 
-#include <sapi.h>
 #include <shellapi.h>
 #include <QDateTime>
 #include <QThread>
@@ -66,7 +99,11 @@
 #include <QRegularExpression>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QStorageInfo>
+#include <QEventLoop>
 
 // Дефайны из CMake
 #ifndef JARVIS_VERSION
@@ -142,12 +179,31 @@ Jarvis::Jarvis(QObject* parent)
     m_keyEmulator  = new KeyEmulator(this);
     m_pcCommands   = new PcCommandRegistry(m_keyEmulator, this);
     m_indexer      = new ProjectIndexer(this);
+    // Профиль проекта: тип, сборка, таргеты, зависимости, ассеты. Индекс
+    // отвечает «где лежит символ», профиль — «что это вообще за проект».
+    m_projectProfile = new ProjectProfile(this);
+    m_projectProfile->setIndexer(m_indexer);
+
+    // Фоновый советник по проекту. Claude ему выдаётся ниже, когда
+    // m_claudeApi уже создан.
+    m_devAdvisor = new DevAdvisor(this);
+    m_devAdvisor->setIndexer(m_indexer);
+    m_devAdvisor->setProfile(m_projectProfile);
     m_codeActions  = new CodeActions(this);
     m_attachments  = new AttachmentsManager(this);
     m_profile      = new UserProfile(this);
     m_activity     = new ActivityTracker(this);
     m_activity->start(15); // capture every 15 seconds
     m_predictor->setActivityTracker(m_activity); // context for the cv::ml experience classifier
+
+    // Чем занят человек — это же и ответ на вопрос, можно ли сейчас
+    // говорить вслух. Политика голоса хранит категорию сырой и сама
+    // считает «глубокая работа» по времени в ней (см. voice_policy.h).
+    connect(m_activity, &ActivityTracker::activityChanged, this,
+            [](const QString&, const QString& category) {
+        VoicePolicyManager::instance().setActivity(category);
+    });
+    VoicePolicyManager::instance().setActivity(m_activity->currentCategory());
 
     // Face/photo enrollment feeds the same knowledge_base training system
     // as voice/text learning — new "appearance" category, not a silo.
@@ -308,14 +364,362 @@ Jarvis::Jarvis(QObject* parent)
     connect(m_pcCommands, &PcCommandRegistry::feedbackReady,
             this, &Jarvis::speakAsync);
 
+    // ── Слой действий ────────────────────────────────────────────
+    // До этого модель умела только говорить: любые действия были
+    // возможны лишь через совпадение фразы с ключевыми словами в
+    // CommandRegistry. Теперь у неё есть инструменты, и она сама
+    // решает, какие вызвать и в каком порядке.
+    m_tools       = new ToolRegistry(this);
+    m_permissions = new PermissionGate(this);
+    JarvisTools::registerSystemTools(*m_tools, m_pcCommands->controller());
+
+    // Контекст экрана: без него слова «здесь» и «это» не на что
+    // отобразить. Опрашивает передний план и пропускает собственное окно.
+    m_context = new ContextTracker(this);
+    m_context->setProjectInfoProvider([this](QString& root, QStringList& recent) {
+        if (!m_indexer)
+            return;
+        root = m_indexer->projectRoot();
+        recent = m_indexer->recentFiles(8);
+    });
+    // Что уже открыто. Считаем открытым то, у чего есть видимое окно с
+    // заголовком, а не всё, что есть в списке процессов: половина этого
+    // списка — служебные хосты, которые для человека ничего не «открыто».
+    m_context->setRunningAppsProvider([this]() -> QStringList {
+        QStringList apps;
+        if (!m_pcCommands || !m_pcCommands->controller())
+            return apps;
+
+        const auto windows = m_pcCommands->controller()->windows()->allWindows();
+        for (const WindowInfo& w : windows) {
+            if (!w.isVisible || w.title.trimmed().isEmpty())
+                continue;
+
+            // Заголовок окна — это не имя программы, но для «уже открыто»
+            // важен не точный процесс, а узнаваемое имя. Берём хвост
+            // заголовка: там почти всегда стоит название приложения.
+            const QString tail = w.title.section(QStringLiteral(" - "), -1).trimmed();
+            const QString name = tail.isEmpty() ? w.title.trimmed() : tail;
+            if (name.size() < 3 || apps.contains(name))
+                continue;
+
+            apps << name;
+            if (apps.size() >= 12)
+                break;
+        }
+        return apps;
+    });
+
+    m_context->start(1500);
+    JarvisTools::registerContextTools(*m_tools, m_context);
+
+    // Право заговорить первым. Условия, при которых это уместно, живут
+    // в самом советчике; здесь только связь «согласились → выполняем».
+    m_advisor = new ContextAdvisor(m_context, this);
+    m_advisor->setRequestHandler([this](const QString& request) {
+        runAgentTask(request, /*recordUserMessage=*/false);
+    });
+    m_advisor->setEnabled(
+        DatabaseManager::instance().getConfig(QStringLiteral("context_advisor"), true).toBool());
+
+    // Git: чтение объявлено безопасным и потому выполняется молча —
+    // «что я менял сегодня» не должно требовать подтверждения. Какой
+    // репозиторий имеется в виду, решает не модель, а открытый проект.
+    JarvisTools::registerGitTools(*m_tools, [this]() -> QString {
+        return m_indexer ? m_indexer->projectRoot() : QString();
+    });
+
+    // Повторяемые цепочки: то, что человек делает одинаково каждый раз,
+    // не должно каждый раз проходить через модель.
+    m_workflows = new WorkflowManager(m_tools, m_permissions, this);
+    JarvisTools::registerWorkflowTools(*m_tools, m_workflows);
+
+    // Ctrl+K — поиск. Провайдеры регистрируем здесь: всё, по чему
+    // ищем (приложения, индекс, реестр инструментов, сценарии, БД),
+    // уже создано выше.
+    m_search = new GlobalSearch(this);
+    registerSearchProviders();
+
+    // ── Лента событий ────────────────────────────────────────────
+    // Монитор фоном опрашивает раз в 5 секунд: этого хватает наблюдателю,
+    // а панель на время открытия сама попросит чаще. Наблюдатель
+    // превращает отсчёты в редкие события — правила в SystemWatcher.
+    m_sysMonitor = new SystemMonitor(this);
+    m_sysMonitor->start(5000);
+
+    m_sysWatcher = new SystemWatcher(m_sysMonitor, this);
+
+    // Устройства: хаб пустой сам по себе, всё содержательное приносят
+    // провайдеры — их регистрируем после того, как ESP32 и mesh созданы.
+    m_devices = new DeviceHub(this);
+    registerDeviceProviders();
+
+    // ── Журнал действий ──────────────────────────────────────────
+    // Реестр знает, ЧТО выполнено; журнал добавляет, кто это начал,
+    // чем кончилось, и переживает перезапуск. Подписка ровно одна:
+    // иначе каждый, кто умеет вызвать инструмент, обязан был бы
+    // помнить про запись — и рано или поздно забыл бы.
+    connect(m_tools, &ToolRegistry::toolInvoked, this,
+            [](const QString& name, const QJsonObject& args, bool ok,
+               const QString& display, int risk) {
+        ActionLog::instance().record(name, args,
+                                     ok ? ActionOutcome::Ok : ActionOutcome::Failed,
+                                     display, risk);
+    });
+    JarvisTools::registerActionTools(*m_tools, m_permissions);
+
+    // Откат перестаёт быть фразой, которую надо угадать: теперь модель
+    // знает и что откатится, и что откатить нельзя.
+    JarvisTools::registerJournalTools(*m_tools, m_uiEnglish);
+
+    // История буфера обмена. Ядро наблюдателю НЕ передаём: с ним он
+    // начинает сам отправлять скопированное в модель, а это включается
+    // осознанно и не мной. Без ядра он ведёт только локальную историю.
+    m_clipboard = new ClipboardWatcher(this);
+    JarvisTools::registerClipboardTools(*m_tools, m_clipboard);
+
+    // ── Проекты ──────────────────────────────────────────────────
+    // Индексатор знал ровно один проект — тот, чей корень ему задали.
+    // Реестр добавляет остальные и делает «открой ESP32» однозначной
+    // командой. Переключение корня делается здесь: слой действий про
+    // индексатор и память ничего не знает.
+    m_projects = new ProjectRegistry(this);
+    m_projects->setActivator([this](const ProjectEntry& project) {
+        if (!m_indexer)
+            return;
+        m_indexer->setProjectRoot(QDir::toNativeSeparators(project.path));
+        m_indexer->indexProject();
+        m_indexer->enableFileWatcher(true);
+        syncProjectInfoToMemory();
+    });
+    JarvisTools::registerProjectTools(*m_tools, m_projects);
+
+    // Первый запуск: проект, в котором человек уже работает, попадает
+    // в список сам. Пустой список проектов бесполезен, а спрашивать
+    // «добавить этот?» — навязчиво.
+    if (m_projects->count() == 0 && m_indexer && !m_indexer->projectRoot().isEmpty())
+        m_projects->addOrReplace(ProjectRegistry::sniff(m_indexer->projectRoot()));
+
+    // ── Плагины ──────────────────────────────────────────────────
+    // Система плагинов была написана и ни разу не включена: хост никто
+    // не реализовывал, папку никто не сканировал. Мост её включает —
+    // и заодно даёт плагину то, чего у него не было: право добавить
+    // инструмент, а не только поймать фразу.
+    m_plugins = new PluginBridge(this, m_tools, m_permissions, this);
+    JarvisTools::registerPluginTools(*m_tools, m_plugins);
+    m_plugins->loadAll();
+
+    // ── Триггеры ─────────────────────────────────────────────────
+    // Замыкают ленту событий обратно на слой действий: до сих пор
+    // события в ней мог увидеть только человек, и то если открывал
+    // панель. Стартуем последними — правила ссылаются на сценарии и
+    // инструменты, а они созданы выше.
+    m_triggers = new TriggerEngine(m_tools, m_permissions, m_workflows, this);
+    m_triggers->setDeviceHub(m_devices);
+    JarvisTools::registerTriggerTools(*m_tools, m_triggers);
+    m_triggers->start();
+
+    // ── Слух ─────────────────────────────────────────────────────
+    // Объекты создаём здесь, а распознавание запускаем отдельно, из
+    // startVoice(): до этого момента интерфейс ещё не подписался, и
+    // просьбу доустановить модели услышать будет некому.
+    m_audio   = new AudioManager(this);
+    m_voiceIn = new VoiceInput(this);
+    m_passive = new PassiveListener(this);
+
+    // Распознанное входит в ядро, а не в окно (см. submitVoiceCommand).
+    connect(m_voiceIn, &VoiceInput::textRecognized,
+            this, &Jarvis::submitVoiceCommand);
+
+    // Отвал сетевого голоса не должен выглядеть как «голос просто стал
+    // хуже»: причина уходит в ленту с общим ключом дедупликации, чтобы
+    // при лежащей сети там была одна строка со счётчиком, а не сотня.
+    ElevenLabsProvider::setFailureReporter([](const QString& reason) {
+        EventFeed::instance().post(
+            QStringLiteral("SYSTEM"), EventLevel::Warning,
+            QStringLiteral("Голос ElevenLabs недоступен — говорю офлайн-голосом"),
+            reason,
+            QStringLiteral("elevenlabs-unavailable"));
+    });
+
+    // Пока человек говорит, фоновая реплика подождёт. Перебивание уже
+    // звучащей фразы — отдельный механизм (MainWindow::maybeBargeIn);
+    // здесь речь о том, чтобы новую не начинать.
+    connect(m_voiceIn, &VoiceInput::speechDetected, this, []() {
+        VoicePolicyManager::instance().noteUserSpeech();
+    });
+
+    // Полный экран, презентация и «не беспокоить» — состояние Windows,
+    // а не догадка: опрашиваем его раз в пять секунд, дешевле, чем
+    // разбирать заголовки окон.
+    m_voiceContextTimer = new QTimer(this);
+    connect(m_voiceContextTimer, &QTimer::timeout, this, []() {
+        VoicePolicyManager::instance().refreshSystemState();
+    });
+    m_voiceContextTimer->start(5000);
+    VoicePolicyManager::instance().refreshSystemState();
+
+    connect(m_passive, &PassiveListener::journalProcessed, this, [](int pairs) {
+        if (pairs > 0)
+            qDebug() << "[Training] Voice journal:" << pairs << "new pairs";
+    });
+    connect(m_passive, &PassiveListener::weeklyCleanupDone, this, [](int deleted) {
+        if (deleted > 0)
+            qDebug() << "[Training] Weekly cleanup:" << deleted << "entries";
+    });
+
+    // Пассивный слушатель работает на уже загруженных моделях Vosk, а не
+    // на своих: две копии — это лишние ~3.6 GB. Поэтому он инициализируется
+    // не сам по себе, а когда VoiceInput сообщил, что модели в памяти.
+    connect(m_voiceIn, &VoiceInput::ready, this, [this]() {
+        PassiveListenerConfig cfg;
+        const QString datasetPath = DatabaseManager::instance().getConfig(
+            QStringLiteral("voice_dataset_path")).toString();
+        if (!datasetPath.isEmpty())
+            cfg.datasetPath = datasetPath;
+        cfg.modelPathRu = m_voiceIn->config().modelPathRu;
+        cfg.modelPathEn = m_voiceIn->config().modelPathEn;
+
+        VoskWorker* w = m_voiceIn->worker();
+        m_passive->initializeWithSharedModels(w ? w->modelForLang(QStringLiteral("ru")) : nullptr,
+                                              w ? w->modelForLang(QStringLiteral("en")) : nullptr,
+                                              cfg);
+    });
+
+    // Автостарт пассивной записи. Выключается через Training → Пассивная
+    // запись; пункт меню спрашивает состояние у слушателя, а не хранит своё.
+    connect(m_passive, &PassiveListener::ready, this, [this]() {
+        m_passive->startListening();
+    });
+
+    // ── Диагностика ──────────────────────────────────────────────
+    // Половина подсистем умеет отваливаться молча: база не открылась —
+    // история просто пустая, ключ не задан — модель «не отвечает».
+    m_health = new HealthCenter(this);
+    registerHealthProbes();
+    JarvisTools::registerHealthTools(*m_tools, m_health);
+
+    // Всё, что человек и так увидел бы как результат своего действия,
+    // в ленту не попадает: она про то, что случилось САМО или в фоне.
+    connect(m_workflows, &WorkflowManager::workflowFinished, this,
+            [](const QString& name, bool ok, const QString& report) {
+        EventFeed::instance().post(
+            QStringLiteral("workflow"),
+            ok ? EventLevel::Good : EventLevel::Warning,
+            (ok ? QStringLiteral("Сценарий \"%1\" выполнен")
+                : QStringLiteral("Сценарий \"%1\" оборвался")).arg(name),
+            report.section(QChar('\n'), 1));
+    });
+
+    connect(m_modes, &ModeManager::modeActivated, this,
+            [this](const QString& id, const QString&) {
+        const ModeInfo mode = m_modes->activeMode();
+        EventFeed::instance().post(
+            QStringLiteral("profile"), EventLevel::Info,
+            QStringLiteral("Профиль: %1").arg(mode.displayName(m_uiEnglish)),
+            mode.system.summary(m_uiEnglish),
+            QStringLiteral("profile/") + id);
+    });
+
+    // Профили = режимы. Системную часть режима (разрешения, уведомления,
+    // громкость, стартовый сценарий) применяем здесь: ModeManager про них
+    // не знает и знать не должен — он про скиллы и промпт.
+    JarvisTools::registerProfileTools(*m_tools, m_modes, m_permissions, m_uiEnglish);
+
+    connect(m_modes, &ModeManager::modeActivated,
+            this, &Jarvis::applyModeSystemProfile);
+
+    // На старте применяем только СОСТОЯНИЕ активного профиля — уровень
+    // доверия и политику уведомлений. Действия (стартовый сценарий,
+    // громкость) не повторяем: запуск приложения это не «переключение
+    // профиля», и перекручивать звук при каждом старте никто не просил.
+    if (m_modes) {
+        const ModeInfo active = m_modes->activeMode();
+        if (!active.system.permissionMode.isEmpty()) {
+            m_permissions->setMode(permissionModeFromString(
+                active.system.permissionMode, m_permissions->mode()));
+        }
+        if (!active.system.notifications.isEmpty()) {
+            NotificationManager::instance().setPolicy(
+                NotificationManager::policyFromString(active.system.notifications));
+        }
+        if (!active.system.voice.isEmpty()) {
+            VoicePolicyManager::instance().setPolicy(
+                VoicePolicyManager::policyFromString(active.system.voice,
+                                                      VoicePolicy::Normal));
+        }
+    }
+
+    // Автопереключение по приложению: режим сам объявляет, в каких окнах
+    // он уместен. Обратного (само выключиться) намеренно нет — молча
+    // снимать профиль, который человек выбрал руками, слишком нахально.
+    connect(m_context, &ContextTracker::focusChanged, this,
+            [this](const QString& appName, const QString&) {
+        if (appName.isEmpty() || !m_modes)
+            return;
+        for (const ModeInfo& mode : m_modes->modes()) {
+            if (mode.id == m_modes->activeId())
+                continue;
+            for (const QString& trigger : mode.system.autoActivateApps) {
+                if (appName.compare(trigger, Qt::CaseInsensitive) == 0) {
+                    qDebug() << "[Modes] auto-activating" << mode.id << "for" << appName;
+                    m_modes->activate(mode.id);
+                    return;
+                }
+            }
+        }
+    });
+
+    m_agent = new AgentLoop(m_claudeApi, m_tools, m_permissions, this);
+
+    connect(m_agent, &AgentLoop::finished, this, [this](const QString& text) {
+        // Тот же путь, что и у обычного ответа: история, TTS, Telegram,
+        // десктопный чат — всё уже подписано на asyncResponseReady.
+        m_memory->addMessage(QStringLiteral("assistant"), text);
+        m_memory->updateContext(m_lastAgentRequest, text);
+        emit asyncResponseReady(text);
+    });
+
+    connect(m_agent, &AgentLoop::failed, this, [this](const QString& err) {
+        EventFeed::instance().post(QStringLiteral("agent"), EventLevel::Error,
+                                   QStringLiteral("Задача не выполнена"), err);
+        if (!emitOfflineAnswer(m_lastAgentRequest))
+            emit asyncResponseError(err);
+    });
+
+    // Состояние «говорит» теперь ведёт очередь TTS — единственная, кто
+    // знает, звучит ли реплика прямо сейчас. isSpeaking()/speakingChanged
+    // остаются прежними для тех, кто на них подписан (см. MainWindow).
+    connect(&VoiceSynthesisManager::instance(), &VoiceSynthesisManager::speakingChanged,
+            this, [this](bool speaking) {
+        m_speaking.store(speaking);
+        emit speakingChanged(speaking);
+    });
+
     // Реакция на ошибки API
     connect(m_claudeApi, &ClaudeApi::apiError, this, [this](const QString& err) {
         emit asyncResponseError(err);
     });
 
+    // Фоновый советник: ключ API появляется вместе с ClaudeApi, а язык
+    // интерфейса — позже, из MainWindow (см. setUiLanguage).
+    m_devAdvisor->setClaudeApi(m_claudeApi);
+    connect(m_devAdvisor, &DevAdvisor::autoFixApplied, this,
+            [this](const QString& message) { emit advisorMessage(message); });
+    connect(m_devAdvisor, &DevAdvisor::adviceReady, this,
+            [this](const QString& description, const QString& action) {
+        emit suggestionAvailable(description, action);
+    });
+
     // Синхронизация информации об индексе с системным промптом
     connect(m_indexer, &ProjectIndexer::indexingFinished, this,
-            [this](int, int) { syncProjectInfoToMemory(); });
+            [this](int, int) {
+        // Профиль пересобирается только после ПОЛНОЙ индексации: обход
+        // дерева ради одного изменённого файла — пустая трата секунд.
+        if (m_projectProfile)
+            m_projectProfile->scan(m_indexer->projectRoot());
+        syncProjectInfoToMemory();
+    });
     connect(m_indexer, &ProjectIndexer::fileReindexed, this,
             [this](const QString&) { syncProjectInfoToMemory(); });
 
@@ -329,6 +733,10 @@ Jarvis::Jarvis(QObject* parent)
             [this](const QString& path) { m_memory->recordFileTouched(path); });
 
     if (m_indexer->fileCount() > 0) {
+        // Индекс поднялся из кэша — профиль тоже берём с диска, чтобы не
+        // обходить всё дерево на каждом старте приложения.
+        if (m_projectProfile && !m_projectProfile->load(m_indexer->projectRoot()))
+            m_projectProfile->scan(m_indexer->projectRoot());
         syncProjectInfoToMemory();
     }
 
@@ -474,7 +882,31 @@ void Jarvis::syncProjectInfoToMemory()
         m_indexer->symbolCount()
     );
 
+    // Архитектурная выжимка (тип проекта, таргеты, зависимости, ассеты)
+    // идёт в system prompt рядом с картой файлов: без неё модель знала,
+    // где лежит класс, но не знала, чем проект собирается.
+    m_memory->setProjectArchitecture(
+        m_projectProfile ? m_projectProfile->brief(3000) : QString());
+
     m_codeActions->setProjectRoot(m_indexer->projectRoot());
+
+    // Советник просыпается только когда есть что советовать: открыт
+    // проект и включён скилл программиста.
+    if (m_devAdvisor) {
+        m_devAdvisor->setProjectRoot(m_indexer->projectRoot());
+        const bool codingOn =
+            !m_skills || m_skills->isFeatureEnabled(SkillManager::featureCodeActions());
+        if (codingOn && m_devAdvisor->isEnabled() && !m_devAdvisor->isRunning())
+            m_devAdvisor->start(20);
+        else if (!codingOn && m_devAdvisor->isRunning())
+            m_devAdvisor->stop();
+    }
+}
+
+void Jarvis::setUiLanguage(bool english)
+{
+    m_uiEnglish = english;
+    if (m_devAdvisor) m_devAdvisor->setUiEnglish(english);
 }
 
 // ============================================================
@@ -626,6 +1058,38 @@ void Jarvis::registerCommands()
         {QStringLiteral("статистика"), QStringLiteral("stats")},
         [this](const QString& s) { return cmdShowStats(s); },
         QStringLiteral("stats — command usage frequency"),
+        /*prefixMatch=*/false
+    );
+
+    // --- Откат файловых правок ---
+    // Только по команде пользователя: сама модель откатывать свои правки
+    // не должна — иначе один неудачный ход отменит и то, что было верно.
+    m_registry.registerCommand(
+        {QStringLiteral("отмени правки"), QStringLiteral("undo edits")},
+        [this](const QString& s) { return cmdUndoEdits(s); },
+        QStringLiteral("undo edits — roll back the last batch of file changes"),
+        /*prefixMatch=*/false
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("история правок"), QStringLiteral("edit history")},
+        [this](const QString& s) { return cmdEditHistory(s); },
+        QStringLiteral("edit history — what can be rolled back"),
+        /*prefixMatch=*/false
+    );
+
+    // --- Фоновый советник по проекту ---
+    m_registry.registerCommand(
+        {QStringLiteral("рекомендации"), QStringLiteral("recommendations")},
+        [this](const QString& s) { return cmdAdvisorReport(s); },
+        QStringLiteral("recommendations — what the background advisor found in the project"),
+        /*prefixMatch=*/false
+    );
+
+    m_registry.registerCommand(
+        {QStringLiteral("проверь проект"), QStringLiteral("check project")},
+        [this](const QString& s) { return cmdAdvisorScan(s); },
+        QStringLiteral("check project — run the project review right now"),
         /*prefixMatch=*/false
     );
 
@@ -979,7 +1443,9 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
             "[DIFF:...][FIND]...[REPLACE]...[/DIFF] — saves tokens. "
             "[FILE:...] for NEW files or full rewrites. "
             "If a new file is very large — write it as one [FILE:...] block: "
-            "JARVIS will auto-continue if the response is truncated.\n");
+            "JARVIS will auto-continue if the response is truncated. "
+            "Fragments below are auto-picked by keywords and may be incomplete — "
+            "request anything else you need with [NEED:...] instead of guessing.\n");
     } else {
         context += QStringLiteral(
             "# Mode: READ. Answer the user's question based on these fragments.\n");
@@ -1013,6 +1479,27 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
         QString header = QStringLiteral("\n### FILE: ") + rel + QStringLiteral("\n```\n");
         QString footer = QStringLiteral("\n```\n");
         if (!appendAndTrim(header + trimmed + footer)) break;
+    }
+
+    // Кто зависит от приложенных файлов. Правка заголовка без этого списка —
+    // это правка вслепую: собираться будет всё, что его включает.
+    if (budget > 500 && !pickedFiles.isEmpty()) {
+        QString impact;
+        for (const QString& rel : pickedFiles) {
+            const QString base = rel.section(QChar('/'), -1);
+            if (!base.endsWith(QStringLiteral(".h")) && !base.endsWith(QStringLiteral(".hpp")))
+                continue;
+            const QStringList users = m_indexer->whoIncludes(base);
+            if (users.isEmpty()) continue;
+            impact += QStringLiteral("- ") + base + QStringLiteral(" is included by: ")
+                    + users.mid(0, 12).join(QStringLiteral(", "));
+            if (users.size() > 12)
+                impact += QStringLiteral(" (+") + QString::number(users.size() - 12)
+                        + QStringLiteral(" more)");
+            impact += QChar('\n');
+        }
+        if (!impact.isEmpty())
+            appendAndTrim(QStringLiteral("\n### Impact (who depends on these files):\n") + impact);
     }
 
     if (budget > 1000 && !symbolHits.isEmpty()) {
@@ -1055,12 +1542,15 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
                 "Design the implementation yourself: specify which existing files "
                 "to modify via [DIFF:...] and which new files to create via "
                 "[FILE:...]/[MKDIR:...]. Don't ask 'which file?' — propose a solution. "
-                "Follow project conventions: minimal new files, single root CMakeLists.txt.)\n");
+                "Follow project conventions: minimal new files, single root CMakeLists.txt. "
+                "If you need to see how a similar feature is wired — request it with "
+                "[NEED:grep:...] / [NEED:file:...] instead of assuming.)\n");
         } else {
             context += QStringLiteral(
                 "\n(Auto-search found no direct matches. "
-                "If the user attached files — use them. "
-                "If no attachments — ask the user to specify a file.)\n");
+                "If the user attached files — use them. Otherwise request what you need "
+                "with [NEED:grep:...], [NEED:tree:...] or [NEED:file:...] — "
+                "do not ask the user to paste code.)\n");
         }
     }
 
@@ -1073,130 +1563,971 @@ QString Jarvis::buildProjectContext(const QString& userQuery) const
 // ============================================================
 
 // Фильтр текста для TTS — убирает символы, ссылки, код
+// Снятие разметки живёт в VoiceSynthesisManager::sanitizeForSpeech —
+// там же, где очередь, так что чистку получают все пути озвучки, а не
+// только этот. Здесь остаётся политика длины: длинный текст читаем
+// первым предложением, целиком его слушать незачем.
 static QString filterTextForSpeech(const QString& text)
 {
-    // Очень длинный ответ — произносим только первое предложение
-    if (text.length() > 300) {
-        // Ищем конец первого предложения
-        for (int i = 20; i < qMin(text.length(), 200); ++i) {
-            QChar c = text[i];
-            if ((c == '.' || c == '!' || c == '?') && i + 1 < text.length()
-                && text[i + 1].isSpace()) {
-                return text.left(i + 1).trimmed();
-            }
-        }
-        return text.left(150).trimmed() + QStringLiteral("...");
-    }
+    const QString clean = VoiceSynthesisManager::sanitizeForSpeech(text);
+    if (clean.length() < 3) return QString();
+    if (clean.length() <= 300) return clean;
 
-    QString result = text;
-
-    // Убираем блоки кода ```...```
-    {
-        int s = result.indexOf(QStringLiteral("```"));
-        while (s >= 0) {
-            int e = result.indexOf(QStringLiteral("```"), s + 3);
-            if (e < 0) break;
-            result.remove(s, e - s + 3);
-            s = result.indexOf(QStringLiteral("```"));
+    for (int i = 20; i < qMin(clean.length(), 200); ++i) {
+        const QChar c = clean[i];
+        if ((c == '.' || c == '!' || c == '?')
+            && i + 1 < clean.length() && clean[i + 1].isSpace())
+        {
+            return clean.left(i + 1).trimmed();
         }
     }
-    // Убираем инлайн-код `...`
-    {
-        int s = result.indexOf('`');
-        while (s >= 0) {
-            int e = result.indexOf('`', s + 1);
-            if (e < 0) break;
-            result.remove(s, e - s + 1);
-            s = result.indexOf('`');
-        }
-    }
-    // Убираем markdown bold **...**
-    result.remove(QRegularExpression(QStringLiteral("\\*\\*[^*]+\\*\\*")));
-    // Убираем markdown italic *...*
-    result.remove(QRegularExpression(QStringLiteral("\\*[^*]+\\*")));
-    // Убираем заголовки ###
-    result.remove(QRegularExpression(QStringLiteral("^#{1,6}\\s+"), QRegularExpression::MultilineOption));
-    // Убираем URL http(s)://...
-    result.remove(QRegularExpression(QStringLiteral("https?://\\S+")));
-    // Убираем Windows пути C:\...
-    result.remove(QRegularExpression(QStringLiteral("[A-Za-z]:\\\\[\\\\S]+")));
-    // Убираем HTML entities &bull; &nbsp; и теги <br>
-    result.remove(QRegularExpression(QStringLiteral("&[a-z]+;")));
-    result.remove(QRegularExpression(QStringLiteral("<[^>]+")));
-    // Убираем bullet символы
-    result.replace(QStringLiteral("•"), QStringLiteral(" "));
-    result.replace(QStringLiteral("→"), QStringLiteral(" "));
-    result.replace(QStringLiteral("►"), QStringLiteral(" "));
-    result.replace(QStringLiteral("■"), QStringLiteral(" "));
-    result.replace(QStringLiteral("●"), QStringLiteral(" "));
-    result.replace(QStringLiteral("&bull;"), QStringLiteral(" "));
-
-    result = result.simplified().trimmed();
-
-    // Если после фильтрации ничего нет — не говорим
-    if (result.length() < 3) return QString();
-
-    return result;
+    return clean.left(150).trimmed() + QStringLiteral("...");
 }
 
 
+// Раньше здесь стоял отдельный движок SAPI со своим потоком и мьютексом:
+// две озвучки, не знающие друг о друге, перебивали одна другую, а
+// tryLock молча ГЛОТАЛ реплику, если предыдущая ещё звучала. Теперь всё
+// идёт через общую очередь VoiceSynthesisManager — фразы становятся в
+// ряд, и доступен Piper, а не только SAPI.
 void Jarvis::speakAsync(const QString& text)
 {
-    if (text.isEmpty()) return;
-    if (!m_ttsMutex.tryLock()) return;
+    const QString speech = filterTextForSpeech(text);
+    if (speech.isEmpty()) return;
 
-    m_speaking.store(true);
-    emit speakingChanged(true);
-
-    // Фильтруем текст для TTS — краткое резюме вместо символов
-    QString copy = filterTextForSpeech(text);
-    if (copy.isEmpty()) {
-        m_speaking.store(false);
-        m_ttsMutex.unlock();
-        emit speakingChanged(false);
-        return;
-    }
-
-    QThread* thread = QThread::create([this, copy]() {
-        ComInitializer threadCom;
-        if (!threadCom.ok()) {
-            m_ttsMutex.unlock();
-            return;
-        }
-
-        ISpVoice* voice = nullptr;
-        HRESULT hr = CoCreateInstance(
-            CLSID_SpVoice, nullptr, CLSCTX_ALL,
-            IID_ISpVoice, reinterpret_cast<void**>(&voice)
-        );
-
-        if (SUCCEEDED(hr) && voice) {
-            voice->SetRate(1);
-            voice->SetVolume(100);
-            std::wstring wtext = copy.toStdWString();
-            voice->Speak(wtext.c_str(), SPF_DEFAULT, nullptr);
-            voice->Release();
-        }
-
-        m_speaking.store(false);
-        m_ttsMutex.unlock();
-
-        QMetaObject::invokeMethod(this, [this]() {
-            emit speakingChanged(false);
-        }, Qt::QueuedConnection);
-    });
-
-    connect(thread, &QThread::finished, thread, &QThread::deleteLater);
-    thread->start();
+    VoiceSynthesisManager::instance().say(speech);
 }
 
 // ============================================================
 // Обработка команд (гибридный режим)
 // ============================================================
 
+// ============================================================
+//  Слой действий: запуск агента и отбор «это просьба действовать»
+// ============================================================
+
+bool Jarvis::looksActionable(const QString& input)
+{
+    QString lower = input.trimmed().toLower();
+    if (lower.isEmpty())
+        return false;
+
+    // Обращение по имени не мешает разбору: "джарвис, открой стим".
+    static const QStringList kAddress = {
+        QStringLiteral("джарвис"), QStringLiteral("jarvis")
+    };
+    for (const QString& a : kAddress) {
+        if (lower.startsWith(a)) {
+            lower = lower.mid(a.length()).trimmed();
+            while (!lower.isEmpty()
+                   && (lower.startsWith(QChar(',')) || lower.startsWith(QChar('!'))))
+                lower = lower.mid(1).trimmed();
+            break;
+        }
+    }
+    if (lower.isEmpty())
+        return false;
+
+    // Вопрос — это разговор, а не задание: "как открыть порт?" не должно
+    // приводить к тому, что JARVIS что-нибудь открывает.
+    if (lower.endsWith(QChar('?')))
+        return false;
+
+    // Код, объяснения и генерация остаются на старом пути: там разбор
+    // [FILE:]-блоков, диаграммы и офлайн-слои, которых у агента нет.
+    static const QStringList kNotActions = {
+        QStringLiteral("объясни"),       QStringLiteral("расскажи"),
+        QStringLiteral("почему"),        QStringLiteral("что такое"),
+        QStringLiteral("как работает"),  QStringLiteral("в чём разница"),
+        QStringLiteral("напиши код"),    QStringLiteral("напиши функц"),
+        QStringLiteral("напиши класс"),  QStringLiteral("сгенерируй"),
+        QStringLiteral("explain"),       QStringLiteral("what is"),
+        QStringLiteral("how does"),      QStringLiteral("write a function"),
+        QStringLiteral("write code"),    QStringLiteral("generate ")
+    };
+    for (const QString& w : kNotActions) {
+        if (lower.contains(w))
+            return false;
+    }
+
+    // Глагол в начале фразы — самый надёжный признак приказа.
+    // "открой стим" — да; "я вчера открыл стим" — нет.
+    static const QStringList kActionStarts = {
+        QStringLiteral("открой"),      QStringLiteral("открыть"),
+        QStringLiteral("запусти"),     QStringLiteral("запустить"),
+        QStringLiteral("включи"),      QStringLiteral("выключи"),
+        QStringLiteral("закрой"),      QStringLiteral("закрыть"),
+        QStringLiteral("сверни"),      QStringLiteral("разверни"),
+        QStringLiteral("переключ"),    QStringLiteral("поставь"),
+        QStringLiteral("убавь"),       QStringLiteral("прибавь"),
+        QStringLiteral("сделай скрин"),QStringLiteral("скриншот"),
+        QStringLiteral("сними скрин"), QStringLiteral("создай папк"),
+        QStringLiteral("создай файл"), QStringLiteral("удали"),
+        QStringLiteral("перемести"),   QStringLiteral("скопируй"),
+        QStringLiteral("переименуй"),  QStringLiteral("найди файл"),
+        QStringLiteral("найди папк"),  QStringLiteral("найди проект"),
+        QStringLiteral("проверь"),     QStringLiteral("собери"),
+        QStringLiteral("скомпилируй"), QStringLiteral("установи"),
+        QStringLiteral("заблокируй"),  QStringLiteral("перезагрузи"),
+        QStringLiteral("убей"),        QStringLiteral("останови"),
+        QStringLiteral("подготовь"),   QStringLiteral("настрой"),
+        QStringLiteral("нажми"),       QStringLiteral("напечатай"),
+        QStringLiteral("сколько занято"),
+
+        QStringLiteral("open "),       QStringLiteral("launch "),
+        QStringLiteral("start "),      QStringLiteral("run "),
+        QStringLiteral("close "),      QStringLiteral("quit "),
+        QStringLiteral("kill "),       QStringLiteral("mute"),
+        QStringLiteral("unmute"),      QStringLiteral("set volume"),
+        QStringLiteral("minimize"),    QStringLiteral("maximize"),
+        QStringLiteral("focus "),      QStringLiteral("switch to"),
+        QStringLiteral("screenshot"),  QStringLiteral("take a screenshot"),
+        QStringLiteral("lock "),       QStringLiteral("shut down"),
+        QStringLiteral("shutdown"),    QStringLiteral("restart"),
+        QStringLiteral("reboot"),      QStringLiteral("build "),
+        QStringLiteral("compile"),     QStringLiteral("install "),
+        QStringLiteral("delete "),     QStringLiteral("move "),
+        QStringLiteral("rename "),     QStringLiteral("find file"),
+        QStringLiteral("prepare "),    QStringLiteral("set up ")
+    };
+    for (const QString& v : kActionStarts) {
+        if (lower.startsWith(v))
+            return true;
+    }
+
+    // Иначе — глагол где угодно, но только рядом с системным объектом:
+    // "а теперь покажи процессы" тоже приказ.
+    static const QStringList kSystemNouns = {
+        QStringLiteral("громкость"),   QStringLiteral("окно"),
+        QStringLiteral("окна"),        QStringLiteral("процесс"),
+        QStringLiteral("буфер обмена"),QStringLiteral("рабочий стол"),
+        QStringLiteral("диск"),        QStringLiteral("оперативн"),
+        QStringLiteral("процессор"),   QStringLiteral("скриншот"),
+        QStringLiteral("volume"),      QStringLiteral("window"),
+        QStringLiteral("process"),     QStringLiteral("clipboard"),
+        QStringLiteral("disk"),        QStringLiteral("cpu")
+    };
+    static const QStringList kAnywhereVerbs = {
+        QStringLiteral("открой"),  QStringLiteral("запусти"),
+        QStringLiteral("включи"),  QStringLiteral("выключи"),
+        QStringLiteral("закрой"),  QStringLiteral("покажи"),
+        QStringLiteral("поставь"), QStringLiteral("проверь"),
+        QStringLiteral("сделай"),  QStringLiteral("open"),
+        QStringLiteral("launch"),  QStringLiteral("show"),
+        QStringLiteral("close"),   QStringLiteral("check")
+    };
+
+    bool hasNoun = false;
+    for (const QString& n : kSystemNouns) {
+        if (lower.contains(n)) { hasNoun = true; break; }
+    }
+    if (!hasNoun)
+        return false;
+
+    for (const QString& v : kAnywhereVerbs) {
+        if (lower.contains(v))
+            return true;
+    }
+    return false;
+}
+
+// ============================================================
+//  Ctrl+K — мгновенный локальный поиск
+// ============================================================
+
+void Jarvis::registerSearchProviders()
+{
+    if (!m_search)
+        return;
+
+    // --- Приложения -------------------------------------------------
+    m_search->addProvider(QStringLiteral("apps"), [this](const QString& q, int limit) {
+        const QString ql = q.toLower();
+        QVector<SearchHit> hits;
+        for (const QString& alias : m_appLauncher.knownAliases()) {
+            const int score = GlobalSearch::matchScore(alias, ql);
+            if (score <= 0)
+                continue;
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Apps") : QStringLiteral("Приложения");
+            h.icon     = QStringLiteral("🚀");
+            h.title    = alias;
+            h.subtitle = m_uiEnglish ? QStringLiteral("launch") : QStringLiteral("запустить");
+            h.action   = SearchHit::Action::LaunchApp;
+            h.payload  = alias;
+            h.score    = score;
+            hits.append(h);
+            if (hits.size() >= limit)
+                break;
+        }
+        return hits;
+    });
+
+    // --- Сценарии ---------------------------------------------------
+    m_search->addProvider(QStringLiteral("workflows"), [this](const QString& q, int limit) {
+        QVector<SearchHit> hits;
+        if (!m_workflows)
+            return hits;
+        const QString ql = q.toLower();
+        for (const Workflow& wf : m_workflows->all()) {
+            const int score = qMax(GlobalSearch::matchScore(wf.name, ql),
+                                   GlobalSearch::matchScore(wf.description, ql) / 2);
+            if (score <= 0)
+                continue;
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Workflows") : QStringLiteral("Сценарии");
+            h.icon     = wf.icon.isEmpty() ? QStringLiteral("▶") : wf.icon;
+            h.title    = wf.name;
+            h.subtitle = wf.description;
+            h.action   = SearchHit::Action::RunWorkflow;
+            h.payload  = wf.name;
+            h.score    = score;
+            hits.append(h);
+            if (hits.size() >= limit)
+                break;
+        }
+        return hits;
+    });
+
+    // --- Профили ----------------------------------------------------
+    m_search->addProvider(QStringLiteral("profiles"), [this](const QString& q, int limit) {
+        QVector<SearchHit> hits;
+        if (!m_modes)
+            return hits;
+        const QString ql = q.toLower();
+        for (const ModeInfo& mode : m_modes->modes()) {
+            const QString name = mode.displayName(m_uiEnglish);
+            const int score = qMax(GlobalSearch::matchScore(name, ql),
+                                   GlobalSearch::matchScore(mode.id, ql));
+            if (score <= 0)
+                continue;
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Profiles") : QStringLiteral("Профили");
+            h.icon     = mode.icon.isEmpty() ? QStringLiteral("👤") : mode.icon;
+            h.title    = name;
+            h.subtitle = mode.system.summary(m_uiEnglish);
+            h.action   = SearchHit::Action::SetProfile;
+            h.payload  = mode.id;
+            h.score    = score;
+            hits.append(h);
+            if (hits.size() >= limit)
+                break;
+        }
+        return hits;
+    });
+
+    // --- Инструменты ------------------------------------------------
+    m_search->addProvider(QStringLiteral("tools"), [this](const QString& q, int limit) {
+        QVector<SearchHit> hits;
+        if (!m_tools)
+            return hits;
+        const QString ql = q.toLower();
+        for (const QString& name : m_tools->names()) {
+            const ToolSpec* spec = m_tools->find(name);
+            if (!spec)
+                continue;
+            const int score = qMax(GlobalSearch::matchScore(name, ql),
+                                   GlobalSearch::matchScore(spec->description, ql) / 3);
+            if (score <= 0)
+                continue;
+
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Actions") : QStringLiteral("Действия");
+            h.icon     = QStringLiteral("⚙");
+            h.title    = name;
+            h.subtitle = spec->description.left(90);
+            h.score    = score;
+
+            // Инструмент без обязательных аргументов запускается прямо
+            // отсюда; остальным нужны параметры, поэтому они уходят в
+            // командную палитру как заготовка запроса.
+            if (GlobalSearch::toolNeedsArguments(m_tools, name)) {
+                h.action  = SearchHit::Action::AskAgent;
+                h.payload = name + QStringLiteral(" ") + q;
+            } else {
+                h.action  = SearchHit::Action::RunTool;
+                h.payload = name;
+            }
+            hits.append(h);
+            if (hits.size() >= limit)
+                break;
+        }
+        return hits;
+    });
+
+    // --- Файлы проекта ----------------------------------------------
+    m_search->addProvider(QStringLiteral("project"), [this](const QString& q, int limit) {
+        QVector<SearchHit> hits;
+        if (!m_indexer)
+            return hits;
+        const QString ql = q.toLower();
+        for (const QString& path : m_indexer->allFiles()) {
+            const QString fileName = QFileInfo(path).fileName();
+            const int score = GlobalSearch::matchScore(fileName, ql);
+            if (score <= 0)
+                continue;
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Project files")
+                                     : QStringLiteral("Файлы проекта");
+            h.icon     = QStringLiteral("📄");
+            h.title    = fileName;
+            h.subtitle = path;
+            h.action   = SearchHit::Action::OpenPath;
+            h.payload  = path;
+            h.score    = score;
+            hits.append(h);
+            if (hits.size() >= limit)
+                break;
+        }
+        return hits;
+    });
+
+    // --- История разговоров -----------------------------------------
+    m_search->addProvider(QStringLiteral("chat"), [this](const QString& q, int limit) {
+        QVector<SearchHit> hits;
+        if (q.length() < 3)
+            return hits;   // на одну-две буквы история выдаёт мусор
+
+        const QList<DbChatMessage> found =
+            DatabaseManager::instance().searchMessages(m_currentUserId, q);
+        for (const DbChatMessage& msg : found) {
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Conversations")
+                                     : QStringLiteral("История");
+            h.icon     = msg.role == QStringLiteral("user") ? QStringLiteral("💬")
+                                                            : QStringLiteral("🤖");
+            h.title    = msg.content.left(80).replace(QChar('\n'), QChar(' '));
+            h.subtitle = msg.createdAt.toString(QStringLiteral("dd.MM.yyyy HH:mm"));
+            h.action   = SearchHit::Action::None;
+            h.score    = 200;   // ниже точных совпадений, выше «ничего»
+            hits.append(h);
+            if (hits.size() >= limit)
+                break;
+        }
+        return hits;
+    });
+
+    // --- Память -----------------------------------------------------
+    m_search->addProvider(QStringLiteral("memory"), [this](const QString& q, int limit) {
+        QVector<SearchHit> hits;
+        if (q.length() < 3)
+            return hits;
+
+        const auto found = MemoryManager::instance().search(q, qMin(limit, 5));
+        for (const auto& res : found) {
+            SearchHit h;
+            h.category = m_uiEnglish ? QStringLiteral("Memory") : QStringLiteral("Память");
+            h.icon     = QStringLiteral("🧠");
+            h.title    = res.chunk.content.left(80).replace(QChar('\n'), QChar(' '));
+            h.subtitle = res.chunk.tag;
+            h.action   = SearchHit::Action::None;
+            h.score    = 180;
+            hits.append(h);
+        }
+        return hits;
+    });
+
+    // --- Всегда доступные запасные варианты --------------------------
+    // Стоят последними и с низким счётом: это не результат, а выход
+    // из ситуации «ничего не нашлось локально».
+    m_search->addProvider(QStringLiteral("fallback"), [this](const QString& q, int) {
+        QVector<SearchHit> hits;
+
+        SearchHit disk;
+        disk.category = m_uiEnglish ? QStringLiteral("Disk") : QStringLiteral("Диск");
+        disk.icon     = QStringLiteral("🔍");
+        disk.title    = (m_uiEnglish ? QStringLiteral("Find \"%1\" on disk")
+                                     : QStringLiteral("Найти \"%1\" на диске")).arg(q);
+        disk.subtitle = QStringLiteral("find_files");
+        disk.action   = SearchHit::Action::RunTool;
+        disk.payload  = QStringLiteral("find_files");
+        disk.args     = QJsonObject{
+            { QStringLiteral("pattern"), q.contains(QChar('*')) ? q
+                                                                : QStringLiteral("*%1*").arg(q) }
+        };
+        disk.score = 40;
+        hits.append(disk);
+
+        SearchHit ask;
+        ask.category = QStringLiteral("JARVIS");
+        ask.icon     = QStringLiteral("💡");
+        ask.title    = (m_uiEnglish ? QStringLiteral("Ask JARVIS: %1")
+                                    : QStringLiteral("Спросить JARVIS: %1")).arg(q);
+        ask.subtitle = m_uiEnglish ? QStringLiteral("hand it to the agent")
+                                   : QStringLiteral("отдать агенту");
+        ask.action   = SearchHit::Action::AskAgent;
+        ask.payload  = q;
+        ask.score    = 30;
+        hits.append(ask);
+
+        return hits;
+    });
+}
+
+// ============================================================
+//  Диагностика
+// ============================================================
+
+void Jarvis::submitVoiceCommand(const QString& text, const QString& lang)
+{
+    const QString clean = text.trimmed();
+    if (clean.isEmpty())
+        return;
+
+    // Речь, не похожая ни на русский, ни на английский — не мусор, а
+    // повод выучить язык: незнакомое со временем становится узнаваемым.
+    if (m_translator && clean.length() >= 6
+        && LanguageDetector::detect(clean) == LanguageDetector::Language::Unknown) {
+        m_translator->learnUnknownLanguageSnippet(clean);
+    }
+
+    if (m_voiceHandler && m_voiceHandler(clean, lang))
+        return;
+
+    // Окна нет (или оно отказалось) — выполняем сами. Ответ уйдёт через
+    // asyncResponseReady и будет произнесён: слушать и отвечать голосом
+    // ядро умеет без всякого интерфейса.
+    qDebug() << "[Voice] No interactive session — running as agent task:" << clean;
+    runAgentTask(clean);
+}
+
+void Jarvis::startVoice()
+{
+    if (m_voiceStarted || !m_voiceIn)
+        return;
+
+    m_voiceStarted = true;
+    m_voiceIn->initialize();
+}
+
+void Jarvis::registerHealthProbes()
+{
+    if (!m_health)
+        return;
+
+    // Слух и речь. Раньше эти пробы регистрировало окно — вместе с
+    // объектами они переехали сюда.
+    m_health->addProbe(QStringLiteral("voice_in"), QStringLiteral("Распознавание"), []() {
+        const VoskSetupStatus st = VoiceInput::checkSetupStatus();
+        if (!st.dllReady)
+            return HealthProbeResult::failed(
+                QStringLiteral("Vosk не установлен — микрофон слышать не будет"));
+        if (!st.anyModelReady())
+            return HealthProbeResult::failed(QStringLiteral("нет ни одной модели"));
+        return HealthProbeResult::ok(
+            QStringLiteral("моделей %1").arg(qMax(1, st.installedModelIds.size())));
+    });
+
+    m_health->addProbe(QStringLiteral("voice_out"), QStringLiteral("Синтез речи"), []() {
+        VoiceSynthesisManager& tts = VoiceSynthesisManager::instance();
+        if (!tts.isEnabled())
+            return HealthProbeResult::warning(QStringLiteral("выключен в настройках"));
+        return HealthProbeResult::ok(
+            QStringLiteral("%1, %2")
+                .arg(tts.activeProviderName(),
+                     tts.isSpeaking() ? QStringLiteral("говорит")
+                                       : QStringLiteral("готов")));
+    });
+
+    // Момент запуска: аптайм — первое, что спрашивают, когда что-то
+    // «уже час как сломано».
+    static const QDateTime started = QDateTime::currentDateTime();
+
+    m_health->addProbe(QStringLiteral("core"), QStringLiteral("Ядро"), []() {
+        const qint64 mins = started.secsTo(QDateTime::currentDateTime()) / 60;
+        return HealthProbeResult::ok(
+            QStringLiteral("JARVIS %1, аптайм %2 ч %3 мин")
+                .arg(QStringLiteral(JARVIS_VERSION)).arg(mins / 60).arg(mins % 60));
+    });
+
+    m_health->addProbe(QStringLiteral("llm"), QStringLiteral("LLM"), [this]() {
+        if (!m_claudeApi)
+            return HealthProbeResult::failed(QStringLiteral("ClaudeApi не создан"));
+        if (!m_claudeApi->hasApiKey())
+            return HealthProbeResult::failed(
+                QStringLiteral("ключ API не задан — модель отвечать не будет"));
+        return HealthProbeResult::ok(m_claudeApi->isRequesting()
+                                         ? QStringLiteral("ключ задан, запрос выполняется")
+                                         : QStringLiteral("ключ задан"));
+    });
+
+    m_health->addProbe(QStringLiteral("database"), QStringLiteral("База данных"), []() {
+        DatabaseManager& db = DatabaseManager::instance();
+        if (!db.isOpen()) {
+            const QString err = db.lastError();
+            return HealthProbeResult::failed(
+                err.isEmpty() ? QStringLiteral("не открыта") : err);
+        }
+        const QFileInfo fi(db.dbPath());
+        return HealthProbeResult::ok(
+            QStringLiteral("%1, %2 МБ")
+                .arg(fi.fileName()).arg(fi.size() / (1024.0 * 1024.0), 0, 'f', 1));
+    });
+
+    m_health->addProbe(QStringLiteral("tools"), QStringLiteral("Инструменты"), [this]() {
+        if (!m_tools || m_tools->count() == 0)
+            return HealthProbeResult::failed(QStringLiteral("реестр пуст — действия недоступны"));
+        return HealthProbeResult::ok(
+            QStringLiteral("%1 в %2 категориях")
+                .arg(m_tools->count()).arg(m_tools->categories().size()));
+    });
+
+    m_health->addProbe(QStringLiteral("triggers"), QStringLiteral("Триггеры"), [this]() {
+        if (!m_triggers)
+            return HealthProbeResult::failed(QStringLiteral("движок не создан"));
+
+        int enabled = 0;
+        for (const TriggerRule& r : m_triggers->all()) {
+            if (r.enabled)
+                ++enabled;
+        }
+        if (!m_triggers->isEnabled())
+            return HealthProbeResult::warning(
+                QStringLiteral("выключены целиком, правил %1").arg(m_triggers->count()));
+        return HealthProbeResult::ok(QStringLiteral("правил %1, включено %2")
+                                         .arg(m_triggers->count()).arg(enabled));
+    });
+
+    m_health->addProbe(QStringLiteral("actions"), QStringLiteral("Журнал действий"), []() {
+        ActionLog& log = ActionLog::instance();
+        const QFileInfo fi(log.storagePath());
+
+        // Журнал, в который не пишется, хуже отсутствующего: он создаёт
+        // ощущение, что история есть.
+        QFile probe(log.storagePath());
+        if (!probe.open(QIODevice::WriteOnly | QIODevice::Append)) {
+            return HealthProbeResult::failed(
+                QStringLiteral("не пишется: %1").arg(fi.absolutePath()));
+        }
+        probe.close();
+
+        return HealthProbeResult::ok(QStringLiteral("записей в памяти %1, файл %2 КБ")
+                                         .arg(log.count()).arg(fi.size() / 1024));
+    });
+
+    m_health->addProbe(QStringLiteral("disk"), QStringLiteral("Диск"), []() {
+        const QStorageInfo storage(JarvisPaths::dataRoot());
+        if (!storage.isValid() || !storage.isReady())
+            return HealthProbeResult::warning(QStringLiteral("состояние тома неизвестно"));
+
+        const double freeGb = storage.bytesAvailable() / (1024.0 * 1024.0 * 1024.0);
+        const QString text  = QStringLiteral("%1: свободно %2 ГБ")
+                                  .arg(storage.rootPath())
+                                  .arg(freeGb, 0, 'f', 1);
+        if (freeGb < 1.0)
+            return HealthProbeResult::failed(text);
+        if (freeGb < 5.0)
+            return HealthProbeResult::warning(text);
+        return HealthProbeResult::ok(text);
+    });
+
+    m_health->addProbe(QStringLiteral("context"), QStringLiteral("Контекст экрана"), [this]() {
+        if (!m_context)
+            return HealthProbeResult::failed(QStringLiteral("трекер не создан"));
+        const MachineContext ctx = m_context->snapshot();
+        if (ctx.isEmpty())
+            return HealthProbeResult::warning(
+                QStringLiteral("чужих окон ещё не видели — «здесь» и «это» не на что отобразить"));
+        return HealthProbeResult::ok(ctx.appName);
+    });
+
+    m_health->addProbe(QStringLiteral("git"), QStringLiteral("Git"), []() {
+        QProcess proc;
+        proc.start(QStringLiteral("git"), { QStringLiteral("--version") });
+        if (!proc.waitForStarted(3000) || !proc.waitForFinished(5000))
+            return HealthProbeResult::warning(
+                QStringLiteral("не найден в PATH — git-инструменты работать не будут"));
+        return HealthProbeResult::ok(
+            QString::fromUtf8(proc.readAllStandardOutput()).trimmed());
+    });
+}
+
+// ============================================================
+//  Устройства
+// ============================================================
+
+void Jarvis::registerDeviceProviders()
+{
+    if (!m_devices)
+        return;
+
+    // --- Сам ПК ------------------------------------------------------
+    m_devices->addProvider(QStringLiteral("pc"), [this]() {
+        DeviceInfo pc;
+        pc.id     = QStringLiteral("this-pc");
+        pc.name   = QSysInfo::machineHostName();
+        pc.kind   = QStringLiteral("pc");
+        pc.icon   = QStringLiteral("🖥");
+        pc.status = DeviceInfo::Status::Online;
+
+        if (m_sysMonitor) {
+            pc.statusText = QStringLiteral("CPU %1%, RAM %2%")
+                                .arg(m_sysMonitor->cpuPercent())
+                                .arg(m_sysMonitor->ramPercent());
+            const qint64 up = m_sysMonitor->uptimeSeconds();
+            pc.details << qMakePair(QStringLiteral("Аптайм"),
+                                    QStringLiteral("%1 ч %2 мин")
+                                        .arg(up / 3600).arg((up % 3600) / 60));
+            pc.details << qMakePair(QStringLiteral("Сеть"),
+                                    QStringLiteral("↓ %1 ↑ %2 KB/s")
+                                        .arg(m_sysMonitor->netDownKbps(), 0, 'f', 0)
+                                        .arg(m_sysMonitor->netUpKbps(), 0, 'f', 0));
+        } else {
+            pc.statusText = QStringLiteral("работает");
+        }
+        return QVector<DeviceInfo>{ pc };
+    });
+
+    // --- ESP32-нода --------------------------------------------------
+    m_devices->addProvider(QStringLiteral("esp32"), [this]() {
+        QVector<DeviceInfo> out;
+        if (!m_esp32Hub || !m_esp32Hub->isRunning())
+            return out;
+
+        DeviceInfo node;
+        node.id   = QStringLiteral("esp32");
+        node.name = QStringLiteral("ESP32");
+        node.kind = QStringLiteral("esp32");
+        node.icon = QStringLiteral("📟");
+
+        if (m_esp32Hub->isConnected()) {
+            node.status     = DeviceInfo::Status::Connected;
+            node.statusText = QStringLiteral("на связи");
+
+            const Esp32SensorData d = m_esp32Hub->lastSensorData();
+            if (d.tempC > 0.0f)
+                node.details << qMakePair(QStringLiteral("Температура"),
+                                          QStringLiteral("%1 °C").arg(double(d.tempC), 0, 'f', 1));
+            if (d.wifiRssi != 0)
+                node.details << qMakePair(QStringLiteral("Wi-Fi"),
+                                          QStringLiteral("%1 dBm").arg(d.wifiRssi));
+            if (d.freeHeap > 0)
+                node.details << qMakePair(QStringLiteral("Свободно памяти"),
+                                          QStringLiteral("%1 KB").arg(d.freeHeap / 1024));
+            if (d.uptimeSec > 0)
+                node.details << qMakePair(QStringLiteral("Аптайм"),
+                                          QStringLiteral("%1 мин").arg(d.uptimeSec / 60));
+            if (!d.ip.isEmpty())
+                node.details << qMakePair(QStringLiteral("Адрес"), d.ip);
+            if (!d.ledMode.isEmpty())
+                node.details << qMakePair(QStringLiteral("Светодиод"), d.ledMode);
+        } else {
+            node.status     = DeviceInfo::Status::Offline;
+            node.statusText = QStringLiteral("не отвечает");
+            if (!m_esp32Hub->nodeIp().isEmpty())
+                node.details << qMakePair(QStringLiteral("Ожидается по адресу"),
+                                          m_esp32Hub->nodeIp());
+        }
+        out.append(node);
+        return out;
+    });
+
+    // --- Соседи по mesh ----------------------------------------------
+    m_devices->addProvider(QStringLiteral("mesh"), [this]() {
+        QVector<DeviceInfo> out;
+        if (!m_mesh)
+            return out;
+
+        for (const J2JPeer& peer : m_mesh->activePeers()) {
+            DeviceInfo d;
+            d.id     = QStringLiteral("peer/") + peer.nodeId;
+            d.name   = peer.nodeName.isEmpty() ? peer.nodeId : peer.nodeName;
+            d.kind   = QStringLiteral("peer");
+            d.icon   = QStringLiteral("🛰");
+            d.status = DeviceInfo::Status::Connected;
+            d.statusText = peer.authorized ? QStringLiteral("авторизован")
+                                           : QStringLiteral("не авторизован");
+            if (!peer.role.isEmpty())
+                d.details << qMakePair(QStringLiteral("Роль"), peer.role);
+            d.details << qMakePair(QStringLiteral("Адрес"), peer.address.toString());
+            if (peer.lastSeen.isValid())
+                d.details << qMakePair(QStringLiteral("Виден"),
+                                       peer.lastSeen.toString(QStringLiteral("HH:mm:ss")));
+            out.append(d);
+        }
+        return out;
+    });
+
+    // --- Bluetooth ----------------------------------------------------
+    m_devices->addProvider(QStringLiteral("bluetooth"), []() {
+        QVector<DeviceInfo> out;
+        for (const BluetoothDeviceInfo& bt : enumerateBluetoothDevices()) {
+            // Сопряжённых устройств у человека десятки, а интересны
+            // подключённые: остальные — это список из настроек Windows.
+            if (!bt.connected)
+                continue;
+
+            DeviceInfo d;
+            d.id         = QStringLiteral("bt/") + bt.address;
+            d.name       = bt.name;
+            d.kind       = QStringLiteral("bluetooth");
+            d.icon       = QStringLiteral("🎧");
+            d.status     = DeviceInfo::Status::Connected;
+            d.statusText = QStringLiteral("подключено");
+            d.details << qMakePair(QStringLiteral("Адрес"), bt.address);
+            out.append(d);
+        }
+        return out;
+    });
+
+    // --- Инструменты --------------------------------------------------
+    if (!m_tools)
+        return;
+
+    {
+        ToolSpec t;
+        t.name        = QStringLiteral("list_devices");
+        t.category    = QStringLiteral("devices");
+        t.risk        = ToolRisk::Safe;
+        t.description = QStringLiteral(
+            "Everything JARVIS can see: this PC, the ESP32 node with its sensors, "
+            "other JARVIS instances on the mesh, connected Bluetooth devices.");
+        t.schema  = ToolSchema::empty();
+        t.handler = [this](const QJsonObject&) -> ToolResult {
+            const int count = m_devices->devices().size();
+            return ToolResult::success(m_devices->summaryForModel(),
+                                       QStringLiteral("Устройств: %1").arg(count));
+        };
+        m_tools->registerTool(t);
+    }
+
+    {
+        ToolSpec t;
+        t.name        = QStringLiteral("device_command");
+        t.category    = QStringLiteral("devices");
+        t.risk        = ToolRisk::Moderate;
+        t.description = QStringLiteral(
+            "Send a command to the ESP32 node: set the LED mode (idle, thinking, "
+            "listening, alert, off), fire a notification pattern, or ask it to report "
+            "its sensors. Other device kinds are read-only for now.");
+        t.schema = ToolSchema()
+                       .choice("command", { QStringLiteral("led"), QStringLiteral("notify"),
+                                            QStringLiteral("status") },
+                               "What to do")
+                       .str("value", "LED mode or notification type", false)
+                       .integer("duration_ms", "How long, for led/notify", false)
+                       .build();
+        t.preview = [](const QJsonObject& a) {
+            return QStringLiteral("ESP32: %1 %2")
+                .arg(a.value(QStringLiteral("command")).toString(),
+                     a.value(QStringLiteral("value")).toString());
+        };
+        t.handler = [this](const QJsonObject& a) -> ToolResult {
+            if (!m_esp32Hub || !m_esp32Hub->isConnected())
+                return ToolResult::failure(
+                    QStringLiteral("The ESP32 node is not connected."));
+
+            const QString command = a.value(QStringLiteral("command")).toString().toLower();
+            const QString value   = a.value(QStringLiteral("value")).toString();
+            const int duration    = a.value(QStringLiteral("duration_ms")).toInt(1000);
+
+            if (command == QLatin1String("led")) {
+                m_esp32Hub->setLed(value.isEmpty() ? QStringLiteral("idle") : value, duration);
+                return ToolResult::success(QStringLiteral("LED set to '%1'").arg(value),
+                                           QStringLiteral("Светодиод: %1").arg(value));
+            }
+            if (command == QLatin1String("notify")) {
+                m_esp32Hub->sendNotification(
+                    value.isEmpty() ? QStringLiteral("info") : value, duration);
+                return ToolResult::success(QStringLiteral("Notification sent"),
+                                           QStringLiteral("Сигнал отправлен"));
+            }
+            if (command == QLatin1String("status")) {
+                // Ответ придёт асинхронно в sensorDataUpdated — отдаём то,
+                // что известно сейчас, и просим обновить к следующему разу.
+                m_esp32Hub->requestStatus();
+                const Esp32SensorData d = m_esp32Hub->lastSensorData();
+                return ToolResult::success(
+                    QStringLiteral("Requested a fresh report. Last known: %1 °C, "
+                                   "Wi-Fi %2 dBm, uptime %3 s")
+                        .arg(double(d.tempC), 0, 'f', 1).arg(d.wifiRssi).arg(d.uptimeSec),
+                    QStringLiteral("Опрошен ESP32"));
+            }
+            return ToolResult::failure(QStringLiteral("Unknown command '%1'").arg(command));
+        };
+        m_tools->registerTool(t);
+    }
+}
+
+QString Jarvis::activateSearchHit(const SearchHit& hit)
+{
+    switch (hit.action) {
+    case SearchHit::Action::None:
+        return QString();
+
+    case SearchHit::Action::LaunchApp: {
+        const AppLauncher::LaunchResult r = m_appLauncher.launch(hit.payload);
+        return r.success ? QStringLiteral("%1 → %2").arg(hit.payload, r.resolvedPath)
+                         : r.errorMessage;
+    }
+
+    case SearchHit::Action::OpenPath:
+        if (m_pcCommands && m_pcCommands->controller()
+            && m_pcCommands->controller()->system()->openPath(hit.payload)) {
+            return hit.payload;
+        }
+        return QStringLiteral("Не удалось открыть: ") + hit.payload;
+
+    case SearchHit::Action::RunTool: {
+        if (!m_tools)
+            return QString();
+        // Через тот же гейт, что и у модели: поиск не обходной путь
+        // к действиям, которые в чате потребовали бы подтверждения.
+        const ToolSpec* spec = m_tools->find(hit.payload);
+        if (!spec)
+            return QStringLiteral("Неизвестный инструмент: ") + hit.payload;
+
+        QString result;
+        bool decided = false;
+        QEventLoop loop;
+        m_permissions->evaluate(hit.payload, spec->risk,
+                                m_tools->describeCall(hit.payload, hit.args),
+                                [&](bool allowed, const QString& reason) {
+            if (allowed) {
+                // Инструмент запустил человек из поиска, а не модель.
+                ActionLog::Actor scope(QStringLiteral("ui"));
+                const ToolResult res = m_tools->invoke(hit.payload, hit.args);
+                result = res.text;
+            } else {
+                result = reason;
+            }
+            decided = true;
+            if (loop.isRunning())
+                loop.quit();
+        });
+        if (!decided)
+            loop.exec();
+        return result;
+    }
+
+    case SearchHit::Action::RunWorkflow:
+        return m_workflows ? m_workflows->run(hit.payload) : QString();
+
+    case SearchHit::Action::SetProfile:
+        if (m_modes) {
+            m_modes->activate(hit.payload);
+            return QStringLiteral("Профиль: ") + hit.payload;
+        }
+        return QString();
+
+    case SearchHit::Action::AskAgent:
+        runAgentTask(hit.payload);
+        return QString();
+    }
+    return QString();
+}
+
+void Jarvis::applyModeSystemProfile(const QString& modeId, const QString& previousId)
+{
+    if (!m_modes)
+        return;
+
+    // Сценарий выхода из прошлого профиля — до всего остального: он ещё
+    // рассчитывает на старые разрешения и старую громкость.
+    if (!previousId.isEmpty() && m_workflows) {
+        for (const ModeInfo& prev : m_modes->modes()) {
+            if (prev.id != previousId)
+                continue;
+            if (!prev.system.onDeactivateWorkflow.isEmpty())
+                m_workflows->run(prev.system.onDeactivateWorkflow);
+            break;
+        }
+    }
+
+    if (modeId.isEmpty())
+        return;
+
+    const ModeInfo mode = m_modes->activeMode();
+    const ModeSystemProfile& sp = mode.system;
+    if (sp.isEmpty())
+        return;
+
+    if (!sp.permissionMode.isEmpty() && m_permissions) {
+        const PermissionMode target =
+            permissionModeFromString(sp.permissionMode, m_permissions->mode());
+        m_permissions->setMode(target);
+        // Разрешения «до перезапуска» выданы под прошлый профиль —
+        // переносить их в новый нельзя: в Focus человек соглашался на
+        // одно, в Gaming согласие уже ничего не значит.
+        m_permissions->clearSessionGrants();
+    }
+
+    if (!sp.notifications.isEmpty()) {
+        NotificationManager::instance().setPolicy(
+            NotificationManager::policyFromString(
+                sp.notifications, NotificationManager::instance().policy()));
+    }
+
+    // Голос — той же природы, что и уведомления: режим объявляет, до
+    // какой степени JARVIS вправе шуметь, а не заставляет его говорить.
+    if (!sp.voice.isEmpty()) {
+        VoicePolicyManager::instance().setPolicy(
+            VoicePolicyManager::policyFromString(
+                sp.voice, VoicePolicyManager::instance().policy()));
+    }
+
+    if (sp.volume >= 0 && m_pcCommands && m_pcCommands->controller())
+        m_pcCommands->controller()->system()->setVolume(qBound(0, sp.volume, 100));
+
+    if (!sp.onActivateWorkflow.isEmpty() && m_workflows)
+        m_workflows->run(sp.onActivateWorkflow);
+
+    qDebug() << "[Modes] applied system profile of" << modeId
+             << ":" << sp.summary(true);
+}
+
+void Jarvis::runAgentTask(const QString& request, bool recordUserMessage)
+{
+    if (!m_agent || !m_tools) {
+        emit asyncResponseError(m_uiEnglish
+                                    ? QStringLiteral("Action layer is not available.")
+                                    : QStringLiteral("Слой действий недоступен."));
+        return;
+    }
+    if (m_agent->isRunning()) {
+        emit asyncResponseError(m_uiEnglish
+                                    ? QStringLiteral("Still working on the previous task.")
+                                    : QStringLiteral("Ещё выполняю предыдущую задачу."));
+        return;
+    }
+
+    m_lastAgentRequest = request;
+
+    if (recordUserMessage)
+        m_memory->addMessage(QStringLiteral("user"), request);
+
+    // Палитра команд зовёт агента напрямую, минуя processCommand, —
+    // снимок экрана обновляем здесь, иначе он будет от прошлого запроса.
+    if (m_context)
+        m_memory->setMachineContext(m_context->promptBlock());
+    m_memory->setEventContext(EventFeed::instance().summaryForModel());
+
+    emit agentSelected(QStringLiteral("⚙ Action agent"));
+
+    QString systemPrompt = m_memory->buildSystemPrompt() + AgentLoop::agentSystemRules();
+
+    // Список сценариев прямо в промпте: иначе на «запусти рабочий режим»
+    // модель сначала потратит шаг на list_workflows.
+    if (m_workflows && m_workflows->count() > 0) {
+        systemPrompt += QStringLiteral("\n=== SAVED WORKFLOWS ===\n")
+                        + m_workflows->summaryForModel()
+                        + QStringLiteral(
+                            "\nRun one with run_workflow(name) when the user asks for it "
+                            "by name or clearly means it. Create one with save_workflow "
+                            "when the user asks to remember a sequence.\n");
+    }
+
+    m_agent->run(request, systemPrompt);
+}
+
 QString Jarvis::processCommand(const QString& input, const QString& attachmentBlock, const QString& langInstruction, qint64 chatId, qint64 replyToMessageId)
 {
     m_currentChatId = chatId;
+
+    // Флаг «это ответ на наш вопрос» относится ровно к текущему ходу —
+    // забираем и сразу гасим, чтобы он не протёк в следующее сообщение.
+    QString answeringQuestion = m_answeringQuestion;
+    m_answeringQuestion.clear();
 
     QString s = input.trimmed();
     if (s.isEmpty()) return QString();
@@ -1206,7 +2537,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     // chat/LLM handling. chatId==0 (desktop) always matches the target chat,
     // since PC and Telegram are the same person.
     if (CuriosityEngine::instance().hasPendingQuestion()) {
+        const QString pending = CuriosityEngine::instance().pendingQuestion();
         if (CuriosityEngine::instance().consumeAnswer(chatId, s, replyToMessageId)) {
+            answeringQuestion = pending;
             // A bare yes/no carries nothing to respond TO — acknowledge it and
             // stop. Anything more substantial ("Yes, the sandwich with chicken")
             // deserves an actual reply, so it falls through to normal handling
@@ -1317,6 +2650,10 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         }
 
         // Activity context: what the user is doing right now
+        // Что на экране прямо сейчас — до activity-блока, он про статистику
+        if (m_context)
+            m_memory->setMachineContext(m_context->promptBlock());
+        m_memory->setEventContext(EventFeed::instance().summaryForModel());
         m_memory->setActivityContext(m_activity->buildActivityContext());
         m_memory->setDetectedRole(m_activity->detectUserRole());
         m_memory->setKnowledgeSummary(m_activity->knowledgeSummary(m_currentUserId));
@@ -1443,6 +2780,19 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
         }
 
         return result.response;
+    }
+
+    // ── 1a. Слой действий ──────────────────────────────────────────
+    // Просьбу ЧТО-ТО СДЕЛАТЬ отдаём агенту: он сам подберёт инструменты
+    // и выполнит цепочку шагов. Беседа, код и объяснения идут дальше по
+    // старому пути — там есть диаграммы, [FILE:]-блоки и офлайн-слои,
+    // которых у агентного цикла нет.
+    if (m_agentEnabled && m_agent && !m_agent->isRunning()
+        && m_claudeApi && m_claudeApi->hasApiKey()
+        && looksActionable(s)) {
+        runAgentTask(attachmentBlock.isEmpty() ? s : s + QStringLiteral("\n\n") + attachmentBlock,
+                     /*recordUserMessage=*/false);
+        return QString();
     }
 
     // ── 1b. Локальные ответы + кэш БД ──────────────────────────────
@@ -1899,6 +3249,9 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
     //    независимо от m_multiAgentMode (см. routeToClaude()).
     const bool needsClaude = routeToClaude(s, attachmentBlock);
 
+    // Новый ход пользователя — счётчик дозапросов контекста обнуляется.
+    m_contextRounds = 0;
+
     if (!m_indexer->projectRoot().isEmpty()) {
         m_codeActions->setProjectRoot(m_indexer->projectRoot());
     }
@@ -1944,6 +3297,20 @@ QString Jarvis::processCommand(const QString& input, const QString& attachmentBl
             directives += QStringLiteral("Language for this reply: ")
                         + langInstruction
                         + QStringLiteral("\n");
+        }
+
+        // Человек отвечает на вопрос, который задали ЕМУ. Сам вопрос лежит в
+        // истории сессии, но по истории модель этого не считывает и разбирает
+        // короткую реплику как новую задачу — отсюда «уточни пару деталей»
+        // вместо нормальной реакции на ответ. Говорим прямо.
+        if (!answeringQuestion.isEmpty()) {
+            directives += QStringLiteral(
+                "This message is the user's ANSWER to the question YOU asked them "
+                "earlier: \"") + answeringQuestion + QStringLiteral("\". "
+                "Read it as that answer and react to it — briefly and naturally, "
+                "a sentence or two, the way one person replies to another. It is "
+                "NOT a new task: don't open with clarifying questions and don't "
+                "expand it into a checklist unless they actually asked for help.\n");
         }
 
         // Visual diagram instruction — applied globally for all UI paths
@@ -2097,9 +3464,43 @@ bool Jarvis::emitOfflineAnswer(const QString& query)
 
     const auto match = LlmCacheManager::instance()
                            .route(LlmCacheManager::kDesktopOwnerId, query);
+
     if (match.tier == LlmCacheManager::CaseMatch::Tier::None
-        || match.response.trimmed().isEmpty())
-        return false;
+        || match.response.trimmed().isEmpty()) {
+        // Готового ответа нет — пробуем собрать свой из отдельных фраз,
+        // сказанных в прошлых разговорах. Это последний уровень перед
+        // «не могу ответить»: он не находит готовое, а составляет новое
+        // из известного.
+        const auto composed = SentenceComposer::instance()
+                                  .compose(LlmCacheManager::kDesktopOwnerId, query);
+        if (composed.text.isEmpty()) return false;
+
+        const QString head = m_uiEnglish
+            ? QStringLiteral("📴 Offline — I don't have a ready answer, but from what "
+                             "I've been told before I can put together this:")
+            : QStringLiteral("📴 Нет сети — готового ответа нет, но из того, что мне "
+                             "уже говорили, складывается вот что:");
+
+        // Пометка обязательна: собранный из чужих фраз текст читается как
+        // обычный ответ, и без предупреждения его не отличить от знания,
+        // которое Джарвис действительно проверял.
+        const QString tail = m_uiEnglish
+            ? QStringLiteral("\n\n⚠️ Assembled from %1 earlier sentence(s), not a fresh "
+                             "answer — worth double-checking.").arg(composed.usedSentences.size())
+            : QStringLiteral("\n\n⚠️ Собрано из %1 ранее сказанных фраз, это не свежий "
+                             "ответ — лучше перепроверить.").arg(composed.usedSentences.size());
+
+        m_memory->addMessage(QStringLiteral("assistant"), composed.text);
+        m_memory->updateContext(query, composed.text);
+
+        emit agentSelected(m_uiEnglish ? QStringLiteral("🧩 Assembled")
+                                       : QStringLiteral("🧩 Собрано из фраз"));
+        emit asyncResponseReady(head + QStringLiteral("\n\n") + composed.text + tail);
+
+        qDebug() << "[Jarvis] Composed answer from" << composed.usedSentences.size()
+                 << "sentences, coverage=" << composed.coverage;
+        return true;
+    }
 
     QString header;
     switch (match.tier) {
@@ -2126,7 +3527,12 @@ bool Jarvis::emitOfflineAnswer(const QString& query)
         return false;
     }
 
-    QString body = header + QStringLiteral("\n\n") + match.response;
+    // Кэш мог быть записан до того, как маркер стали снимать при
+    // сохранении, поэтому чистим и на выдаче: старые записи иначе
+    // показывали бы «[SPEECH: ...]» до самой перезаписи.
+    const QString cleanResponse = JarvisResponse::parse(match.response).fullText;
+
+    QString body = header + QStringLiteral("\n\n") + cleanResponse;
 
     if (!match.missingConcepts.isEmpty()) {
         body += QStringLiteral("\n\n")
@@ -2139,15 +3545,13 @@ bool Jarvis::emitOfflineAnswer(const QString& query)
                     : QStringLiteral(" — спроси заново, когда будет сеть."));
     }
 
-    m_memory->addMessage(QStringLiteral("assistant"), match.response);
+    m_memory->addMessage(QStringLiteral("assistant"), cleanResponse);
     m_memory->updateContext(query, match.response);
 
     emit agentSelected(m_uiEnglish ? QStringLiteral("🧠 Local memory")
                                    : QStringLiteral("🧠 Локальная память"));
-    emit asyncResponseReady(body);
-
-    JarvisResponse dual = JarvisResponse::parse(match.response);
-    VoiceSynthesisManager::instance().say(dual.speechText);
+    // Реплику для голоса отдаём вместе с ответом: озвучивает MainWindow.
+    emit asyncResponseReady(body, JarvisResponse::parse(match.response).speechText);
 
     qDebug() << "[Jarvis] Offline answer served, tier=" << int(match.tier)
              << "overlap=" << match.overlap;
@@ -2195,6 +3599,14 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
     // но гейт защищает и от «забывчивости» модели).
     const bool codeOpsEnabled =
         !m_skills || m_skills->isFeatureEnabled(SkillManager::featureCodeActions());
+
+    // --- Модель попросила недостающий контекст ([NEED:...]) ---
+    // Читаем запрошенное с диска и переспрашиваем сами: пользователь
+    // получит один готовый ответ вместо «покажи мне файл X».
+    if (codeOpsEnabled && !m_pendingFile.active
+        && tryServeContextRequests(userInput, response, hadAttachments)) {
+        return;
+    }
 
     QString openPath, openContent;
     const bool openFile  = codeOpsEnabled
@@ -2309,6 +3721,9 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
         finalResponse = response;
     }
 
+    // Ход завершён — следующий запрос начинает счёт дозапросов заново.
+    m_contextRounds = 0;
+
     QString fileReport      = codeOpsEnabled
         ? m_codeActions->processResponse(finalResponse) : QString();
     QString displayResponse = codeOpsEnabled
@@ -2337,12 +3752,41 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
 
     // Automated offline training: cache conversational responses for local replay.
     // Non-code responses under 3000 chars are good candidates for offline learning.
-    if (!displayResponse.contains(QStringLiteral("```"))
+    // Незакрытый блок = ответ оборвался на полуслове. Такой кэшировать
+    // нельзя: обрезанная диаграмма/схема потом выдаётся роутером как
+    // «похожий случай» на любой родственный вопрос, и пользователь
+    // получает сломанный ответ вместо нового — причём бесконечно, потому
+    // что каждый показ из кэша только подкрепляет запись.
+    auto blockUnclosed = [&displayResponse](const QString& open, const QString& close) {
+        return displayResponse.contains(open) && !displayResponse.contains(close);
+    };
+    const bool truncatedBlock =
+           blockUnclosed(QStringLiteral("<diagram>"),   QStringLiteral("</diagram>"))
+        || blockUnclosed(QStringLiteral("[KICAD_SCH:"), QStringLiteral("[/KICAD_SCH]"))
+        || blockUnclosed(QStringLiteral("[FILE:"),      QStringLiteral("[/FILE]"));
+
+    if (truncatedBlock) {
+        qDebug() << "[Jarvis] Not caching truncated response for:" << userInput.left(60);
+    }
+
+    // Снимаем [SPEECH:] ДО кэширования. Разбор ниже работает по копии
+    // (fullResponse), а в кэш уходит displayResponse — то есть исходный
+    // текст с маркером внутри. При следующем похожем вопросе роутер
+    // отдавал его как есть, и пользователь видел в чате служебный тег
+    // «[SPEECH: ...]», которого в свежем ответе никогда не бывает.
+    displayResponse = JarvisResponse::parse(displayResponse).fullText;
+
+    if (!truncatedBlock
+        && !displayResponse.contains(QStringLiteral("```"))
         && !displayResponse.contains(QStringLiteral("[FILE:"))
         && displayResponse.length() > 20
         && displayResponse.length() < 3000)
     {
         LlmCacheManager::instance().saveResponse(m_currentChatId, userInput, displayResponse);
+        // Тот же ответ разбирается на отдельные фразы. Кэш умеет отдать
+        // ответ целиком на похожий вопрос; словарь фраз позволяет взять
+        // нужное предложение из ответа на СОВСЕМ другой вопрос.
+        SentenceComposer::instance().learn(m_currentChatId, displayResponse);
         qDebug() << "[Jarvis] Auto-cached response for offline learning:"
                  << userInput.left(60);
     }
@@ -2359,32 +3803,37 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
     JarvisResponse dual = JarvisResponse::parse(fullResponse);
     fullResponse = dual.fullText;
 
-    // Smart response: add a human-like summary for long/complex responses
+    // Smart response: a short lead-in for long/complex responses — but only
+    // when it actually adds something. The old generic "Here's a detailed
+    // answer to your question." landed on top of EVERY long reply: it says
+    // nothing the reply doesn't, and (being tied to the UI-language toggle
+    // rather than the language of the answer) it showed up in English above
+    // a Russian answer. Language now follows the reply itself.
     if (fullResponse.length() > 500 && !fullResponse.contains(QStringLiteral("[FILE:"))) {
+        // Судим по вопросу пользователя, а не по ответу: в ответе может
+        // быть большой блок кода на латинице поверх русского текста.
+        const bool en = replyEnglish(userInput);
         QString summary;
-        if (fullResponse.contains(QStringLiteral("```"))) {
-            summary = m_uiEnglish ? QStringLiteral("Here's what I found — code example included below.")
-                                  : QStringLiteral("Вот что нашёл — пример кода ниже.");
-        } else if (fileReport.contains(QStringLiteral("✅"))) {
+        if (fileReport.contains(QStringLiteral("✅"))) {
             int fileCount = fileReport.count(QStringLiteral("✅"));
-            summary = m_uiEnglish ? QStringLiteral("Done. Applied changes to %1 file(s).").arg(fileCount)
-                                  : QStringLiteral("Готово. Изменения применены к %1 файл(ам).").arg(fileCount);
-        } else {
-            summary = m_uiEnglish ? QStringLiteral("Here's a detailed answer to your question.")
-                                  : QStringLiteral("Вот подробный ответ на твой вопрос.");
+            summary = en ? QStringLiteral("Done. Applied changes to %1 file(s).").arg(fileCount)
+                         : QStringLiteral("Готово. Изменения применены к %1 файл(ам).").arg(fileCount);
+        } else if (fullResponse.contains(QStringLiteral("```"))) {
+            summary = en ? QStringLiteral("Here's what I found — code example included below.")
+                         : QStringLiteral("Вот что нашёл — пример кода ниже.");
         }
-        fullResponse = QStringLiteral("💡 ") + summary + QStringLiteral("\n\n") + fullResponse;
+        if (!summary.isEmpty())
+            fullResponse = QStringLiteral("💡 ") + summary + QStringLiteral("\n\n") + fullResponse;
     }
-
-    // Route speech to TTS queue
-    VoiceSynthesisManager::instance().say(dual.speechText);
 
     // ESP32: flash success notification, return LED to idle breathe
     if (m_esp32Hub && m_esp32Hub->isConnected()) {
         m_esp32Hub->sendNotification(QStringLiteral("info"), 2000);
     }
 
-    emit asyncResponseReady(fullResponse);
+    // Речь идёт спутником ответа, а не отдельным вызовом TTS: иначе её
+    // произносит движок, а MainWindow следом читает начало fullResponse.
+    emit asyncResponseReady(fullResponse, dual.speechText);
 
     if (fullResponse.length() > 20)
         MemoryManager::instance().store(QStringLiteral("dialogue"),
@@ -2393,6 +3842,26 @@ void Jarvis::handleClaudeCodeResponse(const QString& userInput,
     if (hadAttachments) {
         emit attachmentsConsumed();
     }
+}
+
+// ============================================================
+// Язык канных фраз
+// ============================================================
+
+bool Jarvis::replyEnglish(const QString& sample) const
+{
+    // Считаем буквы, а не зовём LanguageDetector::detect(): тот отдаёт
+    // Russian уже при двух кириллических символах, а здесь на входе целый
+    // ответ модели — в английском тексте пара русских слов (или наоборот)
+    // не должна переворачивать вывод. Решает большинство.
+    int cyrillic = 0, latin = 0;
+    for (const QChar& ch : sample) {
+        const ushort u = ch.unicode();
+        if ((u >= 0x0410 && u <= 0x044F) || u == 0x0451 || u == 0x0401) ++cyrillic;
+        else if ((u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z'))      ++latin;
+    }
+    if (cyrillic == 0 && latin == 0) return m_uiEnglish;
+    return latin > cyrillic;
 }
 
 // ============================================================
@@ -2465,7 +3934,7 @@ QString Jarvis::cmdShowMemory(const QString&)
     QString text;
 
     // --- Knowledge Base (autonomously learned) ---
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(R"(SELECT category, key, value, confidence, reinforcements,
                         last_seen
                  FROM knowledge_base
@@ -2742,7 +4211,12 @@ QString Jarvis::cmdProjectMap(const QString&)
         return QStringLiteral("No project indexed.");
     }
 
-    QString map = m_indexer->projectMap();
+    QString map;
+    if (m_projectProfile && m_projectProfile->isValid()) {
+        map += QStringLiteral("=== PROJECT PROFILE ===\n")
+             + m_projectProfile->brief(2000) + QStringLiteral("\n");
+    }
+    map += m_indexer->projectMap();
 
     if (map.length() > 3000) {
         map = map.left(3000) + QStringLiteral("\n\n... (truncated, total: ")
@@ -2751,6 +4225,43 @@ QString Jarvis::cmdProjectMap(const QString&)
     }
 
     return map;
+}
+
+QString Jarvis::cmdUndoEdits(const QString&)
+{
+    const QString report = EditJournal::instance().undoLast(m_uiEnglish);
+
+    // Файлы на диске изменились — индекс и профиль об этом не знают.
+    if (!m_indexer->projectRoot().isEmpty()) {
+        m_indexer->indexProject();
+    }
+    return report;
+}
+
+QString Jarvis::cmdEditHistory(const QString&)
+{
+    return EditJournal::instance().history(m_uiEnglish);
+}
+
+// Фоновый советник: показать накопленное и прогнать проверку вручную.
+QString Jarvis::cmdAdvisorReport(const QString&)
+{
+    if (!m_devAdvisor) return QString();
+    return m_devAdvisor->report();
+}
+
+QString Jarvis::cmdAdvisorScan(const QString&)
+{
+    if (!m_devAdvisor) return QString();
+
+    if (m_indexer->fileCount() == 0) {
+        return m_uiEnglish
+            ? QStringLiteral("No project indexed — open one first.")
+            : QStringLiteral("Проект не проиндексирован — сначала открой его.");
+    }
+
+    m_devAdvisor->runNow();
+    return m_devAdvisor->report();
 }
 
 QString Jarvis::cmdGrep(const QString& input)
@@ -3191,4 +4702,236 @@ bool Jarvis::organizeUndoLast()
 {
     if (!m_pcCommands) return false;
     return FileOrganizer::instance().undoLastBatch(m_pcCommands->controller()->system());
+}
+
+// ============================================================
+// Дозапрос контекста моделью: [NEED:...]
+// ============================================================
+//
+// Автоподбор файлов по ключевым словам (buildProjectContext) угадывает
+// нужное далеко не всегда: пользователь пишет «почини озвучку», а код
+// лежит в voice_synthesis_manager.cpp, где слова «озвучка» нет вовсе.
+// Раньше в таком случае модель писала «покажи мне файл X» — и ход
+// уходил впустую, потому что показать его было некому: JARVIS уже
+// закончил ответ.
+//
+// Теперь модель просит недостающее прямо в ответе, JARVIS читает это с
+// диска сам и повторяет запрос. Пользователь видит один финальный ответ
+// и короткую строку статуса о том, что именно JARVIS смотрел.
+
+QStringList Jarvis::parseContextRequests(const QString& response) const
+{
+    static const QRegularExpression reNeed(
+        QStringLiteral(R"(\[NEED:([^\]\n]{1,200})\])"));
+
+    QStringList requests;
+    auto it = reNeed.globalMatch(response);
+    while (it.hasNext()) {
+        const QString req = it.next().captured(1).trimmed();
+        if (req.isEmpty() || requests.contains(req)) continue;
+        requests.append(req);
+        if (requests.size() >= MAX_CONTEXT_REQUESTS) break;
+    }
+    return requests;
+}
+
+QString Jarvis::resolveContextRequest(const QString& request) const
+{
+    const QString req = request.trimmed();
+    if (req.isEmpty()) return QString();
+
+    // Форма запроса: "kind:argument". Без двоеточия — это либо ключевое
+    // слово ("assets", "profile", "tree"), либо просто путь к файлу.
+    QString kind = req.section(QChar(':'), 0, 0).trimmed().toLower();
+    QString arg  = req.section(QChar(':'), 1).trimmed();
+
+    static const QStringList knownKinds = {
+        QStringLiteral("file"), QStringLiteral("symbol"), QStringLiteral("grep"),
+        QStringLiteral("uses"), QStringLiteral("tree"), QStringLiteral("assets"),
+        QStringLiteral("profile"), QStringLiteral("map")
+    };
+    if (!knownKinds.contains(kind)) {
+        arg  = req;
+        kind = QStringLiteral("file");
+    }
+
+    const QString header = QStringLiteral("### [NEED:") + req + QStringLiteral("]\n");
+
+    if (kind == QStringLiteral("profile")) {
+        const QString brief = m_projectProfile ? m_projectProfile->brief(3500) : QString();
+        return header + (brief.isEmpty() ? QStringLiteral("Project profile is not built yet.\n")
+                                         : brief);
+    }
+
+    if (kind == QStringLiteral("assets")) {
+        if (!m_projectProfile) return header + QStringLiteral("No project profile.\n");
+        if (arg.isEmpty()) return header + m_projectProfile->assetsReport(60);
+
+        const auto found = m_projectProfile->findAssets(arg, 40);
+        if (found.isEmpty())
+            return header + QStringLiteral("No assets match '") + arg + QStringLiteral("'.\n");
+
+        QString out = header;
+        for (const auto& asset : found) {
+            out += asset.relativePath + QStringLiteral(" [") + asset.kind + QChar(']');
+            if (!asset.referenced) out += QStringLiteral(" — NOT referenced");
+            out += QChar('\n');
+        }
+        return out;
+    }
+
+    if (kind == QStringLiteral("map")) {
+        return header + m_indexer->projectMap();
+    }
+
+    if (kind == QStringLiteral("uses")) {
+        const QStringList users = m_indexer->whoIncludes(arg);
+        if (users.isEmpty())
+            return header + QStringLiteral("Nothing includes '") + arg + QStringLiteral("'.\n");
+        return header + QStringLiteral("Included by:\n  ")
+             + users.mid(0, 40).join(QStringLiteral("\n  ")) + QChar('\n');
+    }
+
+    if (kind == QStringLiteral("tree")) {
+        QStringList files = m_indexer->allFiles();
+        if (!arg.isEmpty()) {
+            QStringList filtered;
+            for (const QString& f : files) {
+                if (f.startsWith(arg, Qt::CaseInsensitive)) filtered.append(f);
+            }
+            files = filtered;
+        }
+        if (files.isEmpty())
+            return header + QStringLiteral("No indexed files under '") + arg + QStringLiteral("'.\n");
+        if (files.size() > 200) files = files.mid(0, 200);
+        return header + files.join(QChar('\n')) + QChar('\n');
+    }
+
+    if (kind == QStringLiteral("grep")) {
+        const auto hits = m_indexer->grep(arg, 30);
+        if (hits.isEmpty())
+            return header + QStringLiteral("No matches for '") + arg + QStringLiteral("'.\n");
+
+        QString out = header;
+        for (const auto& hit : hits) {
+            out += hit.filePath + QChar(':') + QString::number(hit.line)
+                 + QStringLiteral(": ") + hit.lineText.left(200) + QChar('\n');
+        }
+        return out;
+    }
+
+    if (kind == QStringLiteral("symbol")) {
+        // Принимаем и "Class::method", и просто "method".
+        const QString name = arg.section(QStringLiteral("::"), -1);
+        auto symbols = m_indexer->findSymbol(name, true);
+        if (symbols.isEmpty()) symbols = m_indexer->findSymbol(name, false);
+        if (symbols.isEmpty())
+            return header + QStringLiteral("Symbol '") + arg + QStringLiteral("' not found.\n");
+
+        QString out = header;
+        int shown = 0;
+        for (const auto& sym : symbols) {
+            if (shown >= 3) break;
+            out += QStringLiteral("--- ") + sym.filePath + QStringLiteral(" (")
+                 + sym.kindToString() + QStringLiteral(", L")
+                 + QString::number(sym.lineStart) + QStringLiteral(") ---\n");
+            out += m_indexer->getCodeSnippet(sym, 6);
+            out += QChar('\n');
+            shown++;
+        }
+        return out;
+    }
+
+    // --- kind == "file" ---
+    QString relPath = arg;
+    relPath.replace(QChar('\\'), QChar('/'));
+
+    QString absPath = QDir(m_indexer->projectRoot()).filePath(relPath);
+    if (!QFile::exists(absPath)) {
+        // Модель могла назвать файл по имени, без пути — ищем в индексе.
+        const auto candidates = m_indexer->findFile(relPath.section(QChar('/'), -1));
+        if (candidates.isEmpty()) {
+            return header + QStringLiteral("File '") + arg
+                 + QStringLiteral("' not found in the project.\n");
+        }
+        absPath = candidates.first().filePath;
+        relPath = candidates.first().relativePath;
+    }
+
+    const QFileInfo fi(absPath);
+    constexpr qint64 MAX_SERVED_FILE_BYTES = 120000;
+    if (fi.size() > MAX_SERVED_FILE_BYTES) {
+        return header + QStringLiteral("File is large (")
+             + QString::number(fi.size() / 1024) + QStringLiteral(" KB) — first 800 lines:\n")
+             + m_indexer->getFileLines(absPath, 1, 800);
+    }
+
+    const QString body = m_indexer->getFileLines(absPath, 1, 100000);
+    if (body.isEmpty())
+        return header + QStringLiteral("File '") + relPath + QStringLiteral("' is empty or unreadable.\n");
+
+    return header + QStringLiteral("--- ") + relPath + QStringLiteral(" ---\n") + body;
+}
+
+bool Jarvis::tryServeContextRequests(const QString& userInput,
+                                      const QString& response,
+                                      bool hadAttachments)
+{
+    if (m_indexer->projectRoot().isEmpty()) return false;
+    if (m_contextRounds >= MAX_CONTEXT_ROUNDS) return false;
+
+    // Если модель уже пишет файл — контекст ей больше не нужен, а второй
+    // запрос стоил бы денег и потерял бы наработанное.
+    if (response.contains(QStringLiteral("[FILE:"))
+        || response.contains(QStringLiteral("[DIFF:"))
+        || response.contains(QStringLiteral("[MKDIR:"))
+        || response.contains(QStringLiteral("[DELETE:"))) {
+        return false;
+    }
+
+    const QStringList requests = parseContextRequests(response);
+    if (requests.isEmpty()) return false;
+
+    QString context;
+    QStringList servedLabels;
+    for (const QString& req : requests) {
+        if (context.size() >= MAX_CONTEXT_CHARS) break;
+        const QString chunk = resolveContextRequest(req);
+        if (chunk.isEmpty()) continue;
+        context += chunk + QChar('\n');
+        servedLabels.append(req);
+    }
+    if (context.isEmpty()) return false;
+    if (context.size() > MAX_CONTEXT_CHARS)
+        context = context.left(MAX_CONTEXT_CHARS) + QStringLiteral("\n...(truncated)\n");
+
+    m_contextRounds++;
+
+    emit asyncResponseReady(
+        (m_uiEnglish ? QStringLiteral("🔍 Reading: ") : QStringLiteral("🔍 Смотрю: "))
+        + servedLabels.join(QStringLiteral(", ")));
+
+    const QString followUp =
+        QStringLiteral("[CONTEXT DELIVERY — requested by you via [NEED:...]]\n")
+        + context
+        + QStringLiteral("\n[/CONTEXT DELIVERY]\n"
+          "This is the project content you asked for, read from disk. "
+          "Now answer the original request in full. Ask for more context with "
+          "[NEED:...] only if it is genuinely required — you have ")
+        + QString::number(MAX_CONTEXT_ROUNDS - m_contextRounds)
+        + QStringLiteral(" more chance(s). Original request: ") + userInput;
+
+    m_claudeApi->sendMessage(followUp,
+        [this, userInput, hadAttachments](bool ok, const QString& resp) {
+            if (ok) {
+                handleClaudeCodeResponse(userInput, resp, hadAttachments);
+            } else if (!emitOfflineAnswer(userInput)) {
+                // Дозапрос не дошёл — счётчик сбрасываем, иначе следующий
+                // ход начнётся с уже израсходованными раундами.
+                m_contextRounds = 0;
+                emit asyncResponseError(resp);
+            }
+        });
+
+    return true;
 }

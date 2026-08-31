@@ -3,6 +3,7 @@
 // ============================================================
 #include "llm_cache_manager.h"
 #include "database_manager.h"
+#include "memory_manager.h"
 #include "synapse_graph.h"
 
 #include <QCryptographicHash>
@@ -44,16 +45,21 @@ QString LlmCacheManager::hashQuery(qint64 ownerId, const QString& normalized)
 
 QStringList LlmCacheManager::significantKeywords(const QString& normalized)
 {
-    QStringList keywords;
-    for (const QString& w : normalized.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
-        if (w.length() >= 3)
-            keywords.append(w);
-    }
-    return keywords;
+    // Один словарь стоп-слов на весь проект. Раньше здесь стояло «любое
+    // слово от трёх букв», то есть «привет», «пришли» и «мне» считались
+    // значимыми наравне с «протокол» — и два запроса, у которых общего
+    // только вежливость и глагол просьбы, набирали половину совпадения.
+    // SynapseGraph уже фильтровал те же слова через MemoryManager::tokenize,
+    // так что две части роутера расходились в том, что вообще считать
+    // темой запроса.
+    return MemoryManager::tokenize(normalized);
 }
 
-float LlmCacheManager::keywordOverlap(const QString& a, const QString& b)
+float LlmCacheManager::keywordOverlap(const QString& a, const QString& b,
+                                       int* sharedOut)
 {
+    if (sharedOut) *sharedOut = 0;
+
     const QStringList aKeywords = significantKeywords(normalizeQuery(a));
     if (aKeywords.isEmpty()) return 0.0f;
     const QSet<QString> aSet(aKeywords.begin(), aKeywords.end());
@@ -64,6 +70,8 @@ float LlmCacheManager::keywordOverlap(const QString& a, const QString& b)
     int hits = 0;
     for (const QString& kw : aSet)
         if (bSet.contains(kw)) ++hits;
+
+    if (sharedOut) *sharedOut = hits;
     return static_cast<float>(hits) / aSet.size();
 }
 
@@ -296,7 +304,26 @@ void LlmCacheManager::logRouterDecision(qint64 ownerId, CaseMatch::Tier tier)
 
 LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString& query)
 {
-    static constexpr float kSimilarThreshold = 0.6f;
+    // Порог доли (0.6) отсюда убран намеренно. Любая доля меньше единицы
+    // означает, что в одном из вопросов есть значимое слово, которого нет
+    // в другом, — а это, как правило, не пересказ, а ДРУГОЙ вопрос:
+    //
+    //   «любимый фильм»            × «любимый фильм ужасов»   → 0.75
+    //   «схему как работает пк»    × «схему с объяснением...» → 0.75
+    //
+    // Обе пары дают одинаковую цифру, хотя первая — сужение темы (ответ
+    // про ужасы не отвечает на вопрос про кино вообще), а вторая — просто
+    // другая формулировка. Отличить «ужасов» от «объяснением» по словам
+    // нельзя: нужен смысл. Поэтому порог не поднимается, а убирается —
+    // из памяти отвечаем только когда набор значимых слов СОВПАДАЕТ, всё
+    // остальное уходит к модели. Similar при этом не вырождается в Exact:
+    // он по-прежнему ловит другой порядок слов, пунктуацию, приветствия и
+    // прочую обёртку, которую фильтрует significantKeywords.
+    static constexpr float kFullOverlap = 0.999f;
+
+    // И минимум два общих значимых слова: у запроса из одного слова
+    // совпадение множеств достигается слишком легко.
+    static constexpr int kMinSharedKeywords = 2;
 
     // Every real call is logged (Layer-4 independence metric) — the only
     // path that skips it is the "too short to be a real query" guard below,
@@ -332,15 +359,24 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString&
     if (candidates.isEmpty()) return finish(result);
 
     CaseMatch best;
+    int  bestShared    = 0;
+    bool bestSetsEqual = false;
     for (const CaseMatch& c : candidates) {
-        const float overlap = keywordOverlap(norm, c.matchedQuery);
-        if (overlap > best.overlap) {
-            best = c;
-            best.overlap = overlap;
-        }
+        int shared = 0;
+        const float overlap = keywordOverlap(norm, c.matchedQuery, &shared);
+        if (overlap <= best.overlap) continue;
+
+        best         = c;
+        best.overlap = overlap;
+        bestShared   = shared;
+        // Обратное направление: сколько значимых слов ЗАПОМНЕННОГО вопроса
+        // нашлось в текущем. Единица в обе стороны = множества равны, то
+        // есть лишних слов нет ни там, ни там.
+        bestSetsEqual = overlap >= kFullOverlap
+                     && keywordOverlap(c.matchedQuery, norm) >= kFullOverlap;
     }
 
-    if (best.overlap >= kSimilarThreshold) {
+    if (bestSetsEqual && bestShared >= kMinSharedKeywords) {
         best.tier = CaseMatch::Tier::Similar;
         SynapseGraph::instance().reinforce(ownerId, norm);
         return finish(best);
@@ -350,7 +386,11 @@ LlmCacheManager::CaseMatch LlmCacheManager::route(qint64 ownerId, const QString&
     // of concept-linked fragments instead (spreading activation over
     // SynapseGraph). This is the "puzzle" fallback: a query that textually
     // matches nothing can still be conceptually made of pieces seen before.
-    static constexpr float kAssociativeCompletenessFloor = 0.5f;
+    // Ассоциативный слой отдаёт ДОСЛОВНЫЙ прошлый ответ, а не собранный из
+    // кусочков текст, — поэтому «половина понятий запроса где-то раньше
+    // встречалась» для него не основание. Именно на 0.5 срабатывал разбор
+    // «привет пришли мне схему p2p протокола» → ответ про схему ПК.
+    static constexpr float kAssociativeCompletenessFloor = 0.75f;
     const SynapseGraph::Assembly assembly = SynapseGraph::instance().assemble(ownerId, norm);
     if (!assembly.fragments.isEmpty() && assembly.completeness >= kAssociativeCompletenessFloor) {
         const SynapseGraph::Fragment& top = assembly.fragments.first();

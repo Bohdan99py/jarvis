@@ -994,7 +994,13 @@ bool Brain::tryLocalAnswer(const QString& lower, Intent& intent) const
         // reads as confident, only genuinely loose matches read as unsure.
         intent.confidence = 0.5f + match.overlap * 0.45f;
 
-        if (match.overlap < kUncertainOverlapCeiling) {
+        // Associative — это не «похожий вопрос», а ответ на ДРУГОЙ вопрос,
+        // собранный по общим понятиям. Его нельзя выдавать без оговорки,
+        // каким бы высоким ни было completeness.
+        const bool associative =
+            match.tier == LlmCacheManager::CaseMatch::Tier::Associative;
+
+        if (associative || match.overlap < kUncertainOverlapCeiling) {
             intent.localResponse = match.response
                 + QStringLiteral("\n\n🔎 _Похоже на похожий случай — могу ошибаться._");
             intent.doubtId = SelfJournal::instance().logDoubt(
@@ -1007,9 +1013,13 @@ bool Brain::tryLocalAnswer(const QString& lower, Intent& intent) const
         } else {
             intent.localResponse = match.response;
         }
-        qDebug() << "[Brain] Similar local match found (overlap="
-                 << match.overlap << "). Bypassing remote LLM."
-                 << lower.left(60);
+        // Пишем НАСТОЯЩИЙ слой: раньше и Similar, и Associative логировались
+        // одинаково как "Similar", и по логу нельзя было понять, откуда
+        // взялся чужой ответ — совпали слова или сработали ассоциации.
+        qDebug() << "[Brain]" << (associative ? "Associative" : "Similar")
+                 << "local match (overlap=" << match.overlap
+                 << ", matched=" << match.matchedQuery.left(60)
+                 << "). Bypassing remote LLM." << lower.left(60);
     }
 
     return true;

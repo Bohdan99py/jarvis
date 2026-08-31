@@ -5,10 +5,10 @@
         "en": "Programmer (IDE agent)"
     },
     "description": {
-        "ru": "Вайбкодинг: JARVIS пишет и правит код прямо в файлах проекта ([FILE]/[DIFF] блоки), выполняет команды, открывает IDE. Выключите, если не программируете — JARVIS останется обычным ассистентом.",
-        "en": "Vibecoding: JARVIS writes and edits code directly in project files ([FILE]/[DIFF] blocks), runs commands, opens the IDE. Disable if you don't code — JARVIS keeps working as a regular assistant."
+        "ru": "Инженер проекта: JARVIS индексирует весь проект (C++, QML, CMake, ресурсы, ассеты), понимает чем он собирается и что от чего зависит, сам дочитывает недостающие файлы ([NEED:]), правит код, сборочные скрипты и ресурсы, перемещает и конвертирует ассеты — с журналом правок и откатом по команде «отмени правки». Выключите, если не программируете — JARVIS останется обычным ассистентом.",
+        "en": "Project engineer: JARVIS indexes the whole project (C++, QML, CMake, resources, assets), knows how it is built and what depends on what, pulls in missing files by itself ([NEED:]), edits code, build scripts and resources, moves and converts assets — every change journalled and revertable with \"undo edits\". Disable if you don't code — JARVIS keeps working as a regular assistant."
     },
-    "version": "1.0.0",
+    "version": "2.1.0",
     "features": ["code_actions"],
     "default_enabled": true,
     "category": {

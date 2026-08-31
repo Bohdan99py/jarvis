@@ -4,6 +4,7 @@
 
 #include "security_camera.h"
 #include "face_registry.h"
+#include "artifact_registry.h"
 #include "jarvis_paths.h"
 
 #include <QDir>
@@ -15,6 +16,7 @@
 #include <QPainter>
 #include <QProcess>
 #include <QDebug>
+#include <QMutex>
 #include <QThread>
 #include <QtConcurrent>
 #include <QCoreApplication>
@@ -74,11 +76,25 @@ static cv::VideoCapture& cam()
     return cap;
 }
 
+// Устройство одно на всё приложение, а желающих читать из него трое:
+// сторожевой цикл охраны (свой поток), запись клипа движения
+// (QtConcurrent) и предпросмотр из окна камеры (GUI-поток). Без
+// сериализации два read() по одному cv::VideoCapture дают пустой кадр,
+// и это выглядит как "камера занята другим приложением" — хотя занята
+// она нами же. Рекурсивный: captureFrameFullRes берёт замок и внутри
+// зовёт openCam, который берёт его снова.
+static QRecursiveMutex& camMutex()
+{
+    static QRecursiveMutex m;
+    return m;
+}
+
 // Открытие камеры с fallback-бэкендом. Раньше необработанное
 // cv::Exception из open()/read() убивало приложение молча —
 // "включаешь камеру и всё вылетает без ошибок".
 static void openCam()
 {
+    QMutexLocker lock(&camMutex());
     auto& c = cam();
     if (c.isOpened()) return;
     try {
@@ -96,6 +112,7 @@ static void openCam()
 
 static void closeCam()
 {
+    QMutexLocker lock(&camMutex());
     auto& c = cam();
     try {
         if (c.isOpened()) c.release();
@@ -111,6 +128,25 @@ static void closeCam()
 
 static constexpr int LBP_GRID = 4; // 4x4 = 16 regions
 static constexpr int FACE_SZ  = 200;
+
+// ── Строгость узнавания и детекции ──────────────────────────
+//
+// Максимальное РАССТОЯНИЕ Bhattacharyya, при котором лицо считается
+// своим. 0 = идентично, 1 = ничего общего. Для LBPH типичный порог
+// свой/чужой лежит около 0.3–0.4; берём 0.35 и логируем реальные
+// значения, чтобы после первого теста подстроить по факту, а не на глаз.
+static constexpr double FACE_MATCH_THRESHOLD = 0.35;
+
+// minNeighbors у каскада Хаара: сколько перекрывающихся откликов нужно,
+// чтобы считать область лицом. Было 4 — при таком значении детектор
+// принимал за лицо шею и картинку с бабочками на стене. 7 отсекает
+// случайные текстуры, оставляя реальные лица.
+static constexpr int CASCADE_MIN_NEIGHBORS = 7;
+
+// Минимальный размер лица в пикселях. Мелкие области — почти всегда
+// ложные срабатывания на фоне, а лицо, снятое настолько мелко, всё
+// равно не даст пригодной для узнавания текстуры.
+static constexpr int CASCADE_MIN_FACE_PX = 80;
 
 static cv::Mat computeLBP(const cv::Mat& gray)
 {
@@ -151,7 +187,12 @@ static cv::Mat lbpGridHistogram(const cv::Mat& grayFace)
             cv::Mat hist;
             cv::calcHist(&cell, 1, nullptr, cv::Mat(), hist, 1,
                          &histSize, &histRange);
-            cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX);
+            // L1, а не MINMAX: для Chi-Square/Bhattacharyya гистограмма
+            // должна быть распределением (сумма = 1). MINMAX растягивает
+            // каждую клетку по её собственному максимуму и стирает разницу
+            // в том, НАСКОЛЬКО часто встречается паттерн — а именно этим
+            // одно лицо и отличается от другого.
+            cv::normalize(hist, hist, 1, 0, cv::NORM_L1);
             fullHist.push_back(hist);
         }
     }
@@ -163,13 +204,26 @@ static double compareLBPHistograms(const cv::Mat& a, const cv::Mat& b)
     if (a.cols != b.cols) return 0;
     const int regionSize = 256;
     const int regions = a.cols / regionSize;
-    double totalCorr = 0;
+    // Bhattacharyya, а не корреляция. Замер на реальном кадре показал, что
+    // HISTCMP_CORREL насыщается: владелец и посторонний человек в одном
+    // кадре давали 0.87 и 0.88 — разделяющего порога просто не существует,
+    // 0.90 отвергает обоих, 0.85 принимает обоих. Корреляция отвечает на
+    // вопрос «это вообще лицо», а не «чьё оно».
+    //
+    // Bhattacharyya — каноническая мера для LBPH (в OpenCV
+    // LBPHFaceRecognizer используется Chi-Square, того же семейства):
+    // сравнивает распределения, а не форму кривой, и не насыщается.
+    //
+    // ВНИМАНИЕ: это РАССТОЯНИЕ, 0 = идентично, 1 = ничего общего.
+    // Смысл числа обратный прежнему, поэтому все сравнения с порогом
+    // должны быть "<", а не ">".
+    double totalDist = 0;
     for (int r = 0; r < regions; ++r) {
         cv::Mat ra = a.colRange(r * regionSize, (r + 1) * regionSize);
         cv::Mat rb = b.colRange(r * regionSize, (r + 1) * regionSize);
-        totalCorr += cv::compareHist(ra.t(), rb.t(), cv::HISTCMP_CORREL);
+        totalDist += cv::compareHist(ra.t(), rb.t(), cv::HISTCMP_BHATTACHARYYA);
     }
-    return totalCorr / regions;
+    return totalDist / regions;
 }
 
 static cv::Mat prepareFace(const cv::Mat& gray, const cv::Rect& face)
@@ -428,6 +482,7 @@ void SecurityCamera::deescalateToSentinel()
     m_powerState = Sentinel;
 #ifdef JARVIS_HAS_OPENCV
     if (isOpenCvAvailable()) {
+        QMutexLocker lock(&camMutex());
         auto& c = cam();
         if (c.isOpened()) {
             c.set(cv::CAP_PROP_FRAME_WIDTH,  SENTINEL_RES_W);
@@ -480,6 +535,7 @@ void SecurityCamera::startMonitoring(int sentinelIntervalSec)
     m_powerState = Sentinel;
 #ifdef JARVIS_HAS_OPENCV
     openCam();
+    QMutexLocker lock(&camMutex());
     auto& c = cam();
     if (c.isOpened()) {
         c.set(cv::CAP_PROP_FRAME_WIDTH,  SENTINEL_RES_W);
@@ -505,10 +561,8 @@ void SecurityCamera::stopMonitoring()
     m_sentinelTimer->stop();
     m_deescalateTimer->stop();
     m_lockCheckTimer->stop();
-    if (m_screenLocked) {
-        m_screenLocked = false;
-        emit requestUnlockOverlay();
-    }
+    // Снимать блокировку здесь больше нечего: сеанс запирает Windows, и
+    // выключение охраны не должно (и не может) впускать кого-то обратно.
     removeInputHook();
 
     if (m_recording) {
@@ -530,11 +584,29 @@ void SecurityCamera::checkNow() { onSentinelTick(); }
 //  Frame capture
 // ============================================================
 
+// Любой удачно прочитанный кадр попадает в кэш: он же служит
+// предпросмотру, когда устройство занято сторожевым циклом.
+QImage SecurityCamera::cacheFrame(const QImage& frame)
+{
+    if (!frame.isNull()) {
+        QMutexLocker lock(&m_frameMutex);
+        m_lastFrame = frame;
+    }
+    return frame;
+}
+
+QImage SecurityCamera::lastFrame() const
+{
+    QMutexLocker lock(&m_frameMutex);
+    return m_lastFrame;
+}
+
 QImage SecurityCamera::captureFrameLowRes()
 {
 #ifdef JARVIS_HAS_OPENCV
     if (!isOpenCvAvailable()) return {};
     try {
+        QMutexLocker lock(&camMutex());
         auto& c = cam();
         if (!c.isOpened()) return {};
         cv::Mat frame;
@@ -543,9 +615,9 @@ QImage SecurityCamera::captureFrameLowRes()
         if (frame.cols > SENTINEL_RES_W) {
             cv::Mat small;
             cv::resize(frame, small, cv::Size(SENTINEL_RES_W, SENTINEL_RES_H));
-            return matToQImage(small);
+            return cacheFrame(matToQImage(small));
         }
-        return matToQImage(frame);
+        return cacheFrame(matToQImage(frame));
     } catch (const std::exception& e) {
         qWarning() << "[SecurityCam] captureFrameLowRes exception:" << e.what();
         return {};
@@ -560,6 +632,7 @@ QImage SecurityCamera::captureFrameFullRes()
 #ifdef JARVIS_HAS_OPENCV
     if (isOpenCvAvailable()) {
         try {
+            QMutexLocker lock(&camMutex());
             auto& c = cam();
             if (!c.isOpened()) openCam();
             if (!c.isOpened()) {
@@ -571,8 +644,17 @@ QImage SecurityCamera::captureFrameFullRes()
             c.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
             cv::Mat frame;
             c.read(frame);
+
+            // Отпускаем устройство, если охрана не ведётся. Камера
+            // открывалась при первом же обращении и не закрывалась
+            // никогда — светодиод горел постоянно, и со стороны это
+            // выглядело как слежка в фоне, хотя кадры никто не брал.
+            // Пока идёт наблюдение, камера остаётся открытой намеренно:
+            // переоткрывать её каждую минуту дороже и медленнее.
+            if (!m_monitoring) closeCam();
+
             if (frame.empty()) return {};
-            return matToQImage(frame);
+            return cacheFrame(matToQImage(frame));
         } catch (const std::exception& e) {
             qWarning() << "[SecurityCam] captureFrameFullRes exception:" << e.what();
             return {};
@@ -600,8 +682,8 @@ int SecurityCamera::detectFaces(const QImage& frame)
         cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
         cv::equalizeHist(gray, gray);
         std::vector<cv::Rect> faces;
-        cascade.detectMultiScale(gray, faces, 1.1, 4,
-                                  cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+        cascade.detectMultiScale(gray, faces, 1.1, CASCADE_MIN_NEIGHBORS,
+                                  cv::CASCADE_SCALE_IMAGE, cv::Size(CASCADE_MIN_FACE_PX, CASCADE_MIN_FACE_PX));
         return static_cast<int>(faces.size());
     } catch (const std::exception& e) {
         qWarning() << "[SecurityCam] detectFaces exception:" << e.what();
@@ -630,8 +712,8 @@ bool SecurityCamera::isOwner(const QImage& frame)
     if (cascade.empty()) return false;
 
     std::vector<cv::Rect> faces;
-    cascade.detectMultiScale(gray, faces, 1.1, 4,
-                              cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+    cascade.detectMultiScale(gray, faces, 1.1, CASCADE_MIN_NEIGHBORS,
+                              cv::CASCADE_SCALE_IMAGE, cv::Size(CASCADE_MIN_FACE_PX, CASCADE_MIN_FACE_PX));
 
     // Preload sample LBP histograms (cached per call — samples rarely change)
     std::vector<cv::Mat> sampleHists;
@@ -656,16 +738,17 @@ bool SecurityCamera::isOwner(const QImage& frame)
         for (const auto& sh : sampleHists)
             scores.push_back(compareLBPHistograms(probeHist, sh));
 
-        std::sort(scores.rbegin(), scores.rend());
+        // По возрастанию: теперь это расстояние, лучшее совпадение — наименьшее.
+        std::sort(scores.begin(), scores.end());
         const int topN = std::min(3, static_cast<int>(scores.size()));
         double avg = 0;
         for (int i = 0; i < topN; ++i) avg += scores[i];
         avg /= topN;
 
         qDebug() << "[SecurityCam] LBP match score:" << avg
-                 << "(best:" << scores[0] << ", threshold: 0.45)";
+                 << "(best:" << scores[0] << ", threshold:" << FACE_MATCH_THRESHOLD << ")";
 
-        if (avg > 0.45) return true;
+        if (avg < FACE_MATCH_THRESHOLD) return true;
     }
     return false;
 
@@ -751,8 +834,8 @@ QList<FaceObservation> SecurityCamera::identifyFaces(const QImage& frame)
         cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
 
         std::vector<cv::Rect> faces;
-        cascade.detectMultiScale(gray, faces, 1.1, 4,
-                                  cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+        cascade.detectMultiScale(gray, faces, 1.1, CASCADE_MIN_NEIGHBORS,
+                                  cv::CASCADE_SCALE_IMAGE, cv::Size(CASCADE_MIN_FACE_PX, CASCADE_MIN_FACE_PX));
         if (faces.empty()) return result;
 
         // Известные лица: локальные + принятые по P2P-мешу с других узлов
@@ -776,16 +859,34 @@ QList<FaceObservation> SecurityCamera::identifyFaces(const QImage& frame)
                         scores.push_back(compareLBPHistograms(
                             probeHist, histFromVector(h)));
                     if (scores.empty()) continue;
-                    std::sort(scores.rbegin(), scores.rend());
+                    // По возрастанию: теперь это расстояние, лучшее совпадение — наименьшее.
+        std::sort(scores.begin(), scores.end());
                     const int topN = static_cast<int>(
                         std::min<size_t>(3, scores.size()));
                     double avg = 0;
                     for (int i = 0; i < topN; ++i) avg += scores[i];
                     avg /= topN;
-                    if (avg > bestScore) { bestScore = avg; bestFace = &kf; }
+                    // Меньшее расстояние = лучше, поэтому ищем минимум.
+                    if (avg < bestScore) { bestScore = avg; bestFace = &kf; }
                 }
 
-                if (bestFace && bestScore > 0.45) {
+                // Пишем счёт ВСЕГДА, а не только при совпадении. Без этого
+                // «чужого узнало как владельца» невозможно расследовать:
+                // не видно, каким числом обернулось чужое лицо, и подбор
+                // порога превращается в гадание. Второй путь (isOwner)
+                // логировал, а этот — тот самый, что подписывает имя в
+                // кадре, — молчал.
+                if (bestFace) {
+                    qDebug() << "[SecurityCam] identify:" << bestFace->name
+                             << "score:" << bestScore
+                             << "threshold:" << FACE_MATCH_THRESHOLD
+                             << (bestScore < FACE_MATCH_THRESHOLD ? "-> MATCH"
+                                                                  : "-> rejected");
+                } else {
+                    qDebug() << "[SecurityCam] identify: no known faces to compare";
+                }
+
+                if (bestFace && bestScore < FACE_MATCH_THRESHOLD) {
                     obs.known      = true;
                     obs.name       = bestFace->name;
                     obs.age        = bestFace->age;
@@ -840,17 +941,50 @@ QImage SecurityCamera::annotateFaces(const QImage& frame,
     return annotated;
 }
 
+bool SecurityCamera::isScreenLocked() const
+{
+    // При запертом сеансе ввод уходит на защищённый рабочий стол
+    // Winlogon, к которому обычный процесс доступа не имеет — открыть
+    // его не удаётся, и это самый прямой признак блокировки.
+    //
+    // Тот же ответ приходит на время запроса UAC: там тоже защищённый
+    // рабочий стол. Для наших целей это верно — экраном в этот момент
+    // всё равно никто посторонний не воспользуется.
+    HDESK desktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+    if (!desktop)
+        return true;
+    CloseDesktop(desktop);
+    return false;
+}
+
 void SecurityCamera::lockScreen()
 {
-    if (m_screenLocked) return;
-    m_screenLocked = true;
-    emit requestLockOverlay();
+    if (isScreenLocked())
+        return;
 
-    // While locked, scan for owner face every 3s to auto-unlock
-    if (!m_lockCheckTimer->isActive())
+    if (!LockWorkStation()) {
+        // Отказать может политика домена или отсутствие интерактивного
+        // сеанса. Молчать нельзя: человек уверен, что машина заперта.
+        const DWORD err = GetLastError();
+        qWarning() << "[SecurityCam] LockWorkStation failed, error" << err;
+        emit alertMessage(QStringLiteral(
+            "⚠ Не удалось заблокировать сеанс (код %1) — экран остался открыт")
+                .arg(err));
+        return;
+    }
+
+    emit screenLocked();
+
+    // Пока сеанс заперт — следить за движением, если это включено.
+    // Проверка лица отсюда ушла: разблокировать Windows программно
+    // нельзя, поэтому смотреть в камеру ради этого незачем. Без
+    // включённых оповещений о движении камера при блокировке вообще
+    // не трогается — из-за неё она и мигала.
+    if (m_monitoring && m_alertMotion && !m_lockCheckTimer->isActive())
         m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
 
-    qDebug() << "[SecurityCam] Screen locked via overlay";
+    qDebug() << "[SecurityCam] Session locked (LockWorkStation), motion watch:"
+             << (m_monitoring && m_alertMotion ? "on" : "off");
 }
 
 // ============================================================
@@ -882,6 +1016,7 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
         return;
     }
     openCam();
+    QMutexLocker lock(&camMutex());
     auto& c = cam();
     if (!c.isOpened()) {
         emit alertMessage(QStringLiteral("Cannot enroll: no webcam"));
@@ -893,15 +1028,47 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
     std::vector<cv::Mat> samples;
     std::vector<int> labels;
 
+    // Прогрев. Вебкамере нужно время на автоэкспозицию и автофокус: первые
+    // кадры после открытия устройства приходят чёрными или размытыми, лицо
+    // в них не находится. Без прогрева обучение молча тратило на них
+    // попытки и заканчивалось нулём — «камера включилась и ничего не
+    // записала». Кадры именно ЧИТАЮТСЯ, а не просто пережидаются: у многих
+    // драйверов экспозиция подстраивается только при активном чтении.
+    for (int i = 0; i < 12; ++i) {
+        cv::Mat warm;
+        c.read(warm);
+        QThread::msleep(60);
+    }
+
+    // Счётчики причин, а не только результата: «0 образцов» одинаково
+    // выглядит и когда камеру занял другой процесс, и когда человек не
+    // попал в кадр, и когда в кадре двое. Это разные проблемы с разными
+    // решениями, и пользователю нужно знать, какая из них его.
+    int emptyFrames = 0, noFace = 0, multiFace = 0;
+    // Средняя яркость и размер кадра. «Лицо не найдено» одинаково звучит,
+    // когда человека нет в кадре и когда камера отдаёт почти чёрное
+    // изображение (не открылась диафрагма, закрыта шторка, работает не та
+    // камера — например ИК-модуль Windows Hello). Различить эти случаи по
+    // тексту невозможно, а по числу — тривиально.
+    double brightnessSum = 0.0;
+    int    brightnessN   = 0;
+    int    frameW = 0, frameH = 0;
+
     for (int i = 0; i < sampleCount * 3 && static_cast<int>(samples.size()) < sampleCount; ++i) {
         cv::Mat frame;
         c.read(frame);
-        if (frame.empty()) continue;
+        if (frame.empty()) { ++emptyFrames; QThread::msleep(200); continue; }
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        brightnessSum += cv::mean(gray)[0];
+        ++brightnessN;
+        frameW = gray.cols;
+        frameH = gray.rows;
         std::vector<cv::Rect> faces;
-        cascade.detectMultiScale(gray, faces, 1.1, 4,
-                                  cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+        cascade.detectMultiScale(gray, faces, 1.1, CASCADE_MIN_NEIGHBORS,
+                                  cv::CASCADE_SCALE_IMAGE, cv::Size(CASCADE_MIN_FACE_PX, CASCADE_MIN_FACE_PX));
+        if (faces.empty())      ++noFace;
+        else if (faces.size() > 1) ++multiFace;
         if (faces.size() == 1) {
             cv::Mat prepared = prepareFace(gray, faces[0]);
             samples.push_back(prepared);
@@ -912,8 +1079,58 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
     }
 
     if (static_cast<int>(samples.size()) < 3) {
-        emit alertMessage(QStringLiteral("Enrollment failed: only %1 samples")
-                              .arg(samples.size()));
+        // Называем причину, а не только цифру. Пустые кадры — устройство
+        // занято или отдаёт чёрное; нет лица — человек вне кадра или темно;
+        // несколько лиц — обучение намеренно отказывается гадать, чьё лицо
+        // считать владельцем.
+        QString why;
+        if (emptyFrames > noFace && emptyFrames > multiFace) {
+            why = QStringLiteral("camera returned %1 empty frames — the webcam is "
+                                 "probably busy in another app (or the preview window "
+                                 "is open)").arg(emptyFrames);
+        } else if (multiFace > noFace) {
+            why = QStringLiteral("saw more than one face in %1 frames — enroll alone "
+                                 "in the shot").arg(multiFace);
+        } else {
+            const double avgBright = brightnessN > 0 ? brightnessSum / brightnessN : 0.0;
+            // Порог 25 из 255 — это уже практически чёрный кадр; при таком
+            // уровне каскад Хаара не найдёт лицо в принципе, и советовать
+            // «сядьте лицом к камере» бессмысленно: проблема не в позе.
+            if (avgBright < 25.0) {
+                why = QStringLiteral("frames are almost black (brightness %1/255, %2x%3) — "
+                                     "the lens cover may be shut, or Windows picked an IR "
+                                     "camera instead of the colour one")
+                          .arg(avgBright, 0, 'f', 1).arg(frameW).arg(frameH);
+            } else {
+                why = QStringLiteral("no face found in %1 frames (brightness %2/255, %3x%4) — "
+                                     "sit facing the camera with enough light")
+                          .arg(noFace).arg(avgBright, 0, 'f', 1).arg(frameW).arg(frameH);
+            }
+        }
+        // Кладём последний кадр на диск. Числа сужают круг, но увидеть, что
+        // именно видела камера, решает вопрос сразу: не тот угол, шторка,
+        // чужая камера, засвет. Один файл, перезаписывается каждой
+        // неудачей — свалки не будет.
+        {
+            cv::Mat last;
+            c.read(last);
+            if (!last.empty()) {
+                const QString shot = ownerSamplesDir() + QStringLiteral("/../enroll_debug.png");
+                QDir().mkpath(QFileInfo(shot).absolutePath());
+                cv::imwrite(QFileInfo(shot).absoluteFilePath().toStdString(), last);
+                qWarning() << "[SecurityCam] debug frame saved:"
+                           << QFileInfo(shot).absoluteFilePath();
+            }
+        }
+        qWarning() << "[SecurityCam] enroll failed. samples=" << samples.size()
+                   << "empty=" << emptyFrames << "noFace=" << noFace
+                   << "multiFace=" << multiFace;
+        // И на неудачном пути тоже: неудачное обучение не повод держать
+        // камеру включённой.
+        if (!m_monitoring) closeCam();
+
+        emit alertMessage(QStringLiteral("Enrollment failed (%1 samples): %2")
+                              .arg(samples.size()).arg(why));
         return;
     }
 
@@ -926,6 +1143,14 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
     for (int i = 0; i < static_cast<int>(samples.size()); ++i) {
         const QString path = QStringLiteral("%1/owner_%2.png").arg(dir).arg(i, 3, 10, QLatin1Char('0'));
         cv::imwrite(path.toStdString(), samples[i]);
+
+        // Регистрируем как артефакт: без этого 15 снятых фотографий
+        // существовали только на диске. В окне «Файлы от Джарвиса» их не
+        // было, и человек, снявшийся 15 раз, свои же фотографии найти не
+        // мог — что выглядит как «камера сняла и потеряла».
+        ArtifactRegistry::instance().record(
+            path, QString::fromLatin1(ArtifactRegistry::kPhoto),
+            QStringLiteral("Face sample %1").arg(i + 1));
     }
     m_ownerEnrolled = true;
 
@@ -943,6 +1168,10 @@ void SecurityCamera::enrollOwnerFace(int sampleCount)
             kf.histograms.append(histToVector(lbpGridHistogram(s)));
         FaceRegistry::instance().upsertFace(kf);
     }
+
+    // Обучение закончено — камера больше не нужна, гасим её, если охрана
+    // не ведётся (иначе светодиод остался бы гореть до перезапуска).
+    if (!m_monitoring) closeCam();
 
     emit enrollmentComplete(static_cast<int>(samples.size()));
     emit alertMessage(QStringLiteral("Owner enrolled (%1 samples)")
@@ -1003,8 +1232,8 @@ int SecurityCamera::enrollFaceFromImages(const QStringList& imagePaths,
             cv::equalizeHist(gray, gray);
 
             std::vector<cv::Rect> faces;
-            cascade.detectMultiScale(gray, faces, 1.1, 4,
-                                      cv::CASCADE_SCALE_IMAGE, cv::Size(60, 60));
+            cascade.detectMultiScale(gray, faces, 1.1, CASCADE_MIN_NEIGHBORS,
+                                      cv::CASCADE_SCALE_IMAGE, cv::Size(CASCADE_MIN_FACE_PX, CASCADE_MIN_FACE_PX));
             if (faces.empty()) {
                 emit alertMessage(QStringLiteral("⚠ No face found in: %1")
                                       .arg(QFileInfo(path).fileName()));
@@ -1118,7 +1347,13 @@ void SecurityCamera::onSentinelTick()
             return;
         }
 
-        if (m_ownerEnrolled && !m_screenLocked) {
+        // m_autoLock проверяется здесь, а не только в ветке незнакомца.
+        // Раньше «владелец отошёл» запирал экран независимо от флажка
+        // «Блокировать экран при угрозе» — то есть выключить это было
+        // нельзя. Пока экран закрывал свой оверлей, это была неприятность;
+        // с настоящей блокировкой Windows это машина, запертая всерьёз
+        // вопреки выключенной настройке.
+        if (m_ownerEnrolled && m_autoLock && !isScreenLocked()) {
             const int faces = detectFaces(lowRes);
             if (faces == 0) {
                 ++m_ownerAbsentTicks;
@@ -1129,7 +1364,8 @@ void SecurityCamera::onSentinelTick()
                         lockScreen();
                         emit ownerAbsent(hiRes);
                         emit alertMessage(QStringLiteral(
-                            "🔒 Owner absent — screen locked. Come back to auto-unlock."));
+                            "🔒 Владельца нет на месте — сеанс заперт. "
+                            "Вход обычный: пароль, PIN или Windows Hello."));
                     }
                     m_ownerAbsentTicks = 0;
                 }
@@ -1148,15 +1384,16 @@ void SecurityCamera::onSentinelTick()
 
     if (faceCount == 0) {
         ++m_ownerAbsentTicks;
-        if (m_ownerEnrolled && !m_screenLocked
+        if (m_ownerEnrolled && m_autoLock && !isScreenLocked()
             && m_ownerAbsentTicks >= OWNER_ABSENT_LOCK_TICKS) {
             lockScreen();
             emit ownerAbsent(frame);
             emit alertMessage(QStringLiteral(
-                "🔒 Owner absent — screen locked. Come back to auto-unlock."));
+                "🔒 Владельца нет на месте — сеанс заперт. "
+                "Вход обычный: пароль, PIN или Windows Hello."));
             m_ownerAbsentTicks = 0;
         }
-        if (m_ownerEnrolled && !m_screenLocked
+        if (m_ownerEnrolled && m_autoLock && !isScreenLocked()
             && m_ownerAbsentTicks < OWNER_ABSENT_LOCK_TICKS) {
             m_deescalateTimer->stop();
         } else if (!m_deescalateTimer->isActive()) {
@@ -1187,13 +1424,10 @@ void SecurityCamera::onSentinelTick()
     if (ownerPresent) {
         emit ownerRecognized(frame);
 
-        if (m_screenLocked && m_autoUnlock) {
-            m_screenLocked = false;
-            m_lockCheckTimer->stop();
-            emit requestUnlockOverlay();
-            emit alertMessage(QStringLiteral("🔓 Owner recognized — screen unlocked"));
-            qDebug() << "[SecurityCam] Owner recognized → auto-unlock";
-        }
+        // Здесь была авторазблокировка по лицу. Снять блокировку сеанса
+        // из программы Windows не позволяет — это та же защита, из-за
+        // которой запертый экран нельзя подделать окном. Узнавание лица
+        // на входе умеет Windows Hello, и делает это как надо.
 
         if (faceCount > 1 && !m_companionSuppressed) {
             emit companionNotice(frame, faceCount);
@@ -1207,15 +1441,11 @@ void SecurityCamera::onSentinelTick()
 
     // ── No owner among the faces — real threat ──────────────
 
-    if (faceCount > 1 && m_alertShoulder) {
-        emit unknownFaceDetected(frame, faceCount);
-        if (m_autoLock) {
-            lockScreen();
-            emit alertMessage(QStringLiteral(
-                "⚠ %1 UNKNOWN faces — LOCKED").arg(faceCount));
-        }
-        if (!m_recording) recordMotionClip();
-    } else if (faceCount == 1 && m_alertUnknown) {
+    // Раньше здесь была отдельная ветка "в кадре больше одного" —
+    // подглядывание через плечо. На практике она давала ложные
+    // срабатывания и ничего не добавляла: чужое лицо есть чужое лицо,
+    // одно оно или три. Осталась одна реакция на незнакомца.
+    if (faceCount >= 1 && m_alertUnknown) {
         emit unknownFaceDetected(frame, 1);
         if (m_autoLock) {
             lockScreen();
@@ -1227,43 +1457,40 @@ void SecurityCamera::onSentinelTick()
 }
 
 // ============================================================
-//  Lock-check tick — runs every 3s while screen is locked
-//  Keeps camera alive and checks for owner face to auto-unlock
+//  Тик при запертом сеансе — раз в 3 секунды
+//
+//  Осталась ровно одна задача: заметить движение у машины, пока
+//  хозяина нет, и прислать клип. Проверка лица отсюда ушла вместе
+//  с авторазблокировкой — смотреть в камеру стало незачем.
 // ============================================================
 
 void SecurityCamera::onLockCheckTick()
 {
-    if (!m_screenLocked) {
+    // Следить стоит, только пока сеанс заперт И оповещения о движении
+    // включены: человек мог вернуться и войти, а мог и выключить
+    // оповещения, пока его не было. В обоих случаях камеру надо
+    // отпустить — держать её открытой просто так и значит «мигать».
+    if (!isScreenLocked() || !m_alertMotion) {
         m_lockCheckTimer->stop();
+#ifdef JARVIS_HAS_OPENCV
+        if (isOpenCvAvailable()) closeCam();
+#endif
         return;
     }
 
 #ifdef JARVIS_HAS_OPENCV
     if (!isOpenCvAvailable()) return;
 
+    QMutexLocker lock(&camMutex());
     auto& c = cam();
     if (!c.isOpened()) openCam();
 
     const QImage frame = captureFrameFullRes();
     if (frame.isNull()) return;
 
-    // Check for motion while locked → record + alert
     if (detectMotion(frame) && !m_recording) {
         emit motionDetected(frame);
         recordMotionClip();
-    }
-
-    // Check if owner returned
-    if (m_ownerEnrolled) {
-        const int faces = detectFaces(frame);
-        if (faces > 0 && isOwner(frame) && m_autoUnlock) {
-            m_screenLocked = false;
-            m_lockCheckTimer->stop();
-            emit requestUnlockOverlay();
-            emit ownerRecognized(frame);
-            emit alertMessage(QStringLiteral("🔓 Owner recognized — screen unlocked"));
-            qDebug() << "[SecurityCam] Lock-check: owner detected → unlock";
-        }
     }
 #endif
 }
@@ -1309,7 +1536,7 @@ void SecurityCamera::recordMotionClip()
                 if (m_monitoring) {
                     openCam();
                     m_sentinelTimer->start();
-                    if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                    if (isScreenLocked() && m_alertMotion) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
                 }
             }, Qt::QueuedConnection);
             return;
@@ -1333,7 +1560,7 @@ void SecurityCamera::recordMotionClip()
                 if (m_monitoring) {
                     openCam();
                     m_sentinelTimer->start();
-                    if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                    if (isScreenLocked() && m_alertMotion) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
                 }
             }, Qt::QueuedConnection);
             return;
@@ -1364,7 +1591,7 @@ void SecurityCamera::recordMotionClip()
             if (m_monitoring) {
                 openCam();
                 m_sentinelTimer->start();
-                if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                if (isScreenLocked() && m_alertMotion) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
             }
         }, Qt::QueuedConnection);
 
@@ -1378,7 +1605,7 @@ void SecurityCamera::recordMotionClip()
                 if (m_monitoring) {
                     openCam();
                     m_sentinelTimer->start();
-                    if (m_screenLocked) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
+                    if (isScreenLocked() && m_alertMotion) m_lockCheckTimer->start(LOCK_CHECK_INTERVAL_MS);
                 }
             }, Qt::QueuedConnection);
         }

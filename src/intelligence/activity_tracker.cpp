@@ -409,7 +409,7 @@ void ActivityTracker::ensureTables()
     auto& db = DatabaseManager::instance();
     if (!db.isOpen()) return;
 
-    QSqlQuery q(db.isOpen() ? QSqlDatabase::database() : QSqlDatabase());
+    QSqlQuery q(db.isOpen() ? DatabaseManager::instance().connection() : QSqlDatabase());
     q.exec(R"(CREATE TABLE IF NOT EXISTS activity_log (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     INTEGER NOT NULL DEFAULT 1,
@@ -454,7 +454,7 @@ void ActivityTracker::learnFact(qint64 userId, const QString& category,
         originRole = userOpt->currentRole;
     }
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(R"(INSERT INTO knowledge_base (user_id, category, key, value, confidence, origin_profile_role)
                  VALUES (:uid, :cat, :key, :val, :conf, :origin)
                  ON CONFLICT(user_id, key) DO UPDATE SET
@@ -503,7 +503,7 @@ void ActivityTracker::reinforceFact(qint64 userId, const QString& key)
     auto& db = DatabaseManager::instance();
     if (!db.isOpen()) return;
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(R"(UPDATE knowledge_base SET
                      confidence = MIN(1.0, confidence + 0.05),
                      reinforcements = reinforcements + 1,
@@ -519,7 +519,7 @@ QString ActivityTracker::knowledgeSummary(qint64 userId, int maxFacts) const
     auto& db = DatabaseManager::instance();
     if (!db.isOpen()) return QString();
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(R"(SELECT category, key, value, confidence, reinforcements
                  FROM knowledge_base
                  WHERE user_id = :uid AND confidence >= 0.4

@@ -1,5 +1,7 @@
 import QtQuick
+import QtQuick.Layouts
 import Jarvis.Theme
+import Jarvis.Controls
 
 // ============================================================
 // TrainingCenter.qml — Training & Dataset Center dashboard.
@@ -20,7 +22,7 @@ Rectangle {
     readonly property color violet: Theme.info
 
 
-    property int currentTab: initialTab
+    readonly property int currentTab: tabs.currentIndex
 
     Column {
         anchors.fill: parent
@@ -37,41 +39,19 @@ Rectangle {
         }
 
         // ---- Tab bar ----
-        Row {
-            width: parent.width
-            height: 34
-            spacing: 6
-
-            Repeater {
-                model: [
-                    en ? "Overview" : "Обзор",
-                    en ? "App Usage" : "Использование",
-                    en ? "Local Training" : "Локальное обучение",
-                    en ? "History" : "История",
-                    en ? "Synapse Graph" : "Граф синапсов"
-                ]
-                delegate: Rectangle {
-                    width: tabText.implicitWidth + 24
-                    height: 34
-                    radius: 8
-                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
-                    border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
-                    Text {
-                        id: tabText
-                        anchors.centerIn: parent
-                        text: modelData
-                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
-                        font.pixelSize: 12
-                        font.bold: root.currentTab === index
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.currentTab = index
-                    }
-                }
-            }
+        JarvisTabBar {
+            id: tabs
+            titles: [
+                en ? "Overview"       : "Обзор",
+                en ? "App Usage"      : "Использование",
+                en ? "Local Training" : "Локальное обучение",
+                en ? "History"        : "История",
+                en ? "Synapse Graph"  : "Граф синапсов"
+            ]
+            // initialTab — контекстное свойство из C++: значение на старте.
+            // Клик по вкладке снимает эту привязку, дальше выбор за
+            // пользователем — ровно то поведение, что нужно.
+            currentIndex: initialTab
         }
 
         Rectangle {
@@ -101,202 +81,124 @@ Rectangle {
                 opacity: visible ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 180 } }
 
-                Row {
-                    width: parent.width
-                    height: 160
-                    spacing: 24
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: Theme.spaceLg
 
-                    // Circular progress ring
-                    Canvas {
-                        id: ring
-                        width: 140; height: 140
-                        property real progress: datasetProgress
-                        Behavior on progress { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
-                        onProgressChanged: requestPaint()
-                        onPaint: {
-                            var ctx = getContext("2d")
-                            ctx.reset()
-                            var cx = width / 2, cy = height / 2, r = width / 2 - 10
-                            ctx.lineWidth = 10
-                            ctx.lineCap = "round"
-                            ctx.strokeStyle = "Theme.accentSubtle"
-                            ctx.beginPath()
-                            ctx.arc(cx, cy, r, 0, Math.PI * 2)
-                            ctx.stroke()
-                            ctx.strokeStyle = Theme.accent
-                            ctx.beginPath()
-                            ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2)
-                            ctx.stroke()
+                    // Раньше блоки этой вкладки стояли на абсолютных
+                    // координатах (y: 176, y: 340) — любая правка высоты
+                    // карточки заставляла пересчитывать их вручную.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spaceXl
+
+                        JarvisProgressRing {
+                            value: datasetProgress
+                            caption: en ? "of goal" : "от цели"
                         }
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: 0
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: Theme.spaceMd
+
                             Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: Math.round(ring.progress * 100) + "%"
+                                text: en ? "Training Dataset" : "Датасет обучения"
                                 color: root.cyan
-                                font.pixelSize: 24
-                                font.bold: true
+                                font.family: Type.family
+                                font.pixelSize: Type.caption
+                                font.weight: Font.DemiBold
                             }
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: en ? "of goal" : "от цели"
-                                color: Theme.onSurfaceVariant
-                                font.pixelSize: 10
-                            }
-                        }
-                    }
 
-                    Column {
-                        spacing: 10
-                        width: parent.width - 140 - 24
-                        anchors.verticalCenter: parent.verticalCenter
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.spaceXxl
 
-                        Text { text: en ? "Training Dataset" : "Датасет обучения"; color: root.cyan; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
+                                JarvisStat {
+                                    value: String(datasetTotal)
+                                    label: en ? "pairs saved" : "пар сохранено"
+                                    large: true
+                                }
+                                JarvisStat {
+                                    value: String(datasetLiked)
+                                    label: en ? "liked (👍)" : "лайкнуто (👍)"
+                                    valueColor: root.cyan
+                                    large: true
+                                }
+                                JarvisStat {
+                                    value: String(datasetGoal)
+                                    label: en ? "goal" : "цель"
+                                    valueColor: Theme.onSurfaceVariant
+                                    large: true
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
 
-                        Row {
-                            spacing: 28
-                            Column {
-                                Text { text: datasetTotal; color: Theme.onSurface; font.pixelSize: 20; font.bold: true }
-                                Text { text: en ? "pairs saved" : "пар сохранено"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            }
-                            Column {
-                                Text { text: datasetLiked; color: root.cyan; font.pixelSize: 20; font.bold: true }
-                                Text { text: en ? "liked (👍)" : "лайкнуто (👍)"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            }
-                            Column {
-                                Text { text: datasetGoal; color: Theme.onSurfaceVariant; font.pixelSize: 20; font.bold: true }
-                                Text { text: en ? "goal" : "цель"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
-                            }
-                        }
-
-                        Rectangle {
-                            width: 160; height: 32; radius: 8
-                            color: exportArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                            border.width: 1
-                            border.color: root.cyan
-                            Text {
-                                anchors.centerIn: parent
-                                text: en ? "📤 Export .jsonl" : "📤 Экспорт .jsonl"
-                                color: root.cyan
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: exportArea
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
+                            JarvisButton {
+                                glyph: "📤"
+                                text: en ? "Export .jsonl" : "Экспорт .jsonl"
                                 onClicked: trainingCenter.exportDataset()
                             }
                         }
                     }
-                }
 
-                Rectangle {
-                    id: journalCard
-                    y: 176
-                    width: parent.width
-                    height: 150
-                    radius: 10
-                    color: Theme.surface1
-                    border.width: 1
-                    border.color: Theme.accentSubtle
+                    JarvisPanel {
+                        Layout.fillWidth: true
+                        title: en ? "Voice Journal" : "Голосовой журнал"
+                        compact: true
 
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 14
-                        spacing: 8
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spaceMd
 
-                        Row {
-                            width: parent.width
-                            Text { text: en ? "Voice Journal" : "Голосовой журнал"; color: root.cyan; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
-                            Item { width: parent.width - 260; height: 1 }
-                            Row {
-                                spacing: 6
-                                Text {
-                                    text: en ? "Recording:" : "Запись:"
-                                    color: Theme.onSurfaceVariant
-                                    font.pixelSize: 11
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                Rectangle {
-                                    // No local "checked" state on purpose — always reflects the
-                                    // authoritative recordingActive context property directly, so
-                                    // it can never drift out of sync with the real backend state.
-                                    width: 44; height: 22; radius: 11
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: recordingActive ? root.teal : Theme.outlineStrong
-                                    Behavior on color { ColorAnimation { duration: 150 } }
-                                    Rectangle {
-                                        width: 18; height: 18; radius: 9
-                                        color: Theme.onSurface
-                                        y: 2
-                                        x: recordingActive ? parent.width - width - 2 : 2
-                                        Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: trainingCenter.toggleRecording(!recordingActive)
-                                    }
-                                }
+                            Item { Layout.fillWidth: true }
+
+                            JarvisToggle {
+                                // Локального состояния нет намеренно: тумблер
+                                // всегда отражает recordingActive из C++ и не
+                                // может разъехаться с реальным состоянием.
+                                on: recordingActive
+                                label: en ? "Recording" : "Запись"
+                                onToggleRequested: want => trainingCenter.toggleRecording(want)
                             }
                         }
 
-                        // Stacked bar: processed vs pending
-                        Rectangle {
-                            width: parent.width
-                            height: 10
-                            radius: 5
-                            color: Theme.outline
-                            Row {
-                                anchors.fill: parent
-                                Rectangle {
-                                    width: journalTotal > 0
-                                           ? parent.width * (journalDone / journalTotal) : 0
-                                    height: parent.height
-                                    radius: 5
-                                    color: root.teal
-                                    Behavior on width { NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
-                                }
-                            }
+                        JarvisProgressBar {
+                            Layout.fillWidth: true
+                            value: journalTotal > 0 ? journalDone / journalTotal : 0
+                            fillColor: root.teal
                         }
 
-                        Row {
-                            spacing: 28
-                            Column {
-                                Text { text: journalTotal; color: Theme.onSurface; font.pixelSize: 16; font.bold: true }
-                                Text { text: en ? "recorded" : "записано"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spaceXxl
+
+                            JarvisStat {
+                                value: String(journalTotal)
+                                label: en ? "recorded" : "записано"
                             }
-                            Column {
-                                Text { text: journalDone; color: root.teal; font.pixelSize: 16; font.bold: true }
-                                Text { text: en ? "processed" : "обработано"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
+                            JarvisStat {
+                                value: String(journalDone)
+                                label: en ? "processed" : "обработано"
+                                valueColor: root.teal
                             }
-                            Column {
-                                Text { text: journalPending; color: Theme.warning; font.pixelSize: 16; font.bold: true }
-                                Text { text: en ? "pending" : "в ожидании"; color: Theme.onSurfaceVariant; font.pixelSize: 10 }
+                            JarvisStat {
+                                value: String(journalPending)
+                                label: en ? "pending" : "в ожидании"
+                                valueColor: Theme.warning
                             }
+                            Item { Layout.fillWidth: true }
                         }
                     }
-                }
 
-                Rectangle {
-                    y: 340
-                    width: 130; height: 30; radius: 6
-                    color: refreshArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                    border.width: 1
-                    border.color: Theme.outlineStrong
-                    Text {
-                        anchors.centerIn: parent
-                        text: (en ? "🔄 Refresh" : "🔄 Обновить")
-                        color: root.cyan
-                        font.pixelSize: 11
-                    }
-                    MouseArea {
-                        id: refreshArea
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
+                    JarvisButton {
+                        glyph: "🔄"
+                        text: en ? "Refresh" : "Обновить"
+                        variant: JarvisButton.Ghost
                         onClicked: trainingCenter.refreshStats()
                     }
+
+                    Item { Layout.fillHeight: true }
                 }
             }
 
@@ -313,60 +215,29 @@ Rectangle {
                     anchors.fill: parent
                     spacing: 10
 
-                    Row {
+                    RowLayout {
                         width: parent.width
+                        spacing: Theme.spaceMd
+
                         Text {
+                            Layout.fillWidth: true
                             text: (en ? "Total records: " : "Всего записей: ") + appUsageTotal
                             color: Theme.onSurfaceVariant
-                            font.pixelSize: 12
-                            anchors.verticalCenter: parent.verticalCenter
+                            font.family: Type.family
+                            font.pixelSize: Type.caption
+                            elide: Text.ElideRight
                         }
-                        Item { width: parent.width - 420; height: 1 }
-                        Row {
-                            spacing: 6
-                            Text {
-                                text: en ? "Enable learning:" : "Включить обучение:"
-                                color: Theme.onSurfaceVariant
-                                font.pixelSize: 11
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Rectangle {
-                                width: 44; height: 22; radius: 11
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: appLearningEnabled ? root.teal : Theme.outlineStrong
-                                Behavior on color { ColorAnimation { duration: 150 } }
-                                Rectangle {
-                                    width: 18; height: 18; radius: 9
-                                    color: Theme.onSurface
-                                    y: 2
-                                    x: appLearningEnabled ? parent.width - width - 2 : 2
-                                    Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: trainingCenter.toggleAppLearning(!appLearningEnabled)
-                                }
-                            }
-                            Rectangle {
-                                width: 90; height: 26; radius: 6
-                                color: clearArea.pressed ? Qt.alpha(Theme.error, 0.3) : Qt.alpha(Theme.error, 0.12)
-                                border.width: 1
-                                border.color: Qt.alpha(Theme.error, 0.4)
-                                anchors.verticalCenter: parent.verticalCenter
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: en ? "Clear data" : "Очистить"
-                                    color: Theme.error
-                                    font.pixelSize: 10
-                                }
-                                MouseArea {
-                                    id: clearArea
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: trainingCenter.clearAppUsageData()
-                                }
-                            }
+
+                        JarvisToggle {
+                            on: appLearningEnabled
+                            label: en ? "Enable learning" : "Включить обучение"
+                            onToggleRequested: want => trainingCenter.toggleAppLearning(want)
+                        }
+
+                        JarvisButton {
+                            text: en ? "Clear data" : "Очистить"
+                            variant: JarvisButton.Danger
+                            onClicked: trainingCenter.clearAppUsageData()
                         }
                     }
 
@@ -394,35 +265,31 @@ Rectangle {
 
                             Repeater {
                                 model: appPredictions
-                                delegate: Row {
+                                delegate: RowLayout {
                                     width: predCol.width
-                                    spacing: 10
+                                    spacing: Theme.spaceMd
+
                                     Text {
-                                        width: 140
+                                        Layout.preferredWidth: 140
                                         text: modelData.name
                                         color: Theme.onSurface
-                                        font.pixelSize: 12
+                                        font.family: Type.family
+                                        font.pixelSize: Type.caption
                                         elide: Text.ElideRight
                                     }
-                                    Rectangle {
-                                        width: parent.width - 140 - 60
-                                        height: 14
-                                        radius: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        color: Theme.outline
-                                        Rectangle {
-                                            width: parent.width * modelData.confidence
-                                            height: parent.height
-                                            radius: 4
-                                            color: modelData.confidence >= 0.5 ? Theme.success : root.teal
-                                            Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-                                        }
+                                    JarvisProgressBar {
+                                        Layout.fillWidth: true
+                                        Layout.alignment: Qt.AlignVCenter
+                                        implicitHeight: 12
+                                        value: modelData.confidence
+                                        fillColor: modelData.confidence >= 0.5 ? Theme.success : root.teal
                                     }
                                     Text {
-                                        width: 50
+                                        Layout.preferredWidth: 60
                                         text: Math.round(modelData.confidence * 100) + "% ×" + modelData.frequency
                                         color: Theme.onSurfaceVariant
-                                        font.pixelSize: 9
+                                        font.family: Type.family
+                                        font.pixelSize: 10
                                     }
                                 }
                             }
@@ -447,41 +314,38 @@ Rectangle {
                                 visible: appToday.length === 0
                                 text: en ? "No data for today" : "Нет данных за сегодня"
                                 color: Theme.onSurfaceVariant
-                                font.pixelSize: 11
+                                font.family: Type.family
+                                font.pixelSize: Type.caption
                             }
 
                             Repeater {
                                 model: appToday
-                                delegate: Row {
+                                delegate: RowLayout {
                                     width: todayCol.width
-                                    spacing: 10
+                                    spacing: Theme.spaceMd
+
                                     Text {
-                                        width: 140
+                                        Layout.preferredWidth: 140
                                         text: modelData.name
                                         color: Theme.onSurface
-                                        font.pixelSize: 12
+                                        font.family: Type.family
+                                        font.pixelSize: Type.caption
                                         elide: Text.ElideRight
                                     }
-                                    Rectangle {
-                                        width: parent.width - 140 - 110
-                                        height: 14
-                                        radius: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        color: Theme.outline
-                                        Rectangle {
-                                            width: parent.width * modelData.fraction
-                                            height: parent.height
-                                            radius: 4
-                                            color: Theme.info
-                                            Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-                                        }
+                                    JarvisProgressBar {
+                                        Layout.fillWidth: true
+                                        Layout.alignment: Qt.AlignVCenter
+                                        implicitHeight: 12
+                                        value: modelData.fraction
+                                        fillColor: Theme.info
                                     }
                                     Text {
-                                        width: 100
+                                        Layout.preferredWidth: 100
                                         text: modelData.minutes + " " + (en ? "min" : "мин")
                                               + " · " + modelData.sessions + (en ? " sess." : " сесс.")
                                         color: Theme.onSurfaceVariant
-                                        font.pixelSize: 9
+                                        font.family: Type.family
+                                        font.pixelSize: 10
                                     }
                                 }
                             }
@@ -521,101 +385,52 @@ Rectangle {
 
                     Text { text: en ? "Base model" : "Базовая модель"; color: root.cyan; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
 
-                    Flow {
+                    JarvisChipGroup {
                         width: parent.width
-                        spacing: 8
-                        Repeater {
-                            model: modelOptions
-                            delegate: Rectangle {
-                                radius: 8
-                                height: 28
-                                width: modelTxt.implicitWidth + 20
-                                color: modelData === selectedModel ? Theme.outlineStrong : Theme.outline
-                                border.width: 1
-                                border.color: modelData === selectedModel ? root.cyan : Theme.outlineStrong
-                                Text {
-                                    id: modelTxt
-                                    anchors.centerIn: parent
-                                    text: modelData
-                                    color: Theme.onSurface
-                                    font.pixelSize: 11
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: trainingCenter.selectModel(modelData)
-                                }
-                            }
-                        }
+                        options: modelOptions
+                        value: selectedModel
+                        onPicked: v => trainingCenter.selectModel(v)
                     }
 
                     Text { text: en ? "Max examples" : "Макс. примеров"; color: root.cyan; font.pixelSize: 13; font.bold: true; font.family: "Segoe UI Semibold" }
 
-                    Flow {
+                    JarvisChipGroup {
                         width: parent.width
-                        spacing: 8
-                        Repeater {
-                            model: [
-                                { label: en ? "Quick (30)" : "Быстро (30)", value: 30 },
-                                { label: en ? "Standard (80)" : "Стандарт (80)", value: 80 },
-                                { label: en ? "Thorough (150)" : "Тщательно (150)", value: 150 },
-                                { label: en ? "Maximum (300)" : "Максимум (300)", value: 300 }
-                            ]
-                            delegate: Rectangle {
-                                radius: 8
-                                height: 28
-                                width: exTxt.implicitWidth + 20
-                                color: modelData.value === maxExamples ? Theme.outlineStrong : Theme.outline
-                                border.width: 1
-                                border.color: modelData.value === maxExamples ? root.cyan : Theme.outlineStrong
-                                Text {
-                                    id: exTxt
-                                    anchors.centerIn: parent
-                                    text: modelData.label
-                                    color: Theme.onSurface
-                                    font.pixelSize: 11
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: trainingCenter.setMaxExamples(modelData.value)
-                                }
-                            }
-                        }
+                        options: [
+                            { value: 30,  label: en ? "Quick (30)"      : "Быстро (30)" },
+                            { value: 80,  label: en ? "Standard (80)"   : "Стандарт (80)" },
+                            { value: 150, label: en ? "Thorough (150)"  : "Тщательно (150)" },
+                            { value: 300, label: en ? "Maximum (300)"   : "Максимум (300)" }
+                        ]
+                        value: maxExamples
+                        onPicked: v => trainingCenter.setMaxExamples(v)
                     }
 
-                    Rectangle {
-                        width: 180; height: 36; radius: 8
-                        enabled: likedCount > 0 && ollamaAvailable && !trainingActive
-                        opacity: enabled ? 1 : 0.4
-                        color: trainBtnArea.pressed ? Theme.accentMuted : Theme.accentMuted
-                        border.width: 1
-                        border.color: Theme.accentMuted
+                    // Пульсирующая точка стоит РЯДОМ с кнопкой, а не внутри
+                    // неё. Раньше пульсация висела на opacity самой кнопки и
+                    // дралась с opacity, которым показывали недоступность:
+                    // выключенная кнопка всё равно мигала.
+                    RowLayout {
+                        width: parent.width
+                        spacing: Theme.spaceSm
 
-                        // Gentle pulse while training is running
-                        SequentialAnimation on opacity {
-                            running: trainingActive
-                            loops: Animation.Infinite
-                            NumberAnimation { from: 0.6; to: 1.0; duration: 700; easing.type: Easing.InOutSine }
-                            NumberAnimation { from: 1.0; to: 0.6; duration: 700; easing.type: Easing.InOutSine }
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
+                        JarvisButton {
+                            glyph: trainingActive ? "⏳" : "🚀"
                             text: trainingActive
-                                  ? (en ? "⏳ Training..." : "⏳ Обучение...")
-                                  : (en ? "🚀 Start Training" : "🚀 Начать обучение")
-                            color: Theme.onSurface
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-                        MouseArea {
-                            id: trainBtnArea
-                            anchors.fill: parent
-                            enabled: parent.enabled
-                            cursorShape: Qt.PointingHandCursor
+                                  ? (en ? "Training…" : "Обучение…")
+                                  : (en ? "Start Training" : "Начать обучение")
+                            variant: JarvisButton.Primary
+                            enabled: likedCount > 0 && ollamaAvailable && !trainingActive
                             onClicked: trainingCenter.startTraining()
                         }
+
+                        JarvisStatusDot {
+                            Layout.alignment: Qt.AlignVCenter
+                            visible: trainingActive
+                            pulsing: trainingActive
+                        }
+
+                        Item { Layout.fillWidth: true }
                     }
 
                     Rectangle {
@@ -665,47 +480,11 @@ Rectangle {
                     anchors.fill: parent
                     spacing: 10
 
-                    Rectangle {
+                    JarvisSearchField {
+                        id: searchInput
                         width: parent.width
-                        height: 34
-                        radius: 8
-                        color: Theme.outline
-                        border.width: 1
-                        border.color: searchInput.activeFocus ? root.cyan : Theme.outlineStrong
-
-                        TextInput {
-                            id: searchInput
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 36
-                            verticalAlignment: TextInput.AlignVCenter
-                            color: Theme.onSurface
-                            font.pixelSize: 12
-                            clip: true
-                            selectByMouse: true
-                            onAccepted: trainingCenter.searchHistory(text)
-                        }
-                        Text {
-                            text: en ? "Search chat history..." : "Поиск по истории чатов..."
-                            visible: searchInput.text.length === 0 && !searchInput.activeFocus
-                            color: Theme.onSurfaceDim
-                            anchors.left: parent.left
-                            anchors.leftMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            font.pixelSize: 12
-                        }
-                        Text {
-                            text: "🔍"
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            MouseArea {
-                                anchors.fill: parent
-                                anchors.margins: -8
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: trainingCenter.searchHistory(searchInput.text)
-                            }
-                        }
+                        placeholder: en ? "Search chat history…" : "Поиск по истории чатов…"
+                        onAccepted: trainingCenter.searchHistory(text)
                     }
 
                     Text {
@@ -807,6 +586,27 @@ Rectangle {
                 // and answering it by eye fails as soon as lines cross.
                 property int hoveredNode:  -1
                 property int selectedNode: -1
+
+                // Досье на выбранный узел — приходит из C++ по клику.
+                // Картинка показывает, ЧТО с чем связано; на вопрос
+                // "откуда я вообще это знаю" отвечают только реальные
+                // реплики, а они лежат в БД, не в модели графа.
+                property var nodeInfo: ({})
+
+                function selectNode(index, nodeId) {
+                    if (selectedNode === index) {
+                        selectedNode = -1
+                        nodeInfo = ({})
+                        return
+                    }
+                    selectedNode = index
+                    nodeInfo = trainingCenter.synapseNodeDetail(nodeId)
+                }
+
+                function clearSelection() {
+                    selectedNode = -1
+                    nodeInfo = ({})
+                }
                 readonly property int focusNode: selectedNode >= 0 ? selectedNode : hoveredNode
 
                 // index -> {neighbourIndex: true}, built once per data change
@@ -1123,9 +923,8 @@ Rectangle {
                                                                ? -1 : synapseTab.hoveredNode)
                                             }
                                             TapHandler {
-                                                onTapped: synapseTab.selectedNode =
-                                                    (synapseTab.selectedNode === nodeItem.index)
-                                                        ? -1 : nodeItem.index
+                                                onTapped: synapseTab.selectNode(
+                                                    nodeItem.index, modelData.id)
                                             }
                                             // Своя подсказка вместо Controls.ToolTip: из-за
                                             // неё файл тянул целый модуль QtQuick.Controls
@@ -1199,63 +998,233 @@ Rectangle {
                                 }
                                 // Clicking empty space clears a stuck focus, the
                                 // counterpart to Esc in brain-map.
-                                onClicked: synapseTab.selectedNode = -1
+                                onClicked: synapseTab.clearSelection()
                             }
 
                             // ---- Fit ----
-                            Rectangle {
+                            JarvisButton {
                                 anchors.left: parent.left
                                 anchors.top: parent.top
-                                anchors.margins: 8
-                                width: 54
-                                height: 24
-                                radius: Theme.radiusSm
-                                color: fitArea.pressed ? Theme.outlineStrong : Theme.surface2
-                                border.width: 1
-                                border.color: Theme.outline
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: root.en ? "⤢ Fit" : "⤢ Вписать"
-                                    color: Theme.onSurfaceVariant
-                                    font.pixelSize: 10
+                                anchors.margins: Theme.spaceSm
+                                glyph: "⤢"
+                                text: root.en ? "Fit" : "Вписать"
+                                variant: JarvisButton.Ghost
+
+                                // Actually fits, rather than resetting zoom to
+                                // 1.0 and calling it fitting: the layout rarely
+                                // fills its unit square evenly, so scale comes
+                                // from the real bounding box of the nodes and the
+                                // content is then centred on that box's middle.
+                                onClicked: {
+                                    if (synapseGraphNodes.length === 0) {
+                                        graphContent.scale = 1.0
+                                        graphContent.x = 0
+                                        graphContent.y = 0
+                                        return
+                                    }
+                                    let minX = 1, maxX = 0, minY = 1, maxY = 0
+                                    for (let i = 0; i < synapseGraphNodes.length; ++i) {
+                                        const n = synapseGraphNodes[i]
+                                        minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x)
+                                        minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y)
+                                    }
+                                    // Margin in normalized units leaves room for
+                                    // labels, which sit below their node.
+                                    const pad = 0.06
+                                    const spanX = Math.max(0.05, (maxX - minX) + pad * 2)
+                                    const spanY = Math.max(0.05, (maxY - minY) + pad * 2)
+                                    const k = Math.max(0.5, Math.min(3.0,
+                                                   Math.min(1 / spanX, 1 / spanY)))
+                                    graphContent.scale = k
+                                    // Content scales about its centre, so shifting
+                                    // the bbox centre onto that point is a plain
+                                    // scaled offset from 0.5, 0.5.
+                                    const cx = (minX + maxX) / 2
+                                    const cy = (minY + maxY) / 2
+                                    graphContent.x = (0.5 - cx) * graphContent.width * k
+                                    graphContent.y = (0.5 - cy) * graphContent.height * k
                                 }
-                                MouseArea {
-                                    id: fitArea
+                            }
+
+                            // ---- Досье на узел: почему это здесь ----
+                            // Картинка отвечает "что с чем связано". На вопрос
+                            // "откуда я это знаю" отвечают только настоящие
+                            // реплики, поэтому карточка приходит из БД по клику,
+                            // а не собирается из модели графа.
+                            Rectangle {
+                                id: nodeCard
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 8
+                                width: 300
+                                radius: Theme.radiusMd
+                                color: Qt.rgba(Theme.surface2.r, Theme.surface2.g,
+                                               Theme.surface2.b, 0.96)
+                                border.width: 1
+                                border.color: Theme.outlineStrong
+                                visible: opacity > 0
+                                opacity: (synapseTab.selectedNode >= 0
+                                          && synapseTab.nodeInfo.found === true) ? 1 : 0
+                                Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+
+                                readonly property var info: synapseTab.nodeInfo
+
+                                Flickable {
                                     anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    // Actually fits, rather than resetting zoom to
-                                    // 1.0 and calling it fitting: the layout rarely
-                                    // fills its unit square evenly, so scale comes
-                                    // from the real bounding box of the nodes and the
-                                    // content is then centred on that box's middle.
-                                    onClicked: {
-                                        if (synapseGraphNodes.length === 0) {
-                                            graphContent.scale = 1.0
-                                            graphContent.x = 0
-                                            graphContent.y = 0
-                                            return
+                                    anchors.margins: 12
+                                    contentHeight: cardCol.implicitHeight
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+
+                                    Column {
+                                        id: cardCol
+                                        width: parent.width
+                                        spacing: 10
+
+                                        Row {
+                                            width: parent.width
+                                            spacing: 6
+                                            Text {
+                                                width: parent.width - 20
+                                                text: nodeCard.info.label || ""
+                                                color: Theme.onSurface
+                                                font.pixelSize: 15
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                            }
+                                            Text {
+                                                text: "✕"
+                                                color: Theme.onSurfaceVariant
+                                                font.pixelSize: 13
+                                                TapHandler { onTapped: synapseTab.clearSelection() }
+                                            }
                                         }
-                                        let minX = 1, maxX = 0, minY = 1, maxY = 0
-                                        for (let i = 0; i < synapseGraphNodes.length; ++i) {
-                                            const n = synapseGraphNodes[i]
-                                            minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x)
-                                            minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y)
+
+                                        // Одна фраза-объяснение, собранная в C++:
+                                        // склонения и числа — не работа разметки.
+                                        Text {
+                                            width: parent.width
+                                            text: nodeCard.info.why || ""
+                                            color: Theme.onSurfaceVariant
+                                            font.pixelSize: 11
+                                            wrapMode: Text.WordWrap
+                                            lineHeight: 1.35
                                         }
-                                        // Margin in normalized units leaves room for
-                                        // labels, which sit below their node.
-                                        const pad = 0.06
-                                        const spanX = Math.max(0.05, (maxX - minX) + pad * 2)
-                                        const spanY = Math.max(0.05, (maxY - minY) + pad * 2)
-                                        const k = Math.max(0.5, Math.min(3.0,
-                                                       Math.min(1 / spanX, 1 / spanY)))
-                                        graphContent.scale = k
-                                        // Content scales about its centre, so shifting
-                                        // the bbox centre onto that point is a plain
-                                        // scaled offset from 0.5, 0.5.
-                                        const cx = (minX + maxX) / 2
-                                        const cy = (minY + maxY) / 2
-                                        graphContent.x = (0.5 - cx) * graphContent.width * k
-                                        graphContent.y = (0.5 - cy) * graphContent.height * k
+
+                                        Rectangle {
+                                            width: parent.width; height: 1
+                                            color: Theme.outline
+                                        }
+
+                                        Text {
+                                            text: root.en ? "WIRED TO" : "СВЯЗАНО С"
+                                            color: Theme.onSurfaceVariant
+                                            font.pixelSize: 9
+                                            font.letterSpacing: 1.5
+                                            visible: (nodeCard.info.neighbours || []).length > 0
+                                        }
+
+                                        Repeater {
+                                            model: nodeCard.info.neighbours || []
+                                            delegate: Item {
+                                                required property var modelData
+                                                width: cardCol.width
+                                                height: 22
+
+                                                Text {
+                                                    anchors.left: parent.left
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: parent.width - 92
+                                                    text: modelData.label
+                                                    color: Theme.onSurface
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideRight
+                                                }
+                                                // Толщина связи — та же величина, что
+                                                // рисует линию на схеме, только числом.
+                                                Rectangle {
+                                                    anchors.right: strength.left
+                                                    anchors.rightMargin: 6
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 46
+                                                    height: 3
+                                                    radius: 1.5
+                                                    color: Theme.outline
+                                                    Rectangle {
+                                                        width: parent.width
+                                                               * Math.max(0.05, Math.min(1, modelData.weight / 3))
+                                                        height: parent.height
+                                                        radius: parent.radius
+                                                        color: Theme.accent
+                                                    }
+                                                }
+                                                Text {
+                                                    id: strength
+                                                    anchors.right: parent.right
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "×" + modelData.coActivations
+                                                    color: Theme.onSurfaceVariant
+                                                    font.pixelSize: 10
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width; height: 1
+                                            color: Theme.outline
+                                            visible: (nodeCard.info.origins || []).length > 0
+                                        }
+
+                                        Text {
+                                            text: root.en ? "LEARNED FROM" : "ЗАПОМНИЛ ИЗ"
+                                            color: Theme.onSurfaceVariant
+                                            font.pixelSize: 9
+                                            font.letterSpacing: 1.5
+                                            visible: (nodeCard.info.origins || []).length > 0
+                                        }
+
+                                        Repeater {
+                                            model: nodeCard.info.origins || []
+                                            delegate: Column {
+                                                required property var modelData
+                                                width: cardCol.width
+                                                spacing: 2
+                                                bottomPadding: 6
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: "“" + modelData.query + "”"
+                                                    color: Theme.onSurface
+                                                    font.pixelSize: 11
+                                                    font.italic: true
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                                Text {
+                                                    width: parent.width
+                                                    text: modelData.response
+                                                    color: Theme.onSurfaceVariant
+                                                    font.pixelSize: 10
+                                                    wrapMode: Text.WordWrap
+                                                    maximumLineCount: 3
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+
+                                        // Понятие знакомо, а истории за ним нет —
+                                        // это нормальное состояние, и молчать о нём
+                                        // хуже, чем сказать прямо.
+                                        Text {
+                                            width: parent.width
+                                            visible: (nodeCard.info.origins || []).length === 0
+                                            text: root.en
+                                                ? "No stored conversation is attached to this concept yet."
+                                                : "К этому понятию пока не привязан ни один сохранённый разговор."
+                                            color: Theme.onSurfaceVariant
+                                            font.pixelSize: 10
+                                            wrapMode: Text.WordWrap
+                                        }
                                     }
                                 }
                             }
@@ -1319,32 +1288,24 @@ Rectangle {
                             height: parent.height
                             spacing: 8
 
-                            Row {
+                            RowLayout {
                                 width: parent.width
+                                spacing: Theme.spaceSm
+
                                 Text {
+                                    Layout.fillWidth: true
                                     text: root.en ? "Strongest links" : "Крепчайшие связи"
                                     color: root.violet
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                    font.family: "Segoe UI Semibold"
+                                    font.family: Type.family
+                                    font.pixelSize: Type.caption
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
                                 }
-                                Item { width: parent.width - 150; height: 1 }
-                                Rectangle {
-                                    width: 26; height: 20; radius: Theme.radiusSm
-                                    color: sgRefreshArea.pressed ? Theme.outlineStrong : Theme.surface2
-                                    border.width: 1
-                                    border.color: Theme.outline
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "🔄"
-                                        font.pixelSize: 10
-                                    }
-                                    MouseArea {
-                                        id: sgRefreshArea
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: trainingCenter.refreshStats()
-                                    }
+                                JarvisButton {
+                                    glyph: "🔄"
+                                    accessibleName: root.en ? "Refresh" : "Обновить"
+                                    variant: JarvisButton.Ghost
+                                    onClicked: trainingCenter.refreshStats()
                                 }
                             }
 
@@ -1378,35 +1339,31 @@ Rectangle {
                                                 width: parent.width
                                                 text: modelData.labelA + " ↔ " + modelData.labelB
                                                 color: Theme.onSurface
+                                                font.family: Type.family
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
                                             }
-                                            Row {
+                                            RowLayout {
                                                 width: parent.width
-                                                spacing: 6
-                                                Rectangle {
-                                                    width: parent.width - 62
-                                                    height: 4
-                                                    radius: 2
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    color: Theme.outline
-                                                    Rectangle {
-                                                        width: parent.width * Math.min(1, modelData.weight / 3.0)
-                                                        height: parent.height
-                                                        radius: 2
-                                                        color: root.violet
-                                                        Behavior on width {
-                                                            NumberAnimation { duration: 420
-                                                                              easing.type: Easing.OutCubic }
-                                                        }
-                                                    }
+                                                spacing: Theme.spaceXs + 2
+
+                                                JarvisProgressBar {
+                                                    Layout.fillWidth: true
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    implicitHeight: 4
+                                                    // Вес 3.0 — практический потолок:
+                                                    // выше связи почти не встречаются,
+                                                    // и полоса просто упирается в край.
+                                                    value: modelData.weight / 3.0
+                                                    fillColor: root.violet
                                                 }
                                                 Text {
-                                                    width: 56
+                                                    Layout.preferredWidth: 56
                                                     text: modelData.weight.toFixed(2)
                                                         + " ×" + modelData.coActivations
                                                     color: Theme.onSurfaceDim
-                                                    font.pixelSize: 8
+                                                    font.family: Type.family
+                                                    font.pixelSize: 9
                                                 }
                                             }
                                         }

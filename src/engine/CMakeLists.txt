@@ -13,6 +13,12 @@ add_library(jarvis_engine OBJECT
     skill_manager.cpp
     mode_manager.h
     mode_manager.cpp
+    profile_tools.h
+    profile_tools.cpp
+    health_center.h
+    health_center.cpp
+    plugin_bridge.h
+    plugin_bridge.cpp
     system_manifest.h
     task_manager_dialog.h
     task_manager_dialog.cpp
@@ -34,6 +40,10 @@ add_library(jarvis_engine OBJECT
     self_update_reflector.cpp
     vision_center_dialog.h
     vision_center_dialog.cpp
+    camera_view_dialog.h
+    camera_view_dialog.cpp
+    artifacts_dialog.h
+    artifacts_dialog.cpp
 )
 # task_board.qrc / training_center.qrc are intentionally NOT listed here —
 # see the top-level CMakeLists.txt comment where they're attached to the
@@ -48,7 +58,7 @@ target_link_libraries(jarvis_engine
     PUBLIC  jarvis_common jarvis_db jarvis_intelligence
             Qt6::Core Qt6::Network Qt6::Widgets Qt6::Sql
             Qt6::Quick Qt6::QuickWidgets Qt6::Qml
-    PRIVATE jarvis_llm jarvis_voice jarvis_platform jarvis_network
+    PRIVATE jarvis_llm jarvis_voice jarvis_platform jarvis_agent jarvis_network
             jarvis_media jarvis_modules jarvis_plugins
             advapi32 psapi PowrProf
 )

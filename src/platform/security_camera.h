@@ -14,7 +14,6 @@
 //   Tier 3 — Full Alert (30 FPS, native res):
 //     Haar cascade face detection
 //     Histogram-based owner recognition
-//     Shoulder surfing (multi-face)
 //     Auto-lock + Telegram video alert
 //
 // After 10 seconds with no motion/faces → drops back to Tier 2.
@@ -81,7 +80,21 @@ public:
                                 const QList<FaceObservation>& faces);
 
     // Разовый снимок с камеры в полном разрешении (для Live View)
-    QImage snapshotFullRes() { return captureFrameFullRes(); }
+    // Снимок для предпросмотра. Если устройство прямо сейчас читает
+    // сторожевой цикл, свежий кадр взять неоткуда — отдаём последний
+    // удачный вместо пустого. Пустой кадр окно показывало как "камера
+    // занята другим приложением", хотя занимали её мы сами.
+    QImage snapshotFullRes()
+    {
+        const QImage fresh = captureFrameFullRes();
+        if (!fresh.isNull())
+            return fresh;
+        return lastFrame();
+    }
+
+    // Последний удачно прочитанный кадр (может быть пустым, если камеру
+    // ещё ни разу не открывали).
+    QImage lastFrame() const;
 
     // ── Monitoring lifecycle ────────────────────────────────
     void startMonitoring(int sentinelIntervalSec = 60);
@@ -92,13 +105,35 @@ public:
     // ── Configuration ───────────────────────────────────────
     void setAlertOnUnknownFace(bool v) { m_alertUnknown = v; }
     void setAlertOnMotion(bool v)      { m_alertMotion = v; }
-    void setAlertOnShoulderSurf(bool v){ m_alertShoulder = v; }
     void setAutoLockOnThreat(bool v)   { m_autoLock = v; }
-    void setAutoUnlock(bool v)         { m_autoUnlock = v; }
+    // setAutoUnlock/autoUnlock убраны вместе с оверлеем: разблокировать
+    // сеанс Windows программно нельзя. Узнавание лица теперь дело
+    // Windows Hello, а не JARVIS.
+
+    // Геттеры к тем же флагам. Нужны, чтобы пункт меню спрашивал
+    // состояние у камеры, а не хранил своё: раньше галочка жила только
+    // в QAction, и любой другой способ поменять режим (Telegram,
+    // профиль) с ней расходился.
+    bool alertOnUnknownFace() const { return m_alertUnknown; }
+    bool alertOnMotion() const      { return m_alertMotion; }
+    bool autoLockOnThreat() const   { return m_autoLock; }
 
     // User confirmed via Telegram that the extra person is OK —
     // suppress shoulder-surfing alerts for a cooldown period.
     void confirmCompanionOk(int cooldownMinutes = 30);
+
+    // Запирает сеанс средствами Windows (LockWorkStation).
+    //
+    // Раньше здесь показывалось собственное полноэкранное окно. Оно не
+    // было блокировкой и быть ей не могло: меню «Пуск», панель задач и
+    // Ctrl+Alt+Del в Windows находятся выше любого окна приложения —
+    // именно для того, чтобы программа не могла запереть чужую машину.
+    // Окно рисовалось поверх обоев, а «Пуск» открывался поверх него и
+    // позволял просто снять JARVIS.
+    //
+    // Разблокировки здесь нет и быть не может: снять блокировку сеанса
+    // программе не даёт та же защита. Возвращает человека за машину
+    // Windows — паролем, PIN или Hello.
     void lockScreen();
 
     // ── Power state ─────────────────────────────────────────
@@ -106,7 +141,14 @@ public:
     PowerState powerState() const { return m_powerState; }
 
     // ── Lock state ──────────────────────────────────────────
-    bool isScreenLocked() const { return m_screenLocked; }
+    // Спрашивается у Windows, а не хранится флагом.
+    //
+    // Хранимый m_screenLocked и был источником всех поломок блокировки:
+    // его выставляли в одном месте, снимали в трёх, и любой путь,
+    // забывший его снять, оставлял камеру уверенной, что экран заперт —
+    // после чего «Заблокировать» больше не включался, а проверка лица
+    // тикала до перезапуска. Производное состояние разойтись не может.
+    bool isScreenLocked() const;
 
 signals:
     void unknownFaceDetected(const QImage& frame, int faceCount);
@@ -128,9 +170,10 @@ signals:
     void enrollmentProgress(int current, int total);
     void enrollmentComplete(int samplesCollected);
 
-    // Lock screen overlay should be shown/hidden by the UI layer
-    void requestLockOverlay();
-    void requestUnlockOverlay();
+    // Сеанс заперт средствами Windows. Не «покажи оверлей», а
+    // уведомление постфактум: показывать UI больше нечего, но записать
+    // в ленту и сказать в Telegram — есть что.
+    void screenLocked();
 
     // 20s motion-triggered video clip ready for Telegram
     void motionVideoReady(const QString& videoPath);
@@ -163,13 +206,10 @@ private:
     PowerState m_powerState  = Off;
     bool m_alertUnknown      = true;
     bool m_alertMotion       = true;
-    bool m_alertShoulder     = true;
     bool m_autoLock          = true;
-    bool m_autoUnlock        = true;
     bool m_ownerEnrolled     = false;
     bool m_monitoring        = false;
     bool m_inputHookInstalled = false;
-    bool m_screenLocked      = false;
     std::atomic<bool> m_recording{false};
     std::atomic<bool> m_stopping{false};
 
@@ -203,6 +243,12 @@ public:
 
 private:
     mutable QMutex m_mutex;
+
+    // Кэш последнего кадра — общий для предпросмотра и сторожа
+    QImage cacheFrame(const QImage& frame);
+
+    mutable QMutex m_frameMutex;
+    QImage         m_lastFrame;
 
     static constexpr int SENTINEL_RES_W       = 320;
     static constexpr int SENTINEL_RES_H       = 240;

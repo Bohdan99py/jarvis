@@ -12,6 +12,8 @@
 #include "llm_cache_manager.h"
 #include "lang.h"
 
+#include "jarvis_theme.h"
+
 #include <QQuickWidget>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -64,8 +66,7 @@ TrainingCenterDialog::TrainingCenterDialog(qint64 userId,
     m_view = new QQuickWidget(this);
     m_view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_view->setClearColor(QColor(0x0B, 0x0C, 0x10));
-    m_view->engine()->addImportPath(QCoreApplication::applicationDirPath()
-                                    + QStringLiteral("/qml"));
+    JarvisTheme::prepareEngine(m_view->engine());
 
     // Safe defaults for every property TrainingCenter.qml reads — must exist
     // before setSource() so the initial bindings don't evaluate against
@@ -312,6 +313,9 @@ void TrainingCenterDialog::refreshSynapseGraph()
         const double heat = view.maxActivations > 0
             ? double(n.activations) / view.maxActivations : 0.0;
         QVariantMap m;
+        // id нужен, чтобы по клику можно было спросить досье именно
+        // на этот узел — без него картинка остаётся только картинкой.
+        m[QStringLiteral("id")]          = n.id;
         m[QStringLiteral("label")]       = n.label;
         m[QStringLiteral("activations")] = n.activations;
         m[QStringLiteral("degree")]      = n.degree;
@@ -496,6 +500,77 @@ void TrainingCenterDialog::startTraining()
     m_trainer->setBaseModel(m_selectedModel);
     m_trainer->setMaxPairs(m_maxExamples);
     m_trainer->train(&DatabaseManager::instance());
+}
+
+QVariantMap TrainingCenterDialog::synapseNodeDetail(qint64 nodeId)
+{
+    QVariantMap out;
+
+    const auto d = SynapseGraph::instance().nodeDetail(
+        LlmCacheManager::kDesktopOwnerId, nodeId);
+    out[QStringLiteral("found")] = d.found;
+    if (!d.found)
+        return out;
+
+    out[QStringLiteral("label")]         = d.label;
+    out[QStringLiteral("activations")]   = d.activations;
+    out[QStringLiteral("firstSeen")]     = d.firstSeen;
+    out[QStringLiteral("lastActivated")] = d.lastActivated;
+    out[QStringLiteral("source")]        = d.source;
+    out[QStringLiteral("sourceText")]    =
+        SynapseGraph::sourceDescription(d.source, IS_EN);
+
+    // Одна фраза, отвечающая на "почему это здесь". Собирается тут, а не
+    // в QML: числа и склонения — не работа разметки.
+    const QString times = IS_EN
+        ? QStringLiteral("%1 time(s)").arg(d.activations)
+        : QStringLiteral("%1 раз").arg(d.activations);
+    QString why = IS_EN
+        ? QStringLiteral("I %1 — it has come up %2 since %3.")
+              .arg(SynapseGraph::sourceDescription(d.source, true), times, d.firstSeen)
+        : QStringLiteral("Я %1 — с %2 это всплывало %3.")
+              .arg(SynapseGraph::sourceDescription(d.source, false), d.firstSeen, times);
+
+    if (!d.neighbours.isEmpty()) {
+        QStringList names;
+        for (int i = 0; i < d.neighbours.size() && i < 3; ++i)
+            names << d.neighbours[i].labelB;
+        why += IS_EN
+            ? QStringLiteral(" Strongest links: %1.").arg(names.join(QStringLiteral(", ")))
+            : QStringLiteral(" Крепче всего связано с: %1.").arg(names.join(QStringLiteral(", ")));
+    }
+    if (d.origins.isEmpty()) {
+        why += IS_EN
+            ? QStringLiteral(" No stored case is attached to it yet — "
+                             "the concept is known, the story behind it is not.")
+            : QStringLiteral(" Ни один сохранённый случай к нему пока не привязан — "
+                             "понятие знакомо, а история за ним нет.");
+    }
+    out[QStringLiteral("why")] = why;
+
+    QVariantList neighbours;
+    for (const auto& e : d.neighbours) {
+        QVariantMap m;
+        m[QStringLiteral("label")]         = e.labelB;
+        m[QStringLiteral("weight")]        = e.weight;
+        m[QStringLiteral("coActivations")] = e.coActivations;
+        neighbours.append(m);
+    }
+    out[QStringLiteral("neighbours")] = neighbours;
+
+    QVariantList origins;
+    for (const auto& o : d.origins) {
+        QVariantMap m;
+        // Реплики бывают длинными, а панель узкая: режем здесь, чтобы
+        // QML не занимался обрезкой текста.
+        m[QStringLiteral("query")]    = o.query.left(180);
+        m[QStringLiteral("response")] = o.response.left(240).replace(QChar('\n'), QChar(' '));
+        m[QStringLiteral("weight")]   = o.weight;
+        origins.append(m);
+    }
+    out[QStringLiteral("origins")] = origins;
+
+    return out;
 }
 
 void TrainingCenterDialog::searchHistory(const QString& query)

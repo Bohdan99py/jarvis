@@ -654,6 +654,7 @@ void SessionMemory::clearProjectInfo()
 {
     m_projectRoot.clear();
     m_projectMap.clear();
+    m_projectArchitecture.clear();
     m_projectFileCount   = 0;
     m_projectSymbolCount = 0;
 }
@@ -800,10 +801,45 @@ QString SessionMemory::buildSystemPrompt() const
         prompt += QStringLiteral(
             "IMPORTANT: the project is already indexed. Relevant code fragments will be "
             "automatically attached in '--- Project context ---' at the end of user messages. "
-            "DO NOT ask the user to 'send code' or 'attach file' — you already have the index. "
-            "If a specific fragment is missing — name the file/function you need, and JARVIS "
-            "will load it in the next message.\n\n"
+            "DO NOT ask the user to 'send code' or 'attach file' — you already have the index.\n\n"
         );
+
+        if (m_codeActionsEnabled) {
+            // Ключевой механизм «понимания проекта целиком»: автоподбор по
+            // ключевым словам приносит 3 файла, а не весь проект. Вместо
+            // того чтобы гадать или просить файл у пользователя, модель
+            // запрашивает нужное у JARVIS — он читает это с диска сам и
+            // сразу переспрашивает, пользователь видит один готовый ответ.
+            prompt += QStringLiteral(
+                "=== ASKING FOR MORE PROJECT CONTEXT ([NEED:...]) ===\n"
+                "If the attached fragments are not enough, DO NOT guess and DO NOT ask "
+                "the user to paste code. Emit one or more request blocks INSTEAD of an "
+                "answer — JARVIS reads them from disk and re-asks you automatically:\n"
+                "  [NEED:file:src/engine/jarvis.cpp]   — full file (or its first 800 lines)\n"
+                "  [NEED:symbol:Jarvis::processCommand] — the symbol with surrounding code\n"
+                "  [NEED:grep:setProjectRoot]           — where a string occurs\n"
+                "  [NEED:uses:jarvis.h]                 — which files include this header\n"
+                "  [NEED:tree:src/engine]               — file list of a subtree\n"
+                "  [NEED:map]                           — directory-level project map\n"
+                "  [NEED:profile]                       — build system, targets, deps\n"
+                "  [NEED:assets] or [NEED:assets:icon]  — images/sounds/fonts and where they are used\n"
+                "Rules:\n"
+                "- Up to 6 requests at once, up to 3 rounds per user message — ask for "
+                "everything you need in ONE batch, not one file at a time.\n"
+                "- A response containing [FILE:]/[DIFF:] blocks will NOT trigger context "
+                "loading: either ask for context, or write code — never both in one reply.\n"
+                "- Before modifying an existing file you have not seen in this session, "
+                "request it. Editing a file blind is how [DIFF] blocks fail to apply.\n"
+                "- Adding a new source file? Check the build script too "
+                "([NEED:file:src/<module>/CMakeLists.txt]) — a file that is not in the "
+                "build does not exist.\n\n"
+            );
+        }
+
+        if (!m_projectArchitecture.isEmpty()) {
+            prompt += QStringLiteral("Architecture:\n") + m_projectArchitecture
+                    + QStringLiteral("\n");
+        }
 
         if (!m_projectMap.isEmpty()) {
             // Ограничим карту проекта, чтобы не съела весь бюджет токенов
@@ -837,6 +873,22 @@ QString SessionMemory::buildSystemPrompt() const
                 + m_detectedRole + QStringLiteral("\n"
             "Adapt your style to this role — a programmer gets technical answers, "
             "an artist gets visual/creative guidance, etc.\n\n");
+    }
+
+    // --- Что человек видит на экране прямо сейчас ---
+    // Стоит ПЕРЕД activity-блоком: тот про статистику занятий, а этот —
+    // единственное, что делает осмысленными слова «здесь» и «это».
+    if (!m_machineContext.isEmpty()) {
+        prompt += QStringLiteral("=== ON SCREEN RIGHT NOW ===\n")
+                + m_machineContext + QStringLiteral("\n");
+    }
+
+    // --- Что происходило на машине ---
+    if (!m_eventContext.isEmpty()) {
+        prompt += QStringLiteral("=== RECENT EVENTS ===\n")
+                + m_eventContext + QStringLiteral(
+            "\nThese already reached the user as notifications - mention one only "
+            "if it is relevant to what they just asked.\n\n");
     }
 
     // --- What the user is doing right now ---

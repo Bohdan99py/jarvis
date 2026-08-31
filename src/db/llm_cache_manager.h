@@ -75,7 +75,12 @@ public:
 
     // Shared with CaseDistiller (Layer 2): fraction of `a`'s significant
     // keywords (len>=3) that also appear in `b`, 0..1.
-    static float keywordOverlap(const QString& a, const QString& b);
+    // Доля значимых слов запроса `a`, которые нашлись в `b`. Через
+    // sharedOut отдаётся ещё и их абсолютное число: одной доли мало для
+    // решения — у короткого запроса одно случайно общее слово даёт целых
+    // 50%, и по такому «совпадению» отдавать готовый ответ нельзя.
+    static float keywordOverlap(const QString& a, const QString& b,
+                                int* sharedOut = nullptr);
 
     // ── Layer-4 independence metric ─────────────────────────
     struct IndependenceStats {

@@ -20,7 +20,7 @@
 ## ============================================================
 
 cmake_minimum_required(VERSION 3.16)
-project(jarvis VERSION 3.6.3 LANGUAGES CXX)
+project(jarvis VERSION 3.8.6 LANGUAGES CXX)
 
 # --- C++17, no extensions ---
 set(CMAKE_CXX_STANDARD 17)
@@ -74,12 +74,12 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets Network Sql Concurrent Multimedia MultimediaWidgets
-    Svg SvgWidgets Quick QuickWidgets QuickEffects Qml
+    Svg SvgWidgets Quick QuickWidgets QuickEffects Qml QuickControls2 QuickShapes
 )
 
 # WebEngine is optional — CI environments may not have it installed
-find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)
-if(Qt6WebEngineWidgets_FOUND)
+find_package(Qt6 QUIET COMPONENTS WebEngineQuick)
+if(Qt6WebEngineQuick_FOUND)
     set(JARVIS_HAS_WEBENGINE TRUE)
     message(STATUS "Qt WebEngine: FOUND — interactive diagram panel enabled")
 else()
@@ -247,6 +247,7 @@ add_subdirectory(src/db)
 add_subdirectory(src/llm)
 add_subdirectory(src/voice)
 add_subdirectory(src/platform)
+add_subdirectory(src/agent)
 add_subdirectory(src/media)
 add_subdirectory(src/intelligence)
 add_subdirectory(src/network)
@@ -275,6 +276,7 @@ add_library(JarvisCore STATIC
     $<TARGET_OBJECTS:jarvis_llm>
     $<TARGET_OBJECTS:jarvis_voice>
     $<TARGET_OBJECTS:jarvis_platform>
+    $<TARGET_OBJECTS:jarvis_agent>
     $<TARGET_OBJECTS:jarvis_media>
     $<TARGET_OBJECTS:jarvis_intelligence>
     $<TARGET_OBJECTS:jarvis_network>
@@ -290,6 +292,7 @@ target_include_directories(JarvisCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/llm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/voice
     ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/agent
     ${CMAKE_CURRENT_SOURCE_DIR}/src/media
     ${CMAKE_CURRENT_SOURCE_DIR}/src/intelligence
     ${CMAKE_CURRENT_SOURCE_DIR}/src/network
@@ -318,10 +321,17 @@ target_link_libraries(JarvisCore PUBLIC
     Qt6::QuickWidgets
     Qt6::QuickEffects
     Qt6::Qml
+    # Jarvis.Controls строит кнопки/вкладки/поля на Qt Quick Controls —
+    # ради фокуса, клавиатуры и ролей для скринридера, которых у связки
+    # Rectangle + MouseArea нет.
+    Qt6::QuickControls2
+    # JarvisProgressRing рисует кольцо через Shape/ShapePath, а не Canvas:
+    # Canvas перерисовывается JS-ом в главном потоке.
+    Qt6::QuickShapes
 )
 
 if(JARVIS_HAS_WEBENGINE)
-    target_link_libraries(JarvisCore PUBLIC Qt6::WebEngineWidgets)
+    target_link_libraries(JarvisCore PUBLIC Qt6::WebEngineQuick)
     target_compile_definitions(JarvisCore PUBLIC JARVIS_HAS_WEBENGINE=1)
 endif()
 
@@ -357,6 +367,13 @@ target_link_libraries(JarvisCore PRIVATE
     psapi
     PowrProf
     winmm
+    # SystemMonitor::sampleNetwork -> GetIfTable. Указание iphlpapi в
+    # src/platform недостаточно: там OBJECT-библиотека, её PRIVATE-зависимости
+    # до исполняемого файла не доходят — линковать надо на JarvisCore.
+    iphlpapi
+    # enumerateBluetoothDevices -> BluetoothFindFirstRadio. Как и iphlpapi,
+    # линкуется здесь: у OBJECT-библиотек PRIVATE-зависимости до exe не доходят.
+    Bthprops
 )
 
 if(VOSK_AVAILABLE)
@@ -390,6 +407,11 @@ qt_add_executable(jarvis WIN32
 # App sources added via src/app/CMakeLists.txt
 add_subdirectory(src/app)
 
+# Плагины — отдельные DLL, собираются независимо от ядра и кладутся
+# в bin/plugins. Каталог до сих пор не подключался, из-за чего вся
+# система плагинов существовала только на бумаге.
+add_subdirectory(plugins)
+
 # Qt resource files — deliberately attached to the "jarvis" executable
 # target itself, not to the OBJECT libraries whose code actually uses them
 # (jarvis_common, jarvis_engine). Qt resources are registered globally at
@@ -403,6 +425,9 @@ add_subdirectory(src/app)
 # executable target sidesteps that entirely.
 foreach(_qrc
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/resources.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/mermaid.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/jarvis_controls.qrc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/app/main_screen.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/common/notification_toast.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/task_board.qrc"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/training_center.qrc"

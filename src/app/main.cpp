@@ -3,12 +3,23 @@
 // -------------------------------------------------------
 
 #include "mainwindow.h"
+#include "tray_presence.h"
+#include "push_to_talk.h"
+#include "command_palette.h"
+#include "action_registry.h"
+#include "global_search.h"
+#include "lang.h"
+#include "jarvis.h"
 #include "database_manager.h"
 #include "background_learner.h"
 #include "jarvis_paths.h"
 #include "jarvis_theme.h"
 
 #include <QApplication>
+
+#ifdef JARVIS_HAS_WEBENGINE
+#include <QtWebEngineQuick>
+#endif
 #include <QFont>
 #include <QIcon>
 #include <QStandardPaths>
@@ -57,6 +68,14 @@ void fileMessageHandler(QtMsgType type, const QMessageLogContext&, const QString
 int main(int argc, char* argv[])
 {
     qInstallMessageHandler(fileMessageHandler);
+
+#ifdef JARVIS_HAS_WEBENGINE
+    // ОБЯЗАТЕЛЬНО до QApplication: WebEngine Quick поднимает свой
+    // процесс Chromium и выставляет формат поверхности, и сделать это
+    // после создания приложения уже нельзя. Панель диаграмм без
+    // этого вызова просто не отрисуется.
+    QtWebEngineQuick::initialize();
+#endif
 
     QApplication app(argc, argv);
 
@@ -125,13 +144,90 @@ int main(int argc, char* argv[])
                  << patterns << "patterns updated";
     });
 
-    // ── 4. Главное окно ──────────────────────────────────────
-    MainWindow w;
+    // ── 4. Ядро ──────────────────────────────────────────────
+    // Ядро создаётся здесь, а не внутри окна. Разница не косметическая:
+    // пока Jarvis был ребёнком MainWindow, всё, что работает в фоне —
+    // лента событий, триггеры, наблюдение за системой — существовало
+    // ровно столько, сколько существовал объект окна. Теперь окно можно
+    // уничтожить и создать заново, а ядро продолжит работать: оно
+    // объявлено раньше и разрушается позже (обратный порядок).
+    Jarvis core;
+
+    // ── 5. Команды и палитра ─────────────────────────────────
+    // Реестр команд объявлен раньше окна и разрушается позже: окно его
+    // наполняет, но не владеет им. Палитра берёт оттуда список и запускает
+    // выбранное — Ctrl+Space перестал зависеть от того, открыто ли окно.
+    ActionRegistry actions;
+
+    CommandPalette palette(&core);   // top-level, без родителя
+    palette.setCommandRunner([&actions](const QString& actionId) {
+        actions.run(actionId);
+    });
+    installPaletteHotkeys(&palette, &palette);
+
+    // Команды в Ctrl+K. Раньше провайдер жил в окне — вместе с ним
+    // исчезал бы и поиск по командам.
+    if (GlobalSearch* search = core.search()) {
+        search->addProvider(QStringLiteral("commands"),
+                            [&actions](const QString& q, int limit) {
+            const QString ql = q.toLower();
+            QVector<SearchHit> hits;
+            for (const AppAction& a : actions.all()) {
+                const int score = qMax(GlobalSearch::matchScore(a.title, ql),
+                                       GlobalSearch::matchScore(a.hint, ql) / 3);
+                if (score <= 0)
+                    continue;
+
+                SearchHit h;
+                h.category = IS_EN ? QStringLiteral("Commands") : QStringLiteral("Команды");
+                h.icon     = a.icon.isEmpty() ? QStringLiteral("▸") : a.icon;
+                h.title    = a.title;
+                h.subtitle = a.shortcut.isEmpty() ? a.hint
+                                                  : a.shortcut + QStringLiteral("   ") + a.hint;
+                h.action   = SearchHit::Action::RunCommand;
+                h.payload  = a.id;
+                h.score    = score;
+                hits.append(h);
+                if (hits.size() >= limit)
+                    break;
+            }
+            return hits;
+        });
+    }
+
+    // ── 6. Главное окно — один из интерфейсов к ядру ──────────
+    MainWindow w(&core, &actions);
     w.show();
+
+    // ── 7. Трей — ещё один интерфейс к тому же ядру ───────────
+    // Не часть окна: он переживает его закрытие и берёт состояние,
+    // события, режимы и сценарии прямо из Core.
+    TrayPresence tray(&core);
+    w.setHideOnClose(tray.isAvailable());
+
+    QObject::connect(&tray, &TrayPresence::openWindowRequested,
+                     &w, &MainWindow::showAndRaise);
+    QObject::connect(&tray, &TrayPresence::askRequested,
+                     &palette, [&palette]() {
+        palette.togglePalette(CommandPalette::Mode::Act);
+    });
+    QObject::connect(&tray, &TrayPresence::quitRequested,
+                     &app, &QApplication::quit);
+
+    // ── 8. Push-to-talk ──────────────────────────────────────
+    // Держишь Win+J — говоришь, отпустил — выполняется. Главное окно при
+    // этом не открывается и фокус не забирается.
+    PushToTalk ptt(&core);
+
+    // Распознавание запускаем последним: Vosk при первом запуске просит
+    // доустановить модели, и просьба уходит сигналом — к этому моменту
+    // окно уже подписано и может показать диалог. Без окна ядро просто
+    // молча поднимет микрофон.
+    core.startVoice();
 
     int result = app.exec();
 
-    // ── 5. Чистое завершение ─────────────────────────────────
+    // ── 9. Чистое завершение ─────────────────────────────────
     learner.stop();
     db.close();
 

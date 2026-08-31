@@ -38,7 +38,22 @@ public:
     Q_INVOKABLE void toggleMonitoring(bool on);
     Q_INVOKABLE void setAlertUnknown(bool on);
     Q_INVOKABLE void setAutoLock(bool on);
+    Q_INVOKABLE void setMotionAlert(bool on);
     Q_INVOKABLE void captureNow();
+
+    // Меню камеры свернулось в один пункт, и всё, что в нём было,
+    // переехало сюда. Три команды диалогу не принадлежат: обучение по
+    // файлам и скриншот делает главное окно, живой вид — отдельный
+    // диалог. Их он и просит сигналом, а не тянет за собой MainWindow.
+    Q_INVOKABLE void lockScreen();
+    Q_INVOKABLE void enrollFromPhoto()  { emit enrollFromPhotoRequested(); }
+    Q_INVOKABLE void takeScreenshot()   { emit screenshotRequested(); }
+    Q_INVOKABLE void showLiveView()     { emit liveViewRequested(); }
+
+signals:
+    void enrollFromPhotoRequested();
+    void screenshotRequested();
+    void liveViewRequested();
 
 private:
     void refreshFaces();

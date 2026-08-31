@@ -83,6 +83,18 @@ public:
 
     static NotificationManager& instance();
 
+    // Насколько JARVIS вправе отвлекать. Ставится профилем (режимом):
+    // Focus глушит всё, кроме предупреждений, Gaming — вообще всё.
+    // Вопросы (askQuestion) пропускаются везде, кроме None: вопрос —
+    // это не фоновый шум, а ожидание ответа.
+    enum class Policy { All, Minimal, None };
+
+    void   setPolicy(Policy p) { m_policy = p; }
+    Policy policy() const      { return m_policy; }
+
+    static QString policyName(Policy p);
+    static Policy  policyFromString(const QString& name, Policy fallback = Policy::All);
+
     // Потокобезопасно: из фонового потока вызов перекидывается в GUI-поток.
     void showNotification(const QString& title, const QString& message,
                           Level level = Level::Info);
@@ -103,4 +115,5 @@ private:
     void layoutToasts(NotificationToast* newcomer);
 
     QList<QPointer<NotificationToast>> m_toasts;
+    Policy m_policy = Policy::All;
 };

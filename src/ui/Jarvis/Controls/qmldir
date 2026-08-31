@@ -1,0 +1,21 @@
+module Jarvis.Controls
+
+singleton JarvisUi 1.0 JarvisUi.qml
+
+JarvisBadge        1.0 JarvisBadge.qml
+JarvisButton       1.0 JarvisButton.qml
+JarvisCard         1.0 JarvisCard.qml
+JarvisChatBubble   1.0 JarvisChatBubble.qml
+JarvisChipGroup    1.0 JarvisChipGroup.qml
+JarvisEmptyState   1.0 JarvisEmptyState.qml
+JarvisNoticeBar    1.0 JarvisNoticeBar.qml
+JarvisPanel        1.0 JarvisPanel.qml
+JarvisProgressBar  1.0 JarvisProgressBar.qml
+JarvisProgressRing 1.0 JarvisProgressRing.qml
+JarvisScreenHeader 1.0 JarvisScreenHeader.qml
+JarvisSearchField  1.0 JarvisSearchField.qml
+JarvisStat         1.0 JarvisStat.qml
+JarvisStatusDot    1.0 JarvisStatusDot.qml
+JarvisTextField    1.0 JarvisTextField.qml
+JarvisToggle       1.0 JarvisToggle.qml
+JarvisTabBar       1.0 JarvisTabBar.qml

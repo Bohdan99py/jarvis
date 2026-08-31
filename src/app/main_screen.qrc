@@ -1,0 +1,18 @@
+<RCC>
+    <!--
+      MainScreen.qml ещё не смонтирован: его шапка ждёт порта
+      статус-бара. Остальное — рабочее.
+    -->
+    <qresource prefix="/qml">
+        <file alias="ChatView.qml">ChatView.qml</file>
+        <file alias="WelcomePanel.qml">WelcomePanel.qml</file>
+        <file alias="ComposerArea.qml">ComposerArea.qml</file>
+        <file alias="ChatComposer.qml">ChatComposer.qml</file>
+        <file alias="NoticeStack.qml">NoticeStack.qml</file>
+        <file alias="AttachmentBar.qml">AttachmentBar.qml</file>
+        <file alias="MainScreen.qml">MainScreen.qml</file>
+        <file alias="VisualInsights.qml">VisualInsights.qml</file>
+        <file alias="VisualInsightsWeb.qml">VisualInsightsWeb.qml</file>
+        <file alias="VisualInsightsSvg.qml">VisualInsightsSvg.qml</file>
+    </qresource>
+</RCC>

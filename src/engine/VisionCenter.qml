@@ -1,5 +1,6 @@
 import QtQuick
 import Jarvis.Theme
+import Jarvis.Controls
 
 // ============================================================
 // VisionCenter.qml — что Джарвис видит и кого узнаёт.
@@ -17,7 +18,7 @@ Rectangle {
     readonly property color cyan: Theme.accent
     readonly property color teal: Theme.accentMuted
 
-    property int currentTab: initialTab
+    readonly property int currentTab: tabs.currentIndex
 
     Column {
         anchors.fill: parent
@@ -32,41 +33,18 @@ Rectangle {
             font.family: "Segoe UI Semibold"
         }
 
-        Row {
-            width: parent.width
-            height: 34
-            spacing: 6
-
-            Repeater {
-                model: [
-                    root.en ? "Known faces"  : "Знакомые лица",
-                    root.en ? "Camera"       : "Камера",
-                    root.en ? "Screen vision": "Экранное зрение"
-                ]
-                delegate: Rectangle {
-                    required property var modelData
-                    required property int index
-                    width: tabText.implicitWidth + 24
-                    height: 34
-                    radius: Theme.radiusSm
-                    color: root.currentTab === index ? Theme.accentSubtle : "transparent"
-                    border.width: 1
-                    border.color: root.currentTab === index ? root.cyan : Theme.accentSubtle
-                    Text {
-                        id: tabText
-                        anchors.centerIn: parent
-                        text: modelData
-                        color: root.currentTab === index ? root.cyan : Theme.onSurfaceVariant
-                        font.pixelSize: 12
-                        font.bold: root.currentTab === index
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.currentTab = index
-                    }
-                }
-            }
+        // ---- Tab bar ----
+        JarvisTabBar {
+            id: tabs
+            titles: [
+                root.en ? "Known faces"  : "Знакомые лица",
+                root.en ? "Camera"       : "Камера",
+                root.en ? "Screen vision": "Экранное зрение"
+            ]
+            // initialTab — контекстное свойство из C++: значение на старте.
+            // Клик по вкладке снимает эту привязку, дальше выбор за
+            // пользователем — ровно то поведение, что нужно.
+            currentIndex: initialTab
         }
 
         Rectangle {
@@ -116,25 +94,12 @@ Rectangle {
                         }
                         Item { width: parent.width - 380; height: 1 }
 
-                        Rectangle {
-                            width: 150; height: 30; radius: Theme.radiusSm
-                            color: teachArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                            border.width: 1
-                            border.color: root.cyan
-                            Text {
-                                anchors.centerIn: parent
-                                text: ownerEnrolled
-                                    ? (root.en ? "＋ Add more samples" : "＋ Добавить образцы")
-                                    : (root.en ? "👤 Teach my face"    : "👤 Обучить моё лицо")
-                                color: root.cyan
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: teachArea
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: visionCenter.teachMyFace()
-                            }
+                        JarvisButton {
+                            glyph: ownerEnrolled ? "＋" : "👤"
+                            text: ownerEnrolled
+                                ? (root.en ? "Add more samples" : "Добавить образцы")
+                                : (root.en ? "Teach my face"    : "Обучить моё лицо")
+                            onClicked: visionCenter.teachMyFace()
                         }
                     }
 
@@ -245,27 +210,11 @@ Rectangle {
                                             height: 1
                                         }
 
-                                        Rectangle {
-                                            width: 86; height: 26; radius: Theme.radiusSm
+                                        JarvisButton {
                                             anchors.verticalCenter: parent.verticalCenter
-                                            color: forgetArea.pressed
-                                                ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.3)
-                                                : Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.12)
-                                            border.width: 1
-                                            border.color: Qt.rgba(Theme.error.r, Theme.error.g,
-                                                                  Theme.error.b, 0.4)
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: root.en ? "Forget" : "Забыть"
-                                                color: Theme.error
-                                                font.pixelSize: 10
-                                            }
-                                            MouseArea {
-                                                id: forgetArea
-                                                anchors.fill: parent
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: visionCenter.forgetFace(modelData.id)
-                                            }
+                                            text: root.en ? "Forget" : "Забыть"
+                                            variant: JarvisButton.Danger
+                                            onClicked: visionCenter.forgetFace(modelData.id)
                                         }
                                     }
                                 }
@@ -321,7 +270,12 @@ Rectangle {
                               on: autoLockOn,
                               t: root.en ? "Lock screen on threat" : "Блокировать экран при угрозе",
                               d: root.en ? "Lock the PC automatically when something looks wrong"
-                                         : "Автоматически блокировать ПК, если что-то не так" }
+                                         : "Автоматически блокировать ПК, если что-то не так" },
+                            { key: "motion",
+                              on: motionAlertOn,
+                              t: root.en ? "Motion alerts with video" : "Оповещения о движении с видео",
+                              d: root.en ? "A 20-second clip goes to Telegram"
+                                         : "Клип на 20 секунд уходит в Telegram" }
                         ]
                         delegate: Rectangle {
                             required property var modelData
@@ -333,80 +287,114 @@ Rectangle {
                             border.color: Theme.outline
                             opacity: webcamPresent ? 1 : 0.45
 
-                            Row {
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 10
-
-                                Column {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 2
-                                    Text {
-                                        text: modelData.t
-                                        color: Theme.onSurface
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                    }
-                                    Text {
-                                        text: modelData.d
-                                        color: Theme.onSurfaceDim
-                                        font.pixelSize: 10
-                                    }
+                            // Тумблер прижат к правому краю, подпись занимает
+                            // то, что осталось. Раньше между ними стояла
+                            // распорка шириной parent.width - 400, то есть
+                            // под текст закладывалось ровно 400 пикселей
+                            // независимо от того, сколько он занимает: стоит
+                            // подписи или переводу стать длиннее — и распорка
+                            // выталкивает тумблер за край карточки, где его
+                            // не видно и не нажать.
+                            JarvisToggle {
+                                id: rowToggle
+                                anchors.right: parent.right
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                on: modelData.on
+                                label: ""
+                                accessibleName: modelData.t
+                                enabled: webcamPresent
+                                onToggleRequested: want => {
+                                    if (modelData.key === "monitor")
+                                        visionCenter.toggleMonitoring(want)
+                                    else if (modelData.key === "unknown")
+                                        visionCenter.setAlertUnknown(want)
+                                    else if (modelData.key === "autolock")
+                                        visionCenter.setAutoLock(want)
+                                    else
+                                        visionCenter.setMotionAlert(want)
                                 }
+                            }
 
-                                Item { width: parent.width - 400; height: 1 }
-
-                                Rectangle {
-                                    width: 44; height: 22; radius: 11
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: modelData.on ? root.teal : Theme.outlineStrong
-                                    Behavior on color { ColorAnimation { duration: Theme.motionFast } }
-                                    Rectangle {
-                                        width: 18; height: 18; radius: 9
-                                        color: Theme.onSurface
-                                        y: 2
-                                        x: modelData.on ? parent.width - width - 2 : 2
-                                        Behavior on x {
-                                            NumberAnimation { duration: Theme.motionFast
-                                                              easing.type: Easing.OutCubic }
-                                        }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        enabled: webcamPresent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (modelData.key === "monitor")
-                                                visionCenter.toggleMonitoring(!modelData.on)
-                                            else if (modelData.key === "unknown")
-                                                visionCenter.setAlertUnknown(!modelData.on)
-                                            else
-                                                visionCenter.setAutoLock(!modelData.on)
-                                        }
-                                    }
+                            Column {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 12
+                                anchors.right: rowToggle.left
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+                                Text {
+                                    width: parent.width
+                                    elide: Text.ElideRight
+                                    text: modelData.t
+                                    color: Theme.onSurface
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+                                Text {
+                                    width: parent.width
+                                    elide: Text.ElideRight
+                                    text: modelData.d
+                                    color: Theme.onSurfaceDim
+                                    font.pixelSize: 10
                                 }
                             }
                         }
                     }
 
-                    Rectangle {
-                        width: 150; height: 32; radius: Theme.radiusSm
-                        visible: webcamPresent
-                        color: lookArea.pressed ? Theme.outlineStrong : Theme.accentSubtle
-                        border.width: 1
-                        border.color: root.cyan
-                        Text {
-                            anchors.centerIn: parent
-                            text: root.en ? "👁 Look now" : "👁 Посмотреть сейчас"
-                            color: root.cyan
-                            font.pixelSize: 11
-                        }
-                        MouseArea {
-                            id: lookArea
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
+                    // Всё, что раньше было отдельными пунктами меню
+                    // «Камера». Flow, а не Row: кнопок шесть, и в узком
+                    // окне они должны переноситься, а не уезжать за край.
+                    Flow {
+                        width: parent.width
+                        spacing: 8
+
+                        JarvisButton {
+                            visible: webcamPresent
+                            glyph: "👁"
+                            text: root.en ? "Look now" : "Посмотреть сейчас"
                             onClicked: visionCenter.captureNow()
                         }
+
+                        JarvisButton {
+                            visible: webcamPresent
+                            glyph: "🎥"
+                            text: root.en ? "Who's on camera" : "Кто перед камерой"
+                            onClicked: visionCenter.showLiveView()
+                        }
+
+                        // Кнопки разблокировки здесь нет и не будет: сеанс
+                        // запирает сама Windows, и вернуть человека за
+                        // машину может только она — паролем, PIN или Hello.
+                        JarvisButton {
+                            variant: JarvisButton.Danger
+                            glyph: "🔒"
+                            text: root.en ? "Lock screen now" : "Заблокировать экран"
+                            onClicked: visionCenter.lockScreen()
+                        }
+
+                        JarvisButton {
+                            glyph: "🖼"
+                            text: root.en ? "Teach a face from photos"
+                                          : "Обучить лицо по фотографиям"
+                            onClicked: visionCenter.enrollFromPhoto()
+                        }
+
+                        JarvisButton {
+                            glyph: "📸"
+                            text: root.en ? "Take screenshot" : "Сделать скриншот"
+                            onClicked: visionCenter.takeScreenshot()
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        color: Theme.onSurfaceDim
+                        font.pixelSize: 10
+                        text: root.en
+                              ? "Locking uses the Windows lock screen — you come back with your password, PIN or Hello. Returning by face is Windows Hello's job, not mine."
+                              : "Блокировка — штатная, средствами Windows: вернуться можно паролем, PIN или Windows Hello. Узнавание лица на входе делает Windows Hello, а не JARVIS."
                     }
                 }
             }

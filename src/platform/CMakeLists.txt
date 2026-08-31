@@ -14,6 +14,10 @@ add_library(jarvis_platform OBJECT
     virtual_keyboard.cpp
     screen_agent.h
     screen_agent.cpp
+    system_monitor.h
+    system_monitor.cpp
+    bluetooth_devices.h
+    bluetooth_devices.cpp
     clipboard_watcher.h
     clipboard_watcher.cpp
     camera_agent.h
@@ -33,8 +37,8 @@ target_include_directories(jarvis_platform PRIVATE
 )
 
 target_link_libraries(jarvis_platform
-    PUBLIC  jarvis_common Qt6::Core Qt6::Gui Qt6::Widgets
-    PRIVATE Qt6::Network Qt6::Multimedia Qt6::Concurrent Qt6::Sql user32 ole32 oleaut32 shell32
+    PUBLIC  jarvis_common jarvis_db Qt6::Core Qt6::Gui Qt6::Widgets
+    PRIVATE Qt6::Network Qt6::Multimedia Qt6::Concurrent Qt6::Sql user32 ole32 oleaut32 shell32 psapi iphlpapi
 )
 # JARVIS_HAS_OPENCV is set in the root CMakeLists.txt for BOTH system
 # OpenCV (find_package) AND the redist/opencv/build/ fallback.

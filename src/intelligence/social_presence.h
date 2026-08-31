@@ -125,6 +125,9 @@ private:
     static constexpr int MIN_NUDGE_INTERVAL_SEC  = 300;   // 5 min floor
     static constexpr int MAX_NUDGE_INTERVAL_SEC  = 3600;  // 1 hour ceiling
     static constexpr int NUDGE_CHECK_INTERVAL_MS = 15000; // check every 15s
+    // Дальше этой длины сообщение — не «объявление о статусе», а обычный
+    // запрос; ключевые слова в нём игнорируются (см. detectAvailability).
+    static constexpr int MAX_STATUS_PHRASE_WORDS = 6;
 
     static const QStringList& nudgeQuestionPool();
     static const QStringList& sarcasticResponsePool();

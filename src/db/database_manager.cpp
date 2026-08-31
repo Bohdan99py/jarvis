@@ -713,6 +713,65 @@ bool DatabaseManager::runMigrations()
         execQuery("UPDATE schema_version SET version=19");
         ver = 19;
     }
+    if (ver < 20) {
+        // Отдельные ПРЕДЛОЖЕНИЯ из ответов, а не ответы целиком.
+        //
+        // llm_cache хранит пару "вопрос → ответ" и умеет вернуть ответ
+        // целиком, если новый вопрос достаточно похож на старый. Но знание
+        // редко лежит ровно по границам вопросов: во фразе "машина может
+        // разгоняться до 300 км/ч в зависимости от модели" полезен сам
+        // факт, и он пригодится вопросу, на который тот ответ целиком не
+        // годится. Разложив ответы на предложения и пометив каждое его
+        // понятиями, можно собрать реплику из фраз, сказанных в РАЗНЫХ
+        // разговорах — из этого и складывается собственный словарь.
+        //
+        // concepts — нормализованные токены через пробел (тот же
+        // токенайзер, что у графа), чтобы совпадение считалось так же,
+        // как везде, а не по сырому тексту.
+        execQuery(R"(CREATE TABLE IF NOT EXISTS answer_sentences (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id    INTEGER NOT NULL,
+            sentence    TEXT NOT NULL,
+            concepts    TEXT NOT NULL DEFAULT '',
+            source_hash TEXT NOT NULL DEFAULT '',
+            uses        INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(owner_id, sentence)
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_answer_sentences_owner "
+                  "ON answer_sentences(owner_id)");
+        execQuery("UPDATE schema_version SET version=20");
+        ver = 20;
+    }
+    if (ver < 21) {
+        // Файлы, которые Джарвис создал: схемы KiCad, отрисованные
+        // диаграммы, скриншоты, экспортированные датасеты.
+        //
+        // Раньше созданный файл жил ровно один раз: путь к нему уходил
+        // строкой в чат и там растворялся. Через десять сообщений найти
+        // сгенерированную схему можно было только вспомнив имя файла и
+        // порывшись в проводнике — то есть результат работы ассистента
+        // терялся сразу после показа.
+        //
+        // kind — что это (schematic/diagram/screenshot/export/other):
+        // определяет, чем открывать и как показывать превью.
+        // query — вопрос, из которого файл родился: искать «та схема
+        // машинки» удобнее по формулировке, чем по имени kicad_sch.
+        execQuery(R"(CREATE TABLE IF NOT EXISTS artifacts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id   INTEGER NOT NULL DEFAULT 0,
+            path       TEXT NOT NULL,
+            kind       TEXT NOT NULL DEFAULT 'other',
+            title      TEXT NOT NULL DEFAULT '',
+            query      TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(path)
+        ))");
+        execQuery("CREATE INDEX IF NOT EXISTS idx_artifacts_created "
+                  "ON artifacts(created_at DESC)");
+        execQuery("UPDATE schema_version SET version=21");
+        ver = 21;
+    }
     return true;
 }
 

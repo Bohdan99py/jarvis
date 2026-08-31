@@ -117,6 +117,16 @@ public:
     // из main() ДО создания любого QQuickWidget.
     static void registerQmlTypes();
 
+    // Готовит ОТДЕЛЬНЫЙ движок экрана: пути импорта, по которым
+    // находится библиотека компонентов Jarvis.Controls.
+    //
+    // registerQmlTypes() глобальна и раздаётся всем движкам сама;
+    // путь импорта — нет, его надо добавить каждому. Пока это было
+    // расписано по семи файлам-хостам, забыть строку в новом экране
+    // было делом одной копипасты, а цена ошибки — «модуль не найден»
+    // и пустой экран. Теперь настройка движка живёт в одном месте.
+    static void prepareEngine(QQmlEngine* engine);
+
     QColor bg()       const { return QColor(0x08, 0x0A, 0x0F); }
     QColor surface1() const { return QColor(0x0F, 0x13, 0x1A); }
     QColor surface2() const { return QColor(0x16, 0x1B, 0x24); }

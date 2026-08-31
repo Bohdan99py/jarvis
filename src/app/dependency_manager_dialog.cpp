@@ -325,7 +325,9 @@ QList<ComponentInfo> DependencyManagerDialog::buildComponentList() const
         {
             QStringLiteral("mermaid"),
             QStringLiteral("Mermaid CLI (mmdc)"),
-            QStringLiteral("Renders Mermaid diagrams as SVG. Requires Node.js installed first."),
+            QStringLiteral("Optional. The diagram panel and saved diagrams no longer need it — "
+                           "it is only used to render diagrams sent over Telegram. "
+                           "Requires Node.js installed first."),
             QStringLiteral("npm://global/@mermaid-js/mermaid-cli"),
             QStringLiteral("C:/"),
             QStringLiteral(""),  // checked via 'where mmdc'

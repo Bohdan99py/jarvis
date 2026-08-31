@@ -254,12 +254,15 @@ QString OcrExtractor::buildLanguageString(const QString& tessdataDir)
     // чтобы не падать если пользователь скачал не все языки
     QStringList available;
 
+    // Языки, которые реально нужны владельцу. Каждый добавленный сюда
+    // язык — это не только вес в установщике, но и время распознавания:
+    // Tesseract прогоняет страницу по всем перечисленным моделям, поэтому
+    // «на всякий случай» здесь стоит дорого.
     static const QStringList wanted = {
         QStringLiteral("rus"),
         QStringLiteral("eng"),
         QStringLiteral("fra"),
-        QStringLiteral("deu"),  // немецкий — бонус
-        QStringLiteral("ukr"),  // украинский — бонус
+        QStringLiteral("ron"),  // румынский
     };
 
     for (const QString& lang : wanted) {

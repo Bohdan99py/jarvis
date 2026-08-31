@@ -11,6 +11,8 @@
 #include "session_memory.h"
 #include "lang.h"
 
+#include "jarvis_theme.h"
+
 #include <QQuickWidget>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -34,8 +36,7 @@ UserCenterDialog::UserCenterDialog(Jarvis* jarvis, bool english, QWidget* parent
     m_view = new QQuickWidget(this);
     m_view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_view->setClearColor(QColor(0x0B, 0x0C, 0x10));
-    m_view->engine()->addImportPath(QCoreApplication::applicationDirPath()
-                                    + QStringLiteral("/qml"));
+    JarvisTheme::prepareEngine(m_view->engine());
 
     // Safe defaults for every property UserCenter.qml reads — must exist
     // before setSource() so the initial bindings don't evaluate against
@@ -168,7 +169,7 @@ void UserCenterDialog::deleteUser(qint64 userId)
         QMessageBox::Yes | QMessageBox::No);
     if (r != QMessageBox::Yes) return;
 
-    QSqlQuery q(QSqlDatabase::database());
+    QSqlQuery q(DatabaseManager::instance().connection());
     q.prepare(QStringLiteral("DELETE FROM users WHERE id=:id"));
     q.bindValue(QStringLiteral(":id"), userId);
     q.exec();

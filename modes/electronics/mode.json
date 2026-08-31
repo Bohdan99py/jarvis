@@ -14,8 +14,25 @@
     },
     "icon": "🔌",
     "accent": "#FFD740",
-    "enable_skills": ["electronics", "esp32_hub"],
-    "disable_skills": ["unreal_cpp", "unreal_blueprints", "unreal_editor", "philosopher"],
+    "enable_skills": [
+        "electronics",
+        "esp32_hub"
+    ],
+    "disable_skills": [
+        "unreal_cpp",
+        "unreal_blueprints",
+        "unreal_editor",
+        "philosopher"
+    ],
     "exclusive": false,
-    "default_active": false
+    "default_active": false,
+    "system": {
+        "permission_mode": "balanced",
+        "notifications": "minimal",
+        "voice": "minimal",
+        "volume": -1,
+        "on_activate_workflow": "",
+        "on_deactivate_workflow": "",
+        "auto_activate_apps": []
+    }
 }

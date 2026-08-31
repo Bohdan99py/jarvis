@@ -45,6 +45,9 @@ public:
     void setPluginEnabled(const QString& name, bool enabled);
 
 signals:
+    // Поднимается ПЕРЕД initialize(): всё, что плагин зарегистрирует,
+    // хост припишет этому имени.
+    void pluginInitializing(const QString& name);
     void pluginLoaded(const QString& name);
     void pluginUnloaded(const QString& name);
     void pluginError(const QString& name, const QString& error);

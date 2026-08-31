@@ -49,6 +49,10 @@ add_library(jarvis_intelligence OBJECT
     user_profile_extended.cpp
     project_indexer.h
     project_indexer.cpp
+    project_profile.h
+    project_profile.cpp
+    dev_advisor.h
+    dev_advisor.cpp
     code_actions.h
     code_actions.cpp
     file_organizer.h

@@ -157,6 +157,63 @@ if errorlevel 1 (
 echo.
 
 REM ========================================
+REM Шаг 3.5: внешние инструменты (OCR и PDF)
+REM ========================================
+REM windeployqt знает только про Qt — сторонние exe он не видит, поэтому
+REM Tesseract и Poppler в пакет не попадали вовсе. Для пользователя это
+REM выглядело как "чтение PDF не работает" (Vision Center честно показывал
+REM Poppler красным), хотя оба инструмента лежат в redist\ репозитория и
+REM в отладочной сборке находятся по относительному пути ..\redist\.
+REM
+REM Каталоги выбраны не произвольно: ровно эти пути перебирает
+REM OcrExtractor::pdftoppmPath()/tesseractPath(), так что копия должна
+REM лечь именно сюда, иначе она есть, но не находится.
+echo [4.5/5] Copying OCR/PDF tools...
+
+REM Tesseract копируется БЕЗ tessdata, а языковые модели — поштучно.
+REM В redist лежат 124 языка на 668 МБ, и это был основной вес
+REM установщика. Лишние модели не только занимают место: Tesseract
+REM прогоняет страницу по каждой перечисленной модели, поэтому каждый
+REM ненужный язык — это ещё и время распознавания.
+REM
+REM Список должен совпадать с `wanted` в OcrExtractor::buildLanguageString():
+REM модель без записи в том списке не используется, а запись без модели
+REM молча отбрасывается — расходятся они тихо, поэтому держим их рядом.
+REM osd — не язык, а модель определения ориентации страницы; нужна
+REM Tesseract'у при автоповороте, весит мало.
+if exist "%REDIST_DIR%\Tesseract-OCR\tesseract.exe" (
+    if not exist "%RELEASE_DIR%\Tesseract-OCR\tessdata" mkdir "%RELEASE_DIR%\Tesseract-OCR\tessdata"
+    xcopy /E /I /Y /Q /EXCLUDE:scripts\tessdata_exclude.txt ^
+        "%REDIST_DIR%\Tesseract-OCR" "%RELEASE_DIR%\Tesseract-OCR" >nul
+    for %%L in (eng rus fra ron osd) do (
+        if exist "%REDIST_DIR%\Tesseract-OCR\tessdata\%%L.traineddata" (
+            copy /Y "%REDIST_DIR%\Tesseract-OCR\tessdata\%%L.traineddata" ^
+                "%RELEASE_DIR%\Tesseract-OCR\tessdata\" >nul
+        ) else (
+            echo   [WARNING] tessdata\%%L.traineddata missing
+        )
+    )
+    echo   Tesseract OCR: copied ^(eng, rus, fra, ron^)
+) else (
+    echo   [WARNING] Tesseract not found in %REDIST_DIR% — screen text reading will be off
+)
+
+set POPPLER_SRC=
+for /d %%D in ("%REDIST_DIR%\poppler-*") do set POPPLER_SRC=%%D\Library\bin
+if defined POPPLER_SRC (
+    if exist "!POPPLER_SRC!\pdftoppm.exe" (
+        if not exist "%RELEASE_DIR%\redist\poppler\bin" mkdir "%RELEASE_DIR%\redist\poppler\bin"
+        xcopy /E /I /Y /Q "!POPPLER_SRC!" "%RELEASE_DIR%\redist\poppler\bin" >nul
+        echo   Poppler: copied
+    ) else (
+        echo   [WARNING] Poppler binaries not found — PDF reading will be off
+    )
+) else (
+    echo   [WARNING] No poppler-* folder in %REDIST_DIR% — PDF reading will be off
+)
+echo.
+
+REM ========================================
 REM Шаг 4: Visual C++ Redistributable
 REM ========================================
 echo [5/5] Checking VC++ Redistributable...

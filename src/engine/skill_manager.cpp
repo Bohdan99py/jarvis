@@ -208,6 +208,20 @@ bool SkillManager::copySkillDir(const QString& src, const QString& dst)
     return ok;
 }
 
+int SkillManager::compareVersions(const QString& a, const QString& b)
+{
+    const QStringList pa = a.split(QChar('.'));
+    const QStringList pb = b.split(QChar('.'));
+    const int count = qMax(pa.size(), pb.size());
+
+    for (int i = 0; i < count; ++i) {
+        const int va = i < pa.size() ? pa[i].toInt() : 0;
+        const int vb = i < pb.size() ? pb[i].toInt() : 0;
+        if (va != vb) return va < vb ? -1 : 1;
+    }
+    return 0;
+}
+
 void SkillManager::scan()
 {
     loadState();
@@ -231,6 +245,36 @@ void SkillManager::scan()
         }
         m_installedOnce << info.id;
         stateDirty = true;
+    }
+
+    // 1b) Обновление уже установленных скиллов. Без этого знания скилла
+    //     навсегда застывали в той версии, что была при первом запуске:
+    //     новая сборка несёт новый prompt.md, а пользователь продолжает
+    //     жить со старым. Обновляем только при выросшей версии в
+    //     манифесте — и с бэкапом, если пользователь правил файл сам.
+    for (const QString& srcDir : listSkillDirs(bundledSkillsDir())) {
+        SkillInfo bundled;
+        if (!readManifest(srcDir, bundled)) continue;
+
+        const QString dst = userDir + QStringLiteral("/") + bundled.id;
+        SkillInfo installed;
+        if (!QFileInfo::exists(dst + QStringLiteral("/skill.json"))) continue;
+        if (!readManifest(dst, installed)) continue;
+        if (compareVersions(installed.version, bundled.version) >= 0) continue;
+
+        // Правки пользователя не выбрасываем молча — кладём рядом .bak.
+        const QString userPrompt = dst + QStringLiteral("/prompt.md");
+        if (QFileInfo::exists(userPrompt)
+            && installed.promptText != bundled.promptText) {
+            const QString backup = userPrompt + QStringLiteral(".bak");
+            QFile::remove(backup);
+            QFile::copy(userPrompt, backup);
+        }
+
+        if (copySkillDir(srcDir, dst)) {
+            qDebug() << "[Skills] Updated skill" << bundled.id
+                     << installed.version << "->" << bundled.version;
+        }
     }
 
     // 2) Загружаем все скиллы пользователя

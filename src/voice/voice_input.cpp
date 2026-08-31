@@ -117,7 +117,19 @@ bool VoskModelInfo::isInstalled(const QString& installDir) const
 
 QString VoskModelInfo::fullPath(const QString& installDir) const
 {
-    return installDir + QStringLiteral("/") + subdir;
+    const QString primary = installDir + QStringLiteral("/") + subdir;
+
+    // Папка со старым именем засчитывается, если модель лежит там, а по
+    // новому пути её нет. Иначе после переименования каталога человек
+    // остаётся с полностью скачанной моделью, которой «нет».
+    if (!legacySubdir.isEmpty() && !checkFile.isEmpty()
+        && !QFile::exists(primary + QStringLiteral("/") + checkFile)) {
+        const QString legacy = installDir + QStringLiteral("/") + legacySubdir;
+        if (QFile::exists(legacy + QStringLiteral("/") + checkFile))
+            return legacy;
+    }
+
+    return primary;
 }
 
 // ============================================================
@@ -157,7 +169,8 @@ static void initCatalog()
         QStringLiteral("model-ru-small"),
         QStringLiteral("am/final.mdl"),
         45LL * 1024 * 1024,
-        true
+        true,
+        QStringLiteral("model-ru")   // имя папки до переименования каталога
     });
 }
 
@@ -611,6 +624,14 @@ void VoiceRecorder::stop()
     m_audioDevice = nullptr;
     m_currentBuffer.clear();
     m_speaking = false;
+}
+
+void VoiceRecorder::flushPending()
+{
+    // Ровно то же, что делает пауза в речи, — включая отсев слишком
+    // коротких обрывков (см. onSilenceTimeout).
+    m_silenceTimer->stop();
+    onSilenceTimeout();
 }
 
 void VoiceRecorder::onAudioDataReady()
@@ -1391,9 +1412,17 @@ void VoiceInput::startListening()
     emit listeningStarted();
 }
 
-void VoiceInput::stopListening()
+void VoiceInput::captureWithoutWakeWord()
+{
+    m_bypassWakeWord = true;
+    m_bypassSince.start();
+}
+
+void VoiceInput::stopListening(bool flushPending)
 {
     if (!m_listening) return;
+    if (flushPending)
+        m_recorder->flushPending();
     m_recorder->stop();
     m_listening = false;
 }
@@ -1415,7 +1444,17 @@ void VoiceInput::onRecognized(const QString& text, const QString& lang, bool isW
     if (text.isEmpty()) return;
     emit whisperModeDetected(isWhisper);
 
-    if (m_wakeWordMode) {
+    // Push-to-talk отменяет требование активационного слова: там роль
+    // «джарвис» играет зажатая клавиша, и требовать вдобавок обращения
+    // по имени — значит не реагировать вообще ни на что. Разрешение
+    // одноразовое и с давностью: фраза приходит через секунду-две после
+    // отпускания, а всё, что позже, — это уже обычное фоновое слушание.
+    const bool bypass = m_bypassWakeWord
+                        && m_bypassSince.isValid()
+                        && m_bypassSince.elapsed() < kBypassWindowMs;
+    m_bypassWakeWord = false;
+
+    if (m_wakeWordMode && !bypass) {
         QString lower = text.toLower();
         for (const QString& ww : m_config.wakeWords) {
             if (lower.contains(ww)) {

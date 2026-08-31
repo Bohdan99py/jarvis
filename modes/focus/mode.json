@@ -1,0 +1,32 @@
+{
+    "id": "focus",
+    "name": {
+        "ru": "Фокус",
+        "en": "Focus"
+    },
+    "description": {
+        "ru": "Ничего не отвлекает: уведомления выключены, громкость приглушена, ответы предельно короткие. JARVIS не задаёт своих вопросов и не комментирует происходящее.",
+        "en": "Nothing interrupts: notifications off, volume down, answers as short as possible. JARVIS asks no questions of its own and does not comment on what is happening."
+    },
+    "prompt": {
+        "ru": "Пользователь в режиме глубокой концентрации. Отвечай максимально коротко — одно-два предложения, без вступлений, без уточняющих вопросов, если без них можно обойтись. Не предлагай ничего от себя, не поддерживай беседу, не шути. Если задача выполнима действием — выполни её и сообщи результат одной строкой.",
+        "en": "The user is in deep focus. Answer as briefly as possible - one or two sentences, no preamble, no clarifying questions unless truly necessary. Do not volunteer suggestions, do not make small talk, do not joke. If the task can be done by acting, do it and report the result in one line."
+    },
+    "icon": "🎯",
+    "accent": "#7c4dff",
+    "enable_skills": [],
+    "disable_skills": [
+        "philosopher"
+    ],
+    "exclusive": false,
+    "default_active": false,
+    "system": {
+        "permission_mode": "balanced",
+        "notifications": "none",
+        "voice": "minimal",
+        "volume": 20,
+        "on_activate_workflow": "",
+        "on_deactivate_workflow": "",
+        "auto_activate_apps": []
+    }
+}

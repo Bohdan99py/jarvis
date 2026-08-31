@@ -14,6 +14,30 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+
+// Совпадение по целому слову/фразе. С обычным contains() триггер «news»
+// ловился внутри «newsletter», «teams» — внутри «в teamspeak», а «email»
+// — в любом адресе. Каждое такое совпадение уводило сообщение из диалога
+// в «запустить приложение?».
+bool containsWholePhrase(const QString& haystack, const QString& needle)
+{
+    const auto isWordChar = [](QChar c) {
+        return c.isLetterOrNumber() || c == QLatin1Char('_');
+    };
+    for (int from = 0; ; ) {
+        const int idx = haystack.indexOf(needle, from);
+        if (idx < 0) return false;
+        const int end = idx + needle.length();
+        const bool leftOk  = idx == 0 || !isWordChar(haystack.at(idx - 1));
+        const bool rightOk = end >= haystack.length() || !isWordChar(haystack.at(end));
+        if (leftOk && rightOk) return true;
+        from = idx + 1;
+    }
+}
+
+} // namespace
+
 // ============================================================
 //  Construction + Goal Registry
 // ============================================================
@@ -254,22 +278,25 @@ double SemanticIntentManager::scoreMatch(const QString& lower,
     double bestPhraseScore = 0.0;
 
     for (const QString& phrase : goal.triggerPhrases) {
-        if (lower.contains(phrase)) {
-            // Exact containment — high base score
-            const double lengthRatio =
-                static_cast<double>(phrase.length()) / qMax(1, lower.length());
+        if (!containsWholePhrase(lower, phrase))
+            continue;
 
-            // Longer phrase match relative to message = higher confidence.
-            // A message that IS the trigger phrase scores ~0.95.
-            // A message that just contains it in a larger sentence scores lower.
-            double score = 0.55 + lengthRatio * 0.40;
+        // Насколько триггер покрывает сообщение. Раньше здесь была база
+        // 0.55 за одно лишь вхождение — из-за неё ЛЮБАЯ фраза со словом
+        // «новости»/«почта»/«email» перехватывалась ботом («Похоже, ты
+        // хочешь News. Запустить?») и до модели не доходила. Теперь вес
+        // даёт только покрытие: сообщение, которое ЕСТЬ триггер, набирает
+        // ~0.95, а упоминание внутри живой фразы остаётся разговорным.
+        const double coverage =
+            static_cast<double>(phrase.length()) / qMax(1, lower.length());
 
-            // Bonus if the phrase starts at the beginning
-            if (lower.startsWith(phrase))
-                score += 0.05;
+        double score = coverage * 0.95;
 
-            bestPhraseScore = qMax(bestPhraseScore, score);
-        }
+        // Bonus if the phrase starts at the beginning
+        if (lower.startsWith(phrase))
+            score += 0.05;
+
+        bestPhraseScore = qMax(bestPhraseScore, score);
     }
 
     return qMin(bestPhraseScore, 1.0);

@@ -5,6 +5,19 @@
 add_library(jarvis_voice OBJECT
     voice_input.h
     voice_input.cpp
+    speech_request.h
+    speech_phrases.h
+    voice_policy.h
+    voice_policy.cpp
+    speech_aggregator.h
+    speech_aggregator.cpp
+    voice_provider.h
+    piper_provider.h
+    piper_provider.cpp
+    elevenlabs_provider.h
+    elevenlabs_provider.cpp
+    speech_cache.h
+    speech_cache.cpp
     voice_synthesis_manager.h
     voice_synthesis_manager.cpp
     passive_listener.h

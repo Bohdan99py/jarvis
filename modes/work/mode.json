@@ -14,8 +14,21 @@
     },
     "icon": "💼",
     "accent": "#45A29E",
-    "enable_skills": ["coding"],
-    "disable_skills": ["philosopher"],
+    "enable_skills": [
+        "coding"
+    ],
+    "disable_skills": [
+        "philosopher"
+    ],
     "exclusive": false,
-    "default_active": false
+    "default_active": false,
+    "system": {
+        "permission_mode": "trusted",
+        "notifications": "minimal",
+        "voice": "minimal",
+        "volume": -1,
+        "on_activate_workflow": "",
+        "on_deactivate_workflow": "",
+        "auto_activate_apps": []
+    }
 }
